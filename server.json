@@ -1,0 +1,40 @@
+{
+  "namespace": "io.github.masondelan",
+  "name": "selvedge",
+  "description": "Change tracking for AI-era codebases. Captures why AI agents made each change — entity, diff, and reasoning — to a local SQLite database before the session ends.",
+  "version": "0.2.0",
+  "repository": "https://github.com/masondelan/selvedge",
+  "homepage": "https://github.com/masondelan/selvedge",
+  "license": "MIT",
+  "packages": [
+    {
+      "registry_name": "pypi",
+      "name": "selvedge",
+      "version": "0.2.0",
+      "command": "selvedge-server",
+      "runtime_arguments": []
+    }
+  ],
+  "tools": [
+    {
+      "name": "log_change",
+      "description": "Record a change to a codebase entity. Call immediately after adding, modifying, or removing any DB column, table, function, API endpoint, dependency, or env variable. Set reasoning to the user's original request."
+    },
+    {
+      "name": "diff",
+      "description": "Get change history for an entity or entity prefix. 'users' returns history for the users table and all its columns."
+    },
+    {
+      "name": "blame",
+      "description": "Get the most recent change to an entity — what changed, when, which agent made the change, and why. Like git blame but for semantic entities."
+    },
+    {
+      "name": "history",
+      "description": "Filtered history across all entities. Supports since (7d, 30d, 1y), entity_path prefix, and project filters."
+    },
+    {
+      "name": "search",
+      "description": "Full-text search across entity paths, diffs, reasoning, and agents."
+    }
+  ]
+}

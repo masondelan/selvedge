@@ -204,3 +204,73 @@ def test_search_case_insensitive(storage):
     ))
     rows = storage.search("billing")
     assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# record_tool_call / get_tool_stats
+# ---------------------------------------------------------------------------
+
+
+def test_record_tool_call_persists(storage):
+    storage.record_tool_call("log_change", entity_path="users.email")
+    stats = storage.get_tool_stats()
+    assert stats["total_calls"] == 1
+    assert stats["by_tool"]["log_change"] == 1
+
+
+def test_record_tool_call_multiple_tools(storage):
+    storage.record_tool_call("log_change", entity_path="users.email")
+    storage.record_tool_call("log_change", entity_path="users.name")
+    storage.record_tool_call("blame", entity_path="payments.amount")
+    storage.record_tool_call("search")
+
+    stats = storage.get_tool_stats()
+    assert stats["total_calls"] == 4
+    assert stats["by_tool"]["log_change"] == 2
+    assert stats["by_tool"]["blame"] == 1
+    assert stats["by_tool"]["search"] == 1
+
+
+def test_get_tool_stats_log_change_ratio(storage):
+    storage.record_tool_call("log_change")
+    storage.record_tool_call("log_change")
+    storage.record_tool_call("diff")
+    storage.record_tool_call("blame")
+
+    stats = storage.get_tool_stats()
+    assert stats["log_change_calls"] == 2
+    assert stats["log_change_ratio"] == 0.5
+
+
+def test_get_tool_stats_empty(storage):
+    stats = storage.get_tool_stats()
+    assert stats["total_calls"] == 0
+    assert stats["log_change_calls"] == 0
+    assert stats["log_change_ratio"] == 0.0
+    assert stats["by_tool"] == {}
+
+
+def test_get_tool_stats_recent_list(storage):
+    storage.record_tool_call("log_change", entity_path="users.email")
+    storage.record_tool_call("blame", entity_path="payments.amount")
+
+    stats = storage.get_tool_stats()
+    assert len(stats["recent"]) == 2
+    # newest first
+    assert stats["recent"][0]["tool_name"] == "blame"
+    assert stats["recent"][1]["tool_name"] == "log_change"
+
+
+def test_record_tool_call_never_raises_on_bad_input(storage):
+    # Should never throw — telemetry must be fire-and-forget
+    storage.record_tool_call("log_change", entity_path="x" * 10_000)
+    assert storage.get_tool_stats()["total_calls"] == 1
+
+
+def test_tool_calls_independent_of_change_events(storage):
+    # Tool call count and event count are tracked in separate tables
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add"))
+    storage.record_tool_call("log_change", entity_path="users.email")
+
+    assert storage.count() == 1                        # events table
+    assert storage.get_tool_stats()["total_calls"] == 1  # tool_calls table

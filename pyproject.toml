@@ -9,6 +9,9 @@ description = "Change tracking for AI-era codebases"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [
+    { name = "Mason Delan", email = "masondelan@gmail.com" },
+]
 keywords = ["mcp", "ai", "changelog", "codebase", "tracking", "devtools"]
 classifiers = [
     "Development Status :: 3 - Alpha",

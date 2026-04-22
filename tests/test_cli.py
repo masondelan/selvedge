@@ -177,3 +177,75 @@ def test_log_command(runner):
     assert result.exit_code == 0
     assert "users.phone" in result.output
     assert "add" in result.output
+
+
+# ---------------------------------------------------------------------------
+# stats
+# ---------------------------------------------------------------------------
+
+
+def test_stats_empty(runner):
+    result = runner.invoke(cli, ["stats"])
+    assert result.exit_code == 0
+    assert "No tool calls" in result.output
+
+
+def test_stats_shows_total_and_ratio(runner):
+    from selvedge.config import get_db_path
+    from selvedge.storage import SelvedgeStorage
+    storage = SelvedgeStorage(get_db_path())
+    storage.record_tool_call("log_change", entity_path="users.email")
+    storage.record_tool_call("log_change", entity_path="users.name")
+    storage.record_tool_call("blame", entity_path="payments.amount")
+
+    result = runner.invoke(cli, ["stats"])
+    assert result.exit_code == 0
+    assert "log_change" in result.output
+    assert "blame" in result.output
+    assert "3" in result.output  # total calls visible somewhere
+
+
+def test_stats_json_output(runner):
+    import json
+    from selvedge.config import get_db_path
+    from selvedge.storage import SelvedgeStorage
+    storage = SelvedgeStorage(get_db_path())
+    storage.record_tool_call("log_change", entity_path="users.email")
+    storage.record_tool_call("diff", entity_path="users")
+
+    result = runner.invoke(cli, ["stats", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["total_calls"] == 2
+    assert data["by_tool"]["log_change"] == 1
+    assert data["by_tool"]["diff"] == 1
+    assert "log_change_ratio" in data
+
+
+def test_stats_since_flag(runner):
+    import json
+    from selvedge.config import get_db_path
+    from selvedge.storage import SelvedgeStorage
+    storage = SelvedgeStorage(get_db_path())
+
+    # Seed one old call (simulate by inserting directly with old timestamp)
+    import sqlite3, uuid
+    db_path = get_db_path()
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO tool_calls (id, timestamp, tool_name, entity_path, success, error_msg) "
+        "VALUES (?,?,?,?,?,?)",
+        (str(uuid.uuid4()), "2020-01-01T00:00:00+00:00", "log_change", "old.entity", 1, ""),
+    )
+    conn.commit()
+    conn.close()
+
+    # And one recent call
+    storage.record_tool_call("blame", entity_path="new.entity")
+
+    # --since 7d should only see the recent one
+    result = runner.invoke(cli, ["stats", "--since", "7d", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["total_calls"] == 1
+    assert "blame" in data["by_tool"]

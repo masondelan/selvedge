@@ -93,6 +93,28 @@ selvedge log users.phone add \
   --agent "me"
 ```
 
+## Check log_change coverage
+
+After running with an agent for a while, you can check how often it's actually
+calling `log_change`:
+
+```bash
+# Quick summary in the terminal
+selvedge stats
+selvedge stats --since 7d
+
+# Cross-reference against git commits (run from project root)
+python scripts/coverage_check.py --since 30d
+```
+
+`selvedge stats` shows a breakdown of every MCP tool call recorded — how many
+were `log_change` versus reads (`diff`, `blame`, `history`, `search`). The
+coverage ratio tells you how actively the agent is logging vs. just querying.
+
+The coverage script compares your git log against Selvedge events and lists
+any commits with no associated events. Low coverage usually means the system
+prompt needs a stronger instruction — see `docs/fallbacks.md` for guidance.
+
 ## All CLI commands
 
 ```
@@ -105,6 +127,7 @@ selvedge history [--since SINCE]      Browse all history with filters
               [--project PROJECT]
               [--limit N]
 selvedge search QUERY [--limit N]     Full-text search
+selvedge stats [--since SINCE]        Tool call coverage report
 selvedge log ENTITY CHANGE_TYPE       Manually record a change
              [--diff TEXT]
              [--reasoning TEXT]

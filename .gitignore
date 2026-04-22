@@ -1,6 +1,12 @@
 # Selvedge database (commit this if you want shared team history, ignore for local-only)
 # .selvedge/
 
+# SQLite databases — never commit test or scratch DBs
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
 # Python
 __pycache__/
 *.py[cod]

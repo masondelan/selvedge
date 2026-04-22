@@ -103,6 +103,9 @@ selvedge blame payments.amount         # what changed last and why
 selvedge history --since 30d           # last 30 days of changes
 selvedge search "stripe"               # full-text search
 selvedge stats                         # log_change coverage report
+selvedge install-hook                  # auto-link commits to events
+selvedge import migrations/            # backfill from migration files
+selvedge export --format csv           # dump history to CSV
 ```
 
 ---
@@ -168,6 +171,16 @@ selvedge history [--since SINCE]          Browse all history
               [--limit N]
 selvedge search QUERY [--limit N]         Full-text search
 selvedge stats [--since SINCE]            Tool call coverage report
+selvedge install-hook [--path PATH]       Install git post-commit hook
+selvedge backfill-commit --hash HASH      Backfill git_commit on recent events
+selvedge import PATH                      Import migration files (SQL / Alembic)
+              [--format auto|sql|alembic]
+              [--project NAME]
+              [--dry-run]
+selvedge export [--format json|csv]       Export history to JSON or CSV
+              [--since SINCE]
+              [--entity ENTITY]
+              [--output FILE]
 selvedge log ENTITY CHANGE_TYPE           Manually log a change
              [--diff TEXT]
              [--reasoning TEXT]

@@ -249,3 +249,191 @@ def test_stats_since_flag(runner):
     data = json.loads(result.output)
     assert data["total_calls"] == 1
     assert "blame" in data["by_tool"]
+
+
+# ---------------------------------------------------------------------------
+# install-hook
+# ---------------------------------------------------------------------------
+
+
+def test_install_hook_creates_hook_file(runner, tmp_path):
+    git_dir = tmp_path / ".git" / "hooks"
+    git_dir.mkdir(parents=True)
+    # fake a minimal .git dir
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+
+    result = runner.invoke(cli, ["install-hook", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    hook_file = tmp_path / ".git" / "hooks" / "post-commit"
+    assert hook_file.exists()
+    assert "selvedge backfill-commit" in hook_file.read_text()
+    assert oct(hook_file.stat().st_mode)[-3:] == "755"
+
+
+def test_install_hook_appends_to_existing(runner, tmp_path):
+    git_dir = tmp_path / ".git" / "hooks"
+    git_dir.mkdir(parents=True)
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    hook = git_dir / "post-commit"
+    hook.write_text("#!/bin/sh\necho 'existing hook'\n")
+    hook.chmod(0o755)
+
+    result = runner.invoke(cli, ["install-hook", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    content = hook.read_text()
+    assert "existing hook" in content
+    assert "selvedge backfill-commit" in content
+
+
+def test_install_hook_idempotent(runner, tmp_path):
+    git_dir = tmp_path / ".git" / "hooks"
+    git_dir.mkdir(parents=True)
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+
+    runner.invoke(cli, ["install-hook", "--path", str(tmp_path)])
+    runner.invoke(cli, ["install-hook", "--path", str(tmp_path)])
+
+    hook = tmp_path / ".git" / "hooks" / "post-commit"
+    # Should only appear once
+    assert hook.read_text().count("selvedge backfill-commit") == 1
+
+
+def test_install_hook_fails_outside_git_repo(runner, tmp_path):
+    result = runner.invoke(cli, ["install-hook", "--path", str(tmp_path)])
+    assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# backfill-commit
+# ---------------------------------------------------------------------------
+
+
+def test_backfill_commit_updates_events(runner):
+    seed(3, entity="users.email")
+    result = runner.invoke(cli, ["backfill-commit", "--hash", "abc1234def56"])
+    assert result.exit_code == 0
+    assert "3" in result.output
+
+    # Verify the events were actually updated
+    import json
+    result2 = runner.invoke(cli, ["diff", "users.email", "--json"])
+    data = json.loads(result2.output)
+    assert all(e["git_commit"] == "abc1234def56" for e in data)
+
+
+def test_backfill_commit_quiet_flag(runner):
+    seed(1)
+    result = runner.invoke(cli, ["backfill-commit", "--hash", "abc123", "--quiet"])
+    assert result.exit_code == 0
+    assert result.output.strip() == ""
+
+
+def test_backfill_commit_no_events(runner):
+    result = runner.invoke(cli, ["backfill-commit", "--hash", "abc123"])
+    assert result.exit_code == 0
+    assert "No events" in result.output
+
+
+# ---------------------------------------------------------------------------
+# export
+# ---------------------------------------------------------------------------
+
+
+def test_export_json_stdout(runner):
+    import json
+    seed(3)
+    result = runner.invoke(cli, ["export"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 3
+
+
+def test_export_csv_stdout(runner):
+    seed(2, entity="users.email")
+    result = runner.invoke(cli, ["export", "--format", "csv"])
+    assert result.exit_code == 0
+    lines = result.output.strip().splitlines()
+    assert lines[0].startswith("id,")      # header row
+    assert len(lines) == 3                  # header + 2 data rows
+
+
+def test_export_to_file(runner, tmp_path):
+    seed(2)
+    out = tmp_path / "history.json"
+    result = runner.invoke(cli, ["export", "--output", str(out)])
+    assert result.exit_code == 0
+    assert out.exists()
+    import json
+    data = json.loads(out.read_text())
+    assert len(data) == 2
+
+
+def test_export_since_filter(runner):
+    import json
+    seed(1)
+    result = runner.invoke(cli, ["export", "--since", "7d"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 1
+
+
+def test_export_empty(runner):
+    import json
+    result = runner.invoke(cli, ["export"])
+    assert result.exit_code == 0
+    assert json.loads(result.output) == []
+
+
+# ---------------------------------------------------------------------------
+# import (migration files)
+# ---------------------------------------------------------------------------
+
+
+def test_import_sql_file(runner, tmp_path):
+    import json
+    f = tmp_path / "migration.sql"
+    f.write_text("CREATE TABLE users (id INTEGER); ALTER TABLE users ADD COLUMN email TEXT;")
+
+    result = runner.invoke(cli, ["import", str(f)])
+    assert result.exit_code == 0
+    assert "2" in result.output
+
+    # Verify events were persisted
+    result2 = runner.invoke(cli, ["diff", "users", "--json"])
+    data = json.loads(result2.output)
+    assert len(data) == 2
+
+
+def test_import_dry_run(runner, tmp_path):
+    import json
+    f = tmp_path / "migration.sql"
+    f.write_text("CREATE TABLE users (id INTEGER);")
+
+    result = runner.invoke(cli, ["import", str(f), "--dry-run"])
+    assert result.exit_code == 0
+    assert "users" in result.output
+
+    # Dry run must NOT persist events
+    result2 = runner.invoke(cli, ["diff", "users", "--json"])
+    data = json.loads(result2.output)
+    assert len(data) == 0
+
+
+def test_import_json_flag(runner, tmp_path):
+    import json
+    f = tmp_path / "migration.sql"
+    f.write_text("CREATE TABLE payments (id INTEGER);")
+
+    result = runner.invoke(cli, ["import", str(f), "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+    assert data[0]["entity_path"] == "payments"
+
+
+def test_import_empty_file(runner, tmp_path):
+    f = tmp_path / "empty.sql"
+    f.write_text("")
+    result = runner.invoke(cli, ["import", str(f)])
+    assert result.exit_code == 0
+    assert "No importable" in result.output

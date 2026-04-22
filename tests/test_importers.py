@@ -1,0 +1,322 @@
+"""Tests for selvedge.importers — SQL DDL and Alembic migration parsers."""
+
+import pytest
+from pathlib import Path
+from selvedge.importers import parse_sql_file, parse_alembic_file, import_path
+
+
+# ---------------------------------------------------------------------------
+# SQL parser — CREATE / DROP TABLE
+# ---------------------------------------------------------------------------
+
+
+def test_sql_create_table(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("CREATE TABLE users (id INTEGER PRIMARY KEY);")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "users"
+    assert events[0].entity_type == "table"
+    assert events[0].change_type == "create"
+
+
+def test_sql_create_table_if_not_exists(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("CREATE TABLE IF NOT EXISTS orders (id INTEGER);")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "orders"
+    assert events[0].change_type == "create"
+
+
+def test_sql_drop_table(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("DROP TABLE IF EXISTS old_sessions;")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "old_sessions"
+    assert events[0].change_type == "delete"
+
+
+# ---------------------------------------------------------------------------
+# SQL parser — ADD / DROP / RENAME / ALTER COLUMN
+# ---------------------------------------------------------------------------
+
+
+def test_sql_add_column(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("ALTER TABLE users ADD COLUMN stripe_id VARCHAR(255);")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "users.stripe_id"
+    assert events[0].entity_type == "column"
+    assert events[0].change_type == "add"
+    assert "stripe_id" in events[0].diff
+
+
+def test_sql_add_column_without_column_keyword(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("ALTER TABLE payments ADD amount DECIMAL(10,2) NOT NULL DEFAULT 0;")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "payments.amount"
+    assert events[0].change_type == "add"
+
+
+def test_sql_drop_column(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("ALTER TABLE users DROP COLUMN legacy_flag;")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "users.legacy_flag"
+    assert events[0].change_type == "remove"
+
+
+def test_sql_rename_column(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("ALTER TABLE users RENAME COLUMN user_tier TO subscription_tier;")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "users.user_tier"
+    assert events[0].change_type == "rename"
+
+
+def test_sql_rename_table(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("ALTER TABLE old_name RENAME TO new_name;")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "old_name"
+    assert events[0].entity_type == "table"
+    assert events[0].change_type == "rename"
+
+
+# ---------------------------------------------------------------------------
+# SQL parser — indexes
+# ---------------------------------------------------------------------------
+
+
+def test_sql_create_index(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("CREATE INDEX idx_users_email ON users (email);")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].entity_type == "index"
+    assert events[0].change_type == "index_add"
+
+
+def test_sql_drop_index(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("DROP INDEX IF EXISTS idx_users_email;")
+    events = parse_sql_file(f)
+    assert len(events) == 1
+    assert events[0].change_type == "index_remove"
+
+
+# ---------------------------------------------------------------------------
+# SQL parser — multiple statements, project tagging, reasoning
+# ---------------------------------------------------------------------------
+
+
+def test_sql_multiple_statements(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("""
+    CREATE TABLE users (id INTEGER);
+    ALTER TABLE users ADD COLUMN email VARCHAR(255);
+    ALTER TABLE users ADD COLUMN stripe_id TEXT;
+    DROP TABLE old_users;
+    """)
+    events = parse_sql_file(f)
+    assert len(events) == 4
+    assert events[0].change_type == "create"
+    assert events[1].change_type == "add"
+    assert events[2].change_type == "add"
+    assert events[3].change_type == "delete"
+
+
+def test_sql_project_tagged(tmp_path):
+    f = tmp_path / "001.sql"
+    f.write_text("CREATE TABLE users (id INTEGER);")
+    events = parse_sql_file(f, project="my-api")
+    assert events[0].project == "my-api"
+
+
+def test_sql_reasoning_contains_filename(tmp_path):
+    f = tmp_path / "0023_add_stripe.sql"
+    f.write_text("ALTER TABLE users ADD COLUMN stripe_id TEXT;")
+    events = parse_sql_file(f)
+    assert "0023_add_stripe.sql" in events[0].reasoning
+
+
+def test_sql_empty_file(tmp_path):
+    f = tmp_path / "empty.sql"
+    f.write_text("")
+    assert parse_sql_file(f) == []
+
+
+def test_sql_no_ddl(tmp_path):
+    f = tmp_path / "select.sql"
+    f.write_text("SELECT * FROM users WHERE id = 1;")
+    assert parse_sql_file(f) == []
+
+
+# ---------------------------------------------------------------------------
+# Alembic parser
+# ---------------------------------------------------------------------------
+
+
+def test_alembic_add_column(tmp_path):
+    f = tmp_path / "001_add_col.py"
+    f.write_text("""
+def upgrade():
+    op.add_column('users', sa.Column('stripe_id', sa.String(255), nullable=True))
+""")
+    events = parse_alembic_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "users.stripe_id"
+    assert events[0].change_type == "add"
+
+
+def test_alembic_drop_column(tmp_path):
+    f = tmp_path / "002_drop.py"
+    f.write_text("""
+def upgrade():
+    op.drop_column('users', 'legacy_flag')
+""")
+    events = parse_alembic_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "users.legacy_flag"
+    assert events[0].change_type == "remove"
+
+
+def test_alembic_create_table(tmp_path):
+    f = tmp_path / "003_create.py"
+    f.write_text("""
+def upgrade():
+    op.create_table('payments',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('amount', sa.Integer(), nullable=False),
+    )
+""")
+    events = parse_alembic_file(f)
+    assert any(e.change_type == "create" and e.entity_path == "payments" for e in events)
+
+
+def test_alembic_drop_table(tmp_path):
+    f = tmp_path / "004_drop_table.py"
+    f.write_text("""
+def upgrade():
+    op.drop_table('old_sessions')
+""")
+    events = parse_alembic_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "old_sessions"
+    assert events[0].change_type == "delete"
+
+
+def test_alembic_alter_column(tmp_path):
+    f = tmp_path / "005_alter.py"
+    f.write_text("""
+def upgrade():
+    op.alter_column('users', 'email', existing_type=sa.String(100), type_=sa.String(255))
+""")
+    events = parse_alembic_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "users.email"
+    assert events[0].change_type == "modify"
+
+
+def test_alembic_rename_table(tmp_path):
+    f = tmp_path / "006_rename.py"
+    f.write_text("""
+def upgrade():
+    op.rename_table('user_profiles', 'profiles')
+""")
+    events = parse_alembic_file(f)
+    assert len(events) == 1
+    assert events[0].entity_path == "user_profiles"
+    assert events[0].change_type == "rename"
+
+
+def test_alembic_skips_downgrade(tmp_path):
+    """Events in downgrade() should not be imported."""
+    f = tmp_path / "007_migration.py"
+    f.write_text("""
+def upgrade():
+    op.add_column('users', sa.Column('new_col', sa.String()))
+
+def downgrade():
+    op.drop_column('users', 'new_col')
+""")
+    events = parse_alembic_file(f)
+    # Only the upgrade add_column should appear, not the downgrade drop_column
+    assert all(e.change_type == "add" for e in events)
+    assert len(events) == 1
+
+
+def test_alembic_multiple_ops(tmp_path):
+    f = tmp_path / "008_multi.py"
+    f.write_text("""
+def upgrade():
+    op.create_table('invoices', sa.Column('id', sa.Integer()))
+    op.add_column('users', sa.Column('invoice_id', sa.Integer()))
+    op.add_column('users', sa.Column('billing_email', sa.String()))
+""")
+    events = parse_alembic_file(f)
+    assert len(events) == 3
+
+
+def test_alembic_project_tagged(tmp_path):
+    f = tmp_path / "009.py"
+    f.write_text("""
+def upgrade():
+    op.add_column('users', sa.Column('x', sa.String()))
+""")
+    events = parse_alembic_file(f, project="billing-service")
+    assert events[0].project == "billing-service"
+
+
+# ---------------------------------------------------------------------------
+# import_path — directory walking, auto-detect
+# ---------------------------------------------------------------------------
+
+
+def test_import_path_single_sql_file(tmp_path):
+    f = tmp_path / "schema.sql"
+    f.write_text("CREATE TABLE users (id INTEGER); ALTER TABLE users ADD COLUMN email TEXT;")
+    events = import_path(f)
+    assert len(events) == 2
+
+
+def test_import_path_directory_mixed(tmp_path):
+    (tmp_path / "001.sql").write_text("CREATE TABLE users (id INTEGER);")
+    (tmp_path / "002.py").write_text("""
+def upgrade():
+    op.add_column('users', sa.Column('email', sa.String()))
+""")
+    events = import_path(tmp_path, fmt="auto")
+    assert len(events) == 2
+
+
+def test_import_path_sorted_by_name(tmp_path):
+    (tmp_path / "002_second.sql").write_text("ALTER TABLE users ADD COLUMN b TEXT;")
+    (tmp_path / "001_first.sql").write_text("CREATE TABLE users (id INTEGER);")
+    events = import_path(tmp_path, fmt="sql")
+    # 001 should come first
+    assert events[0].entity_path == "users"
+    assert events[0].change_type == "create"
+
+
+def test_import_path_empty_directory(tmp_path):
+    assert import_path(tmp_path) == []
+
+
+def test_import_path_fmt_sql_skips_py(tmp_path):
+    (tmp_path / "mig.sql").write_text("CREATE TABLE t (id INTEGER);")
+    (tmp_path / "mig.py").write_text("""
+def upgrade():
+    op.add_column('t', sa.Column('x', sa.String()))
+""")
+    events = import_path(tmp_path, fmt="sql")
+    assert len(events) == 1
+    assert events[0].change_type == "create"

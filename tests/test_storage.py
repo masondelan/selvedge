@@ -274,3 +274,59 @@ def test_tool_calls_independent_of_change_events(storage):
 
     assert storage.count() == 1                        # events table
     assert storage.get_tool_stats()["total_calls"] == 1  # tool_calls table
+
+
+# ---------------------------------------------------------------------------
+# backfill_git_commit
+# ---------------------------------------------------------------------------
+
+
+def test_backfill_git_commit_updates_events(storage):
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add"))
+    storage.log_event(ChangeEvent(entity_path="users.name", change_type="add"))
+
+    updated = storage.backfill_git_commit("abc1234", window_minutes=10)
+    assert updated == 2
+
+    rows = storage.get_entity_history("users")
+    assert all(r["git_commit"] == "abc1234" for r in rows)
+
+
+def test_backfill_git_commit_skips_already_set(storage):
+    e = ChangeEvent(entity_path="users.email", change_type="add", git_commit="existing_hash")
+    storage.log_event(e)
+
+    updated = storage.backfill_git_commit("new_hash", window_minutes=10)
+    assert updated == 0  # already has a commit hash — should not be overwritten
+
+    row = storage.get_blame("users.email")
+    assert row["git_commit"] == "existing_hash"
+
+
+def test_backfill_git_commit_returns_zero_when_nothing_to_update(storage):
+    updated = storage.backfill_git_commit("abc1234", window_minutes=10)
+    assert updated == 0
+
+
+def test_backfill_git_commit_respects_window(storage):
+    import sqlite3
+    from datetime import datetime, timezone, timedelta
+
+    # Insert an event with an old timestamp (outside the window)
+    old_event = ChangeEvent(entity_path="old.col", change_type="add")
+    old_event.timestamp = (
+        datetime.now(timezone.utc) - timedelta(minutes=30)
+    ).isoformat()
+    storage.log_event(old_event)
+
+    # Insert a recent event (inside the window)
+    new_event = ChangeEvent(entity_path="new.col", change_type="add")
+    storage.log_event(new_event)
+
+    updated = storage.backfill_git_commit("abc1234", window_minutes=10)
+    assert updated == 1  # only the recent event
+
+    old_row = storage.get_blame("old.col")
+    new_row = storage.get_blame("new.col")
+    assert old_row["git_commit"] == ""
+    assert new_row["git_commit"] == "abc1234"

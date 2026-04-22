@@ -93,6 +93,56 @@ selvedge log users.phone add \
   --agent "me"
 ```
 
+## Auto-link commits to events (git hook)
+
+Run once in each project to install the post-commit hook:
+
+```bash
+selvedge install-hook
+```
+
+After that, every `git commit` automatically stamps recent Selvedge events with
+the new commit hash. No manual `--commit` flag needed in your agent's calls.
+
+To backfill a specific commit manually:
+
+```bash
+selvedge backfill-commit --hash $(git rev-parse HEAD)
+```
+
+## Backfill history from migration files
+
+If your project existed before Selvedge, import your existing migration files
+to seed schema history:
+
+```bash
+# Raw SQL migrations
+selvedge import migrations/ --format sql --project my-api
+
+# Alembic Python migrations
+selvedge import alembic/versions/ --format alembic
+
+# Auto-detect by file extension (default)
+selvedge import migrations/
+
+# Preview without writing
+selvedge import migrations/ --dry-run
+```
+
+## Export history
+
+```bash
+# All events as JSON to stdout
+selvedge export
+
+# Save to file
+selvedge export --format json --output history.json
+selvedge export --format csv --output history.csv
+
+# Filtered export
+selvedge export --since 30d --entity users --format csv
+```
+
 ## Check log_change coverage
 
 After running with an agent for a while, you can check how often it's actually
@@ -128,6 +178,14 @@ selvedge history [--since SINCE]      Browse all history with filters
               [--limit N]
 selvedge search QUERY [--limit N]     Full-text search
 selvedge stats [--since SINCE]        Tool call coverage report
+selvedge install-hook [--path PATH]   Install git post-commit hook
+selvedge backfill-commit --hash HASH  Backfill git_commit on recent events
+selvedge import PATH                  Import SQL / Alembic migration files
+             [--format auto|sql|alembic]
+             [--project NAME] [--dry-run]
+selvedge export [--format json|csv]   Export history to JSON or CSV
+             [--since SINCE] [--entity ENTITY]
+             [--output FILE]
 selvedge log ENTITY CHANGE_TYPE       Manually record a change
              [--diff TEXT]
              [--reasoning TEXT]

@@ -446,3 +446,231 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
     storage = get_storage()
     stored = storage.log_event(event)
     console.print(f"[green]✓[/green] Logged [bold]{entity_path}[/bold] ({change_type})  [dim]{stored.id[:8]}[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# install-hook
+# ---------------------------------------------------------------------------
+
+_HOOK_SCRIPT = """\
+#!/bin/sh
+# Selvedge post-commit hook
+# Backfills git_commit on Selvedge events logged during this session.
+# Installed by: selvedge install-hook
+if command -v selvedge >/dev/null 2>&1; then
+  selvedge backfill-commit --hash "$(git rev-parse HEAD)" --quiet
+fi
+"""
+
+_HOOK_MARKER = "# Selvedge post-commit hook"
+
+
+@cli.command("install-hook")
+@click.option("--path", "-p", default=".", help="Project root (default: current directory)")
+@click.option("--window", default=10, show_default=True,
+              help="Minutes back to search for events to backfill")
+def install_hook(path, window):
+    """Install a git post-commit hook that auto-backfills git_commit.
+
+    \b
+    After every `git commit`, the hook runs `selvedge backfill-commit`
+    which finds events logged in the last N minutes with no git_commit
+    and stamps them with the new commit hash.
+
+    \b
+    If a post-commit hook already exists, the Selvedge block is appended
+    rather than overwriting the existing script.
+
+    \b
+    Examples:
+      selvedge install-hook
+      selvedge install-hook --window 20
+    """
+    root = Path(path).resolve()
+    git_dir = root / ".git"
+    if not git_dir.exists():
+        err_console.print(f"[red]error:[/red] no .git directory found at {root}")
+        err_console.print("run this command from inside a git repository")
+        sys.exit(1)
+
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+    hook_path = hooks_dir / "post-commit"
+
+    if hook_path.exists():
+        existing = hook_path.read_text()
+        if _HOOK_MARKER in existing:
+            console.print("[yellow]Selvedge hook already installed.[/yellow]")
+            console.print(f"  [dim]{hook_path}[/dim]")
+            return
+        # Append to existing hook
+        updated = existing.rstrip("\n") + "\n\n" + _HOOK_SCRIPT
+        hook_path.write_text(updated)
+        console.print(f"[green]✓[/green] Appended Selvedge hook to existing post-commit")
+    else:
+        hook_path.write_text(_HOOK_SCRIPT)
+        console.print(f"[green]✓[/green] Installed post-commit hook")
+
+    hook_path.chmod(0o755)
+    console.print(f"  [dim]{hook_path}[/dim]")
+    console.print()
+    console.print(
+        "  After each [bold]git commit[/bold], Selvedge will automatically backfill\n"
+        f"  [bold]git_commit[/bold] on events logged in the last [bold]{window}[/bold] minutes."
+    )
+
+
+# ---------------------------------------------------------------------------
+# backfill-commit  (called by the git hook, also usable directly)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("backfill-commit")
+@click.option("--hash", "commit_hash", required=True, help="Git commit hash to stamp")
+@click.option("--window", default=10, show_default=True,
+              help="Minutes back to search for events to backfill")
+@click.option("--quiet", is_flag=True, help="Suppress output (used by git hook)")
+def backfill_commit(commit_hash, window, quiet):
+    """Backfill git_commit on recent events that don't have one.
+
+    \b
+    Normally called automatically by the post-commit hook. You can also
+    run it manually to stamp a specific commit hash onto recent events.
+
+    \b
+    Examples:
+      selvedge backfill-commit --hash abc1234
+      selvedge backfill-commit --hash $(git rev-parse HEAD) --window 20
+    """
+    updated = get_storage().backfill_git_commit(commit_hash, window_minutes=window)
+    if not quiet:
+        if updated:
+            console.print(
+                f"[green]✓[/green] Backfilled [bold]{updated}[/bold] event(s) "
+                f"→ [yellow]{commit_hash[:12]}[/yellow]"
+            )
+        else:
+            console.print(f"[dim]No events to backfill for {commit_hash[:12]}[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# export
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--format", "fmt", type=click.Choice(["json", "csv"]), default="json",
+              show_default=True, help="Output format")
+@click.option("--since", "-s", default="", help="Since date or relative: 7d, 24h, 3m, 1y")
+@click.option("--entity", "-e", default="", help="Filter to entity path prefix")
+@click.option("--project", "-p", default="", help="Filter by project name")
+@click.option("--limit", "-n", default=0, help="Max rows (0 = all)")
+@click.option("--output", "-o", default="-",
+              help="Output file path (default: stdout)")
+def export(fmt, since, entity, project, limit, output):
+    """Export change history to JSON or CSV.
+
+    \b
+    Examples:
+      selvedge export                            # all events as JSON to stdout
+      selvedge export --format csv -o out.csv   # CSV file
+      selvedge export --since 30d --entity users
+      selvedge export --format json -o history.json
+    """
+    import csv as csv_mod
+    import io
+
+    resolved_since = parse_relative_time(since) if since else ""
+    effective_limit = limit if limit > 0 else 1_000_000
+    rows = get_storage().get_history(
+        since=resolved_since,
+        entity_path=entity,
+        project=project,
+        limit=effective_limit,
+    )
+
+    if fmt == "json":
+        content = json.dumps(rows, indent=2)
+    else:
+        buf = io.StringIO()
+        if rows:
+            writer = csv_mod.DictWriter(buf, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+        content = buf.getvalue()
+
+    if output == "-":
+        click.echo(content)
+    else:
+        Path(output).write_text(content)
+        console.print(
+            f"[green]✓[/green] Exported [bold]{len(rows)}[/bold] events "
+            f"→ [dim]{output}[/dim]"
+        )
+
+
+# ---------------------------------------------------------------------------
+# import (migration files)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("import")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--format", "fmt",
+              type=click.Choice(["auto", "sql", "alembic"]),
+              default="auto", show_default=True,
+              help="Migration format (auto-detects by default)")
+@click.option("--project", "-p", default="", help="Project name to tag events with")
+@click.option("--dry-run", is_flag=True, help="Preview what would be imported, don't write")
+@click.option("--json", "as_json", is_flag=True, help="Output events as JSON (implies --dry-run)")
+def import_migrations(path, fmt, project, dry_run, as_json):
+    """Import migration files to backfill schema change history.
+
+    \b
+    PATH can be a single migration file or a directory of migration files.
+    Supports raw SQL DDL files and Alembic Python migration files.
+
+    \b
+    Examples:
+      selvedge import migrations/
+      selvedge import migrations/ --project my-api
+      selvedge import migrations/0023_add_payments.py --dry-run
+      selvedge import schema.sql --format sql
+    """
+    from .importers import import_path
+
+    target = Path(path)
+    events = import_path(target, fmt=fmt, project=project)
+
+    if not events:
+        console.print("[yellow]No importable schema changes found.[/yellow]")
+        return
+
+    if as_json:
+        click.echo(json.dumps([e.to_dict() for e in events], indent=2))
+        return
+
+    if dry_run:
+        table = Table(
+            title=f"Dry run — {len(events)} events from {target.name}",
+            box=box.SIMPLE_HEAD,
+            show_lines=False,
+            header_style="bold",
+        )
+        table.add_column("Entity", style="cyan")
+        table.add_column("Change", style="green")
+        table.add_column("Diff")
+        for e in events:
+            table.add_row(e.entity_path, e.change_type, (e.diff or "")[:60])
+        console.print(table)
+        console.print(f"  [dim]Run without --dry-run to import these {len(events)} events.[/dim]")
+        return
+
+    storage = get_storage()
+    for event in events:
+        storage.log_event(event)
+
+    console.print(
+        f"[green]✓[/green] Imported [bold]{len(events)}[/bold] events from "
+        f"[dim]{target.name}[/dim]"
+    )

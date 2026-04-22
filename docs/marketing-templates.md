@@ -49,7 +49,7 @@ and whether the reasoning field is enough, or if more structure is needed.
 
 **Title:**
 ```
-Show HN: Selvedge v0.2 – git hooks + migration file parsing for AI codebase history
+Show HN: Selvedge v0.2 – git hooks, migration importer, and CSV export for AI codebase history
 ```
 
 **Body:**
@@ -57,17 +57,26 @@ Show HN: Selvedge v0.2 – git hooks + migration file parsing for AI codebase hi
 a few months ago i posted selvedge — an mcp server for capturing why AI agents
 make changes before the session disappears.
 
-v0.2 adds two things people asked for:
+v0.2 adds three things:
 
-1. git post-commit hook — automatically backfills git_commit on selvedge
-   events that match the commit window. no manual tagging.
+1. git post-commit hook — one command installs it, then every commit
+   automatically backfills git_commit on selvedge events from that session.
+   no manual tagging ever.
 
-2. selvedge import — point it at your alembic or liquibase files and it
-   backfills schema history from before you started using selvedge.
+   selvedge install-hook
 
-the import command is the one i'm most excited about. if you're onboarding
-an existing project with 2 years of migrations, you're not starting from
-a blank slate anymore.
+2. selvedge import — point it at your alembic or raw sql migration files and
+   it backfills schema history from before you started using selvedge.
+
+   selvedge import alembic/versions/ --project my-api
+
+3. selvedge export — dump your full history to json or csv for reporting,
+   audits, or piping into other tools.
+
+   selvedge export --format csv --since 30d > last-month.csv
+
+the import command is the one i'm most excited about. if you have 2 years of
+alembic migrations sitting there, you can backfill all of it in one command.
 
 pip install selvedge==0.2.0
 changelog: github.com/masondelan/selvedge/releases/tag/v0.2.0

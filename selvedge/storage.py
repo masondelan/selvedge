@@ -2,7 +2,7 @@
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -103,6 +103,29 @@ class SelvedgeStorage:
     # ------------------------------------------------------------------
     # Write — tool call telemetry (local only, never networked)
     # ------------------------------------------------------------------
+
+    def backfill_git_commit(self, commit_hash: str, window_minutes: int = 10) -> int:
+        """
+        Backfill ``git_commit`` on recent events that don't have one yet.
+
+        Finds events logged within the last ``window_minutes`` minutes whose
+        ``git_commit`` field is empty and sets it to ``commit_hash``.
+
+        Called automatically by the post-commit git hook installed via
+        ``selvedge install-hook``.
+
+        Returns:
+            Number of events updated.
+        """
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+        ).isoformat()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE events SET git_commit = ? WHERE git_commit = '' AND timestamp >= ?",
+                (commit_hash, cutoff),
+            )
+            return cursor.rowcount
 
     def record_tool_call(
         self,

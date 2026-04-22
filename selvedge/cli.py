@@ -338,6 +338,80 @@ def search(query, limit, as_json):
 
 
 # ---------------------------------------------------------------------------
+# stats (tool-call coverage)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--since", "-s", default="", help="Since date or relative: 7d, 24h, 3m, 1y")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def stats(since, as_json):
+    """Show MCP tool call statistics and log_change coverage.
+
+    \b
+    The coverage ratio tells you how often agents are actually calling
+    log_change relative to total tool invocations. A low ratio suggests
+    agents are querying history but not logging new changes.
+
+    \b
+    Examples:
+      selvedge stats
+      selvedge stats --since 7d
+    """
+    resolved_since = parse_relative_time(since) if since else ""
+    data = get_storage().get_tool_stats(since=resolved_since)
+
+    if as_json:
+        click.echo(json.dumps(data, indent=2))
+        return
+
+    total = data["total_calls"]
+    log_calls = data["log_change_calls"]
+    ratio = data["log_change_ratio"]
+
+    period = f" (since {since})" if since else ""
+    console.print(f"\n[bold]Selvedge tool call stats[/bold]{period}\n")
+
+    if total == 0:
+        console.print("  [dim]No tool calls recorded yet.[/dim]")
+        console.print("  [dim]Tool call tracking starts once the MCP server is connected.[/dim]\n")
+        return
+
+    # Coverage bar
+    bar_width = 30
+    filled = int(ratio * bar_width)
+    bar = "[green]" + "█" * filled + "[/green]" + "[dim]" + "░" * (bar_width - filled) + "[/dim]"
+    coverage_color = "green" if ratio >= 0.2 else "yellow" if ratio >= 0.1 else "red"
+    console.print(f"  log_change coverage  {bar}  [{coverage_color}]{ratio:.0%}[/{coverage_color}]")
+    console.print(f"  [dim]{log_calls} log_change calls out of {total} total[/dim]\n")
+
+    # Per-tool breakdown
+    table = Table(box=box.SIMPLE_HEAD, show_header=True, header_style="bold")
+    table.add_column("Tool", style="cyan")
+    table.add_column("Calls", justify="right")
+    table.add_column("Share", justify="right", style="dim")
+
+    for tool_name, count in data["by_tool"].items():
+        share = f"{count/total:.0%}"
+        style = "bold" if tool_name == "log_change" else ""
+        table.add_row(tool_name, str(count), share, style=style)
+
+    console.print(table)
+
+    # Recent calls
+    if data.get("recent"):
+        console.print("  [bold]Recent tool calls[/bold]")
+        for call in data["recent"][:5]:
+            entity = f"  [cyan]{call['entity_path']}[/cyan]" if call.get("entity_path") else ""
+            status = "[green]✓[/green]" if call.get("success") else "[red]✗[/red]"
+            console.print(
+                f"    {status}  [dim]{fmt_ts(call['timestamp'])}[/dim]  "
+                f"[magenta]{call['tool_name']}[/magenta]{entity}"
+            )
+    console.print()
+
+
+# ---------------------------------------------------------------------------
 # log (manual entry)
 # ---------------------------------------------------------------------------
 

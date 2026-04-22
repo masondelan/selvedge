@@ -41,6 +41,26 @@ Homepage = "https://github.com/masondelan/selvedge"
 Repository = "https://github.com/masondelan/selvedge"
 Issues = "https://github.com/masondelan/selvedge/issues"
 
+[tool.hatch.build.targets.wheel]
+packages = ["selvedge"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "selvedge/",
+    "tests/",
+    "docs/",
+    "README.md",
+    "CLAUDE.md",
+    "pyproject.toml",
+]
+exclude = [
+    ".selvedge/",
+    "*.db",
+    "*.db-journal",
+    "*.db-shm",
+    "*.db-wal",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

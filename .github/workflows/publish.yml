@@ -1,0 +1,68 @@
+name: Publish to PyPI + create GitHub Release
+
+# Triggers when you push a version tag: git tag v0.2.0 && git push --tags
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # needed to create GitHub Releases
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for changelog generation
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload dist/*
+
+      - name: Generate changelog from git log
+        id: changelog
+        run: |
+          # Get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            CHANGES=$(git log --pretty=format:"- %s" HEAD)
+          else
+            CHANGES=$(git log --pretty=format:"- %s" ${PREV_TAG}..HEAD)
+          fi
+          echo "CHANGES<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Selvedge ${{ github.ref_name }}
+          body: |
+            ## What's changed
+
+            ${{ steps.changelog.outputs.CHANGES }}
+
+            ---
+
+            **Install:** `pip install selvedge==${{ github.ref_name }}`
+            **PyPI:** https://pypi.org/project/selvedge/
+            **Docs:** https://github.com/masondelan/selvedge/blob/main/docs/getting-started.md
+          files: dist/*
+          draft: false
+          prerelease: false

@@ -116,6 +116,8 @@ def log_change(
     Returns:
         dict with id, timestamp, and status "logged".
     """
+    storage = get_storage()
+    storage.record_tool_call("log_change", entity_path=entity_path)
     event = ChangeEvent(
         entity_path=entity_path,
         change_type=change_type,
@@ -127,7 +129,7 @@ def log_change(
         git_commit=git_commit,
         project=project,
     )
-    stored = get_storage().log_event(event)
+    stored = storage.log_event(event)
     return {"id": stored.id, "timestamp": stored.timestamp, "status": "logged"}
 
 
@@ -147,7 +149,9 @@ def diff(entity_path: str, limit: int = 20) -> list[dict]:
     Returns:
         List of change events, newest first.
     """
-    return get_storage().get_entity_history(entity_path, limit)
+    storage = get_storage()
+    storage.record_tool_call("diff", entity_path=entity_path)
+    return storage.get_entity_history(entity_path, limit)
 
 
 @mcp.tool()
@@ -165,7 +169,9 @@ def blame(entity_path: str) -> dict:
         The most recent ChangeEvent for that entity, or an error dict
         if no history exists.
     """
-    result = get_storage().get_blame(entity_path)
+    storage = get_storage()
+    storage.record_tool_call("blame", entity_path=entity_path)
+    result = storage.get_blame(entity_path)
     if not result:
         return {"error": f"No history found for '{entity_path}'"}
     return result
@@ -194,8 +200,10 @@ def history(
     Returns:
         List of change events, newest first.
     """
+    storage = get_storage()
+    storage.record_tool_call("history", entity_path=entity_path)
     resolved_since = _parse_relative_time(since) if since else ""
-    return get_storage().get_history(
+    return storage.get_history(
         since=resolved_since,
         entity_path=entity_path,
         project=project,
@@ -220,7 +228,9 @@ def search(query: str, limit: int = 20) -> list[dict]:
     Returns:
         List of matching change events, newest first.
     """
-    return get_storage().search(query, limit)
+    storage = get_storage()
+    storage.record_tool_call("search")
+    return storage.search(query, limit)
 
 
 # ---------------------------------------------------------------------------

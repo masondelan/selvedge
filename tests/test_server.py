@@ -20,7 +20,7 @@ def isolate_db(tmp_path, monkeypatch):
 
 
 # Import server tools after the fixture patches the env
-from selvedge.server import log_change, diff, blame, history, search
+from selvedge.server import log_change, diff, blame, history, search, changeset
 
 
 # ---------------------------------------------------------------------------
@@ -157,3 +157,106 @@ def test_search_finds_by_reasoning():
 def test_search_no_results():
     log_change(entity_path="users.email", change_type="add")
     assert search("xyzzy_impossible") == []
+
+
+# ---------------------------------------------------------------------------
+# changeset_id — log_change and changeset tool
+# ---------------------------------------------------------------------------
+
+
+def test_log_change_with_changeset_id():
+    result = log_change(
+        entity_path="payments.amount",
+        change_type="add",
+        reasoning="Adding payments table as part of Stripe billing feature",
+        changeset_id="add-stripe-billing",
+    )
+    assert result["status"] == "logged"
+
+    rows = changeset("add-stripe-billing")
+    assert len(rows) == 1
+    assert rows[0]["changeset_id"] == "add-stripe-billing"
+    assert rows[0]["entity_path"] == "payments.amount"
+
+
+def test_log_change_changeset_id_defaults_empty():
+    result = log_change(entity_path="users.email", change_type="add",
+                        reasoning="Added email for auth")
+    assert result["status"] == "logged"
+    rows = history()
+    assert rows[0]["changeset_id"] == ""
+
+
+def test_changeset_groups_multiple_events():
+    cs = "add-stripe"
+    log_change(entity_path="payments", change_type="create",
+               reasoning="Create payments table for Stripe integration", changeset_id=cs)
+    log_change(entity_path="payments.amount", change_type="add",
+               reasoning="Amount field for payment value", changeset_id=cs)
+    log_change(entity_path="payments.currency", change_type="add",
+               reasoning="Currency ISO code field", changeset_id=cs)
+    # Unrelated event
+    log_change(entity_path="users.email", change_type="add",
+               reasoning="Email for auth login flow")
+
+    rows = changeset(cs)
+    assert len(rows) == 3
+    assert all(r["changeset_id"] == cs for r in rows)
+
+
+def test_changeset_returns_error_for_unknown():
+    rows = changeset("nonexistent-changeset")
+    assert len(rows) == 1
+    assert "error" in rows[0]
+
+
+def test_history_changeset_filter():
+    log_change(entity_path="a.x", change_type="add",
+               reasoning="Part of feature A", changeset_id="cs-a")
+    log_change(entity_path="b.y", change_type="add",
+               reasoning="Part of feature B", changeset_id="cs-b")
+
+    rows = history(changeset_id="cs-a")
+    assert len(rows) == 1
+    assert rows[0]["entity_path"] == "a.x"
+
+
+# ---------------------------------------------------------------------------
+# reasoning quality warnings
+# ---------------------------------------------------------------------------
+
+
+def test_log_change_no_warning_for_good_reasoning():
+    result = log_change(
+        entity_path="users.phone",
+        change_type="add",
+        reasoning="User asked to add phone number field to support SMS 2FA verification.",
+    )
+    assert "warnings" not in result
+
+
+def test_log_change_warns_empty_reasoning():
+    result = log_change(entity_path="users.email", change_type="add", reasoning="")
+    assert "warnings" in result
+    assert any("empty" in w for w in result["warnings"])
+
+
+def test_log_change_warns_short_reasoning():
+    result = log_change(entity_path="users.email", change_type="add", reasoning="For auth")
+    assert "warnings" in result
+    assert any("short" in w for w in result["warnings"])
+
+
+def test_log_change_warns_generic_reasoning():
+    for generic in ["user request", "as requested", "done", "n/a", "updated"]:
+        result = log_change(entity_path="x.y", change_type="modify", reasoning=generic)
+        assert "warnings" in result, f"expected warning for reasoning={generic!r}"
+        assert any("generic" in w for w in result["warnings"])
+
+
+def test_log_change_event_still_logged_even_with_warning():
+    result = log_change(entity_path="a.b", change_type="add", reasoning="")
+    assert result["status"] == "logged"
+    assert "id" in result
+    rows = history()
+    assert len(rows) == 1

@@ -396,12 +396,13 @@ def test_import_sql_file(runner, tmp_path):
 
     result = runner.invoke(cli, ["import", str(f)])
     assert result.exit_code == 0
-    assert "2" in result.output
+    # CREATE TABLE → 2 events (table + id column); ALTER ADD email → 1
+    assert "3" in result.output
 
     # Verify events were persisted
     result2 = runner.invoke(cli, ["diff", "users", "--json"])
     data = json.loads(result2.output)
-    assert len(data) == 2
+    assert len(data) == 3
 
 
 def test_import_dry_run(runner, tmp_path):
@@ -437,3 +438,157 @@ def test_import_empty_file(runner, tmp_path):
     result = runner.invoke(cli, ["import", str(f)])
     assert result.exit_code == 0
     assert "No importable" in result.output
+
+
+# ---------------------------------------------------------------------------
+# changeset CLI command
+# ---------------------------------------------------------------------------
+
+
+def seed_changeset(changeset_id: str, n: int = 2) -> None:
+    """Seed events with a shared changeset_id."""
+    from selvedge.config import get_db_path
+    storage = SelvedgeStorage(get_db_path())
+    for i in range(n):
+        storage.log_event(ChangeEvent(
+            entity_path=f"payments.col{i}",
+            change_type="add",
+            reasoning=f"Adding payments column {i} for Stripe integration",
+            changeset_id=changeset_id,
+        ))
+
+
+def test_changeset_list_shows_changesets(runner):
+    seed_changeset("add-stripe", n=3)
+    seed_changeset("add-auth", n=1)
+    result = runner.invoke(cli, ["changeset", "--list"])
+    assert result.exit_code == 0
+    assert "add-stripe" in result.output
+    assert "add-auth" in result.output
+
+
+def test_changeset_list_json(runner):
+    import json
+    seed_changeset("my-cs", n=2)
+    result = runner.invoke(cli, ["changeset", "--list", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["changeset_id"] == "my-cs"
+    assert data[0]["event_count"] == 2
+
+
+def test_changeset_show_by_id(runner):
+    seed_changeset("show-cs", n=2)
+    result = runner.invoke(cli, ["changeset", "show-cs"])
+    assert result.exit_code == 0
+    assert "show-cs" in result.output
+    assert "payments.col0" in result.output
+
+
+def test_changeset_show_json(runner):
+    import json
+    seed_changeset("json-cs", n=2)
+    result = runner.invoke(cli, ["changeset", "json-cs", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 2
+    assert all(r["changeset_id"] == "json-cs" for r in data)
+
+
+def test_changeset_show_unknown(runner):
+    result = runner.invoke(cli, ["changeset", "nonexistent-cs"])
+    assert result.exit_code == 0
+    assert "No events" in result.output
+
+
+def test_changeset_list_empty(runner):
+    result = runner.invoke(cli, ["changeset", "--list"])
+    assert result.exit_code == 0
+    assert "No changesets" in result.output
+
+
+# ---------------------------------------------------------------------------
+# history --changeset filter
+# ---------------------------------------------------------------------------
+
+
+def test_history_changeset_filter(runner):
+    seed_changeset("cs-a", n=2)
+    seed_changeset("cs-b", n=3)
+    result = runner.invoke(cli, ["history", "--changeset", "cs-a"])
+    assert result.exit_code == 0
+    # All shown events should be from cs-a — check entity paths
+    assert "payments.col0" in result.output
+
+
+def test_history_changeset_filter_json(runner):
+    import json
+    seed_changeset("cs-x", n=2)
+    seed(1, entity="unrelated.col")
+    result = runner.invoke(cli, ["history", "--changeset", "cs-x", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 2
+    assert all(r["changeset_id"] == "cs-x" for r in data)
+
+
+# ---------------------------------------------------------------------------
+# history --summarize
+# ---------------------------------------------------------------------------
+
+
+def test_history_summarize_groups_by_session(runner):
+    from selvedge.config import get_db_path
+    storage = SelvedgeStorage(get_db_path())
+    for i in range(3):
+        storage.log_event(ChangeEvent(
+            entity_path=f"users.col{i}", change_type="add",
+            reasoning=f"Adding column {i} for the user profile feature",
+            session_id="sess-abc",
+        ))
+    result = runner.invoke(cli, ["history", "--summarize"])
+    assert result.exit_code == 0
+    assert "Changelog" in result.output
+    assert "users.col" in result.output
+
+
+def test_history_summarize_groups_by_changeset(runner):
+    seed_changeset("cs-summarize", n=3)
+    result = runner.invoke(cli, ["history", "--summarize"])
+    assert result.exit_code == 0
+    assert "changeset" in result.output
+    assert "cs-summarize" in result.output
+
+
+def test_history_summarize_empty(runner):
+    result = runner.invoke(cli, ["history", "--summarize"])
+    assert result.exit_code == 0
+    assert "No events" in result.output
+
+
+# ---------------------------------------------------------------------------
+# log --changeset option
+# ---------------------------------------------------------------------------
+
+
+def test_log_with_changeset(runner):
+    result = runner.invoke(cli, [
+        "log", "payments.amount", "add",
+        "--reasoning", "Adding amount field for Stripe billing feature",
+        "--changeset", "add-stripe",
+    ])
+    assert result.exit_code == 0
+    assert "add-stripe" in result.output
+
+
+def test_log_changeset_stored(runner):
+    import json
+    runner.invoke(cli, [
+        "log", "payments.amount", "add",
+        "--reasoning", "Adding amount field for Stripe billing feature",
+        "--changeset", "my-feature",
+    ])
+    result = runner.invoke(cli, ["diff", "payments.amount", "--json"])
+    data = json.loads(result.output)
+    assert data[0]["changeset_id"] == "my-feature"

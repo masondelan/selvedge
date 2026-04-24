@@ -11,22 +11,69 @@ from selvedge.importers import parse_sql_file, parse_alembic_file, import_path
 
 
 def test_sql_create_table(tmp_path):
+    """CREATE TABLE emits one event for the table and one per column."""
     f = tmp_path / "001.sql"
     f.write_text("CREATE TABLE users (id INTEGER PRIMARY KEY);")
     events = parse_sql_file(f)
-    assert len(events) == 1
+    # 1 table event + 1 column event for `id`
+    assert len(events) == 2
     assert events[0].entity_path == "users"
     assert events[0].entity_type == "table"
     assert events[0].change_type == "create"
+    assert events[1].entity_path == "users.id"
+    assert events[1].entity_type == "column"
+    assert events[1].change_type == "add"
 
 
 def test_sql_create_table_if_not_exists(tmp_path):
     f = tmp_path / "001.sql"
     f.write_text("CREATE TABLE IF NOT EXISTS orders (id INTEGER);")
     events = parse_sql_file(f)
-    assert len(events) == 1
+    assert len(events) == 2
     assert events[0].entity_path == "orders"
     assert events[0].change_type == "create"
+    assert events[1].entity_path == "orders.id"
+    assert events[1].change_type == "add"
+
+
+def test_sql_create_table_multi_column(tmp_path):
+    """Multi-column CREATE TABLE emits a column event per column,
+    skipping table-level constraints like PRIMARY KEY (id)."""
+    f = tmp_path / "001.sql"
+    f.write_text("""
+        CREATE TABLE users (
+            id INTEGER NOT NULL,
+            stripe_customer_id VARCHAR(255),
+            user_tier_v2 TEXT DEFAULT 'free',
+            amount DECIMAL(10, 2) DEFAULT 0,
+            PRIMARY KEY (id)
+        );
+    """)
+    events = parse_sql_file(f)
+    # 1 table + 4 columns (PRIMARY KEY clause is skipped, not treated as a column)
+    assert len(events) == 5
+    paths = [e.entity_path for e in events]
+    assert paths == [
+        "users",
+        "users.id",
+        "users.stripe_customer_id",
+        "users.user_tier_v2",
+        "users.amount",
+    ]
+    # The DECIMAL(10, 2) inner comma should NOT split the column —
+    # `users.amount` is one entry, not two.
+    assert "DECIMAL(10, 2)" in events[4].diff or "DECIMAL(10," in events[4].diff
+
+
+def test_sql_create_table_blame_works_for_inline_columns(tmp_path):
+    """A blame query against a column defined only in CREATE TABLE
+    should return the create-time event — this was the headline gap
+    in the import story before the per-column fix."""
+    f = tmp_path / "0001_initial.sql"
+    f.write_text("CREATE TABLE users (id INTEGER, email TEXT);")
+    events = parse_sql_file(f)
+    paths = {e.entity_path for e in events}
+    assert "users.email" in paths
 
 
 def test_sql_drop_table(tmp_path):
@@ -73,22 +120,32 @@ def test_sql_drop_column(tmp_path):
 
 
 def test_sql_rename_column(tmp_path):
+    """Renaming a column emits two events so blame works under both names."""
     f = tmp_path / "001.sql"
     f.write_text("ALTER TABLE users RENAME COLUMN user_tier TO subscription_tier;")
     events = parse_sql_file(f)
-    assert len(events) == 1
+    assert len(events) == 2
     assert events[0].entity_path == "users.user_tier"
     assert events[0].change_type == "rename"
+    assert events[1].entity_path == "users.subscription_tier"
+    assert events[1].change_type == "add"
+    assert "renamed from" in events[1].reasoning
 
 
 def test_sql_rename_table(tmp_path):
+    """Renaming a table emits two events so blame works under both names."""
     f = tmp_path / "001.sql"
     f.write_text("ALTER TABLE old_name RENAME TO new_name;")
     events = parse_sql_file(f)
-    assert len(events) == 1
+    assert len(events) == 2
     assert events[0].entity_path == "old_name"
     assert events[0].entity_type == "table"
     assert events[0].change_type == "rename"
+    assert events[1].entity_path == "new_name"
+    assert events[1].entity_type == "table"
+    assert events[1].change_type == "create"
+    assert "rename" in events[1].reasoning
+    assert "old_name" in events[1].reasoning
 
 
 # ---------------------------------------------------------------------------
@@ -127,11 +184,15 @@ def test_sql_multiple_statements(tmp_path):
     DROP TABLE old_users;
     """)
     events = parse_sql_file(f)
-    assert len(events) == 4
-    assert events[0].change_type == "create"
-    assert events[1].change_type == "add"
-    assert events[2].change_type == "add"
-    assert events[3].change_type == "delete"
+    # CREATE TABLE users (id) → 2 events (table + id column)
+    # ALTER ADD email           → 1 event
+    # ALTER ADD stripe_id       → 1 event
+    # DROP TABLE old_users      → 1 event
+    assert len(events) == 5
+    assert [e.change_type for e in events] == ["create", "add", "add", "add", "delete"]
+    assert [e.entity_path for e in events] == [
+        "users", "users.id", "users.email", "users.stripe_id", "old_users"
+    ]
 
 
 def test_sql_project_tagged(tmp_path):
@@ -227,15 +288,20 @@ def upgrade():
 
 
 def test_alembic_rename_table(tmp_path):
+    """Renaming a table emits two events so the new name is queryable."""
     f = tmp_path / "006_rename.py"
     f.write_text("""
 def upgrade():
     op.rename_table('user_profiles', 'profiles')
 """)
     events = parse_alembic_file(f)
-    assert len(events) == 1
+    assert len(events) == 2
     assert events[0].entity_path == "user_profiles"
     assert events[0].change_type == "rename"
+    assert events[1].entity_path == "profiles"
+    assert events[1].change_type == "create"
+    assert "rename" in events[1].reasoning
+    assert "user_profiles" in events[1].reasoning
 
 
 def test_alembic_skips_downgrade(tmp_path):
@@ -263,7 +329,14 @@ def upgrade():
     op.add_column('users', sa.Column('billing_email', sa.String()))
 """)
     events = parse_alembic_file(f)
-    assert len(events) == 3
+    # create_table('invoices') → table event + invoices.id column event
+    # 2x op.add_column         → 2 column events
+    assert len(events) == 4
+    paths = [e.entity_path for e in events]
+    assert "invoices" in paths
+    assert "invoices.id" in paths
+    assert "users.invoice_id" in paths
+    assert "users.billing_email" in paths
 
 
 def test_alembic_project_tagged(tmp_path):
@@ -285,7 +358,8 @@ def test_import_path_single_sql_file(tmp_path):
     f = tmp_path / "schema.sql"
     f.write_text("CREATE TABLE users (id INTEGER); ALTER TABLE users ADD COLUMN email TEXT;")
     events = import_path(f)
-    assert len(events) == 2
+    # CREATE TABLE → 2 events (table + id column); ADD COLUMN email → 1
+    assert len(events) == 3
 
 
 def test_import_path_directory_mixed(tmp_path):
@@ -295,7 +369,8 @@ def upgrade():
     op.add_column('users', sa.Column('email', sa.String()))
 """)
     events = import_path(tmp_path, fmt="auto")
-    assert len(events) == 2
+    # SQL CREATE TABLE → 2 events; alembic add_column → 1 event
+    assert len(events) == 3
 
 
 def test_import_path_sorted_by_name(tmp_path):
@@ -318,5 +393,7 @@ def upgrade():
     op.add_column('t', sa.Column('x', sa.String()))
 """)
     events = import_path(tmp_path, fmt="sql")
-    assert len(events) == 1
+    # SQL CREATE TABLE → 2 events (table + id column); .py file is skipped
+    assert len(events) == 2
     assert events[0].change_type == "create"
+    assert events[1].entity_path == "t.id"

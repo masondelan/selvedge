@@ -28,15 +28,20 @@ selvedge/
 │   ├── models.py         ChangeEvent dataclass, ChangeType + EntityType enums
 │   ├── config.py         DB path resolution (env → walk-up → ~/.selvedge)
 │   ├── storage.py        SelvedgeStorage — SQLite CRUD layer
-│   ├── server.py         FastMCP server — 5 tools exposed to AI agents
-│   └── cli.py            Click + Rich CLI — init, status, diff, blame, history, search, log
+│   ├── server.py         FastMCP server — 6 tools exposed to AI agents
+│   ├── importers.py      Migration file parsers — SQL DDL + Alembic
+│   └── cli.py            Click + Rich CLI — init, status, diff, blame, history, search, log, import, export, install-hook
+├── scripts/
+│   └── coverage_check.py cross-references git log vs Selvedge events
 ├── tests/
 │   ├── test_storage.py
 │   ├── test_server.py
-│   └── test_cli.py
+│   ├── test_cli.py
+│   └── test_importers.py
 ├── docs/
 │   └── getting-started.md
 ├── pyproject.toml
+├── CHANGELOG.md
 ├── README.md
 └── CLAUDE.md
 ```
@@ -71,6 +76,7 @@ The central entity. Every recorded change is one row in the `events` table.
 | `session_id` | TEXT | Agent session/conversation ID |
 | `git_commit` | TEXT | Git commit hash this change lands in |
 | `project` | TEXT | Repository/project name |
+| `changeset_id` | TEXT | Groups related changes into a named feature/task (e.g. `"add-stripe-billing"`) |
 | `metadata` | TEXT | JSON blob for extensibility |
 
 ### entity_path conventions
@@ -91,13 +97,17 @@ Prefix queries work everywhere: `users` matches `users`, `users.email`, `users.c
 
 ## MCP Server tools
 
-The MCP server (`selvedge/server.py`) exposes these tools to AI agents:
+The MCP server (`selvedge/server.py`) exposes these 6 tools to AI agents:
 
 ### `log_change`
 Record a change. Call this immediately after making any meaningful change.
 
 **Required:** `entity_path`, `change_type`
-**Optional:** `diff`, `entity_type`, `reasoning`, `agent`, `session_id`, `git_commit`, `project`
+**Optional:** `diff`, `entity_type`, `reasoning`, `agent`, `session_id`, `git_commit`, `project`, `changeset_id`
+
+The `reasoning` field is validated at write time — the server returns a `warnings` array if it's empty, too short (< 20 chars), or a generic placeholder like `"user request"` or `"done"`. Aim for a full sentence describing intent.
+
+The `changeset_id` field groups related events under a shared slug (e.g. `"add-stripe-billing"`). All events in a changeset can be retrieved together via the `changeset` tool.
 
 ### `diff`
 Get change history for an entity or entity prefix. Returns list of events, newest first.
@@ -107,6 +117,9 @@ Get the most recent change to an exact entity path — what, when, who, why.
 
 ### `history`
 Filtered history across all entities. Supports `since` (ISO or relative like `7d`, `30d`, `1y`), `entity_path`, `project`, `limit`.
+
+### `changeset`
+Get all events belonging to a `changeset_id`, oldest first. Use to reconstruct the full scope of a feature or task across multiple entities.
 
 ### `search`
 Full-text substring search across `entity_path`, `diff`, `reasoning`, `agent`.
@@ -127,6 +140,12 @@ selvedge history --entity users --since 30d
 selvedge history --project my-api
 selvedge search "billing"                  # full-text search
 selvedge log users.phone add --reasoning "2FA" --agent me  # manual entry
+selvedge stats                             # tool call coverage report
+selvedge import ./migrations/              # backfill from SQL/Alembic migration files
+selvedge import ./migrations/ --dry-run   # preview without writing
+selvedge export --since 30d --output history.json
+selvedge install-hook                      # install git post-commit hook
+selvedge backfill-commit --hash abc123     # manually backfill a git commit hash
 ```
 
 All commands support `--json` for machine-readable output.
@@ -193,9 +212,15 @@ Rules:
 - Call selvedge.log_change immediately after adding, modifying, or removing
   any DB column, table, function, API endpoint, dependency, or env variable.
 - Set `reasoning` to the user's original request or the problem being solved.
+  Write at least one full sentence — the server will warn on empty, very short,
+  or generic values like "user request" or "done".
+  Good example: "User asked to add 2FA — needs phone number to send SMS codes."
 - Set `agent` to "claude-code" (or whichever agent you are).
 - Set `session_id` if you have access to the current session/conversation ID.
 - Set `git_commit` to the commit hash once you know it.
+- For multi-entity changes (e.g. adding a whole feature), set a shared `changeset_id`
+  on all related log_change calls — use a short slug like "add-stripe-billing".
+  This lets anyone query the full scope of the change with selvedge.changeset().
 - Before modifying an entity, call selvedge.diff or selvedge.blame to understand
   its history and avoid conflicting with past decisions.
 ```
@@ -204,26 +229,52 @@ Rules:
 
 ## Phase plan
 
-### Phase 1 — Core (DONE ✓)
-- [x] MCP server with 5 tools
+> **Keeping this accurate:** The source of truth for what's shipped is `CHANGELOG.md`.
+> If checkboxes here drift from reality, trust the changelog and update this file.
+> A weekly Cowork task flags any mismatch automatically.
+
+### Phase 1 — Core (DONE ✓ · v0.1.0)
+- [x] MCP server with 5 tools (log_change, diff, blame, history, search)
 - [x] SQLite storage with WAL mode
-- [x] CLI (init, status, diff, blame, history, search, log)
+- [x] CLI (init, status, diff, blame, history, search, log, stats)
+- [x] Local tool call telemetry + `scripts/coverage_check.py`
 - [x] PyPI package with entry points
-- [x] Test suite (storage, server, CLI)
+- [x] Test suite — storage, server, CLI (57 tests)
 
-### Phase 2 — Integrations
-- [ ] Git hook: auto-link selvedge events to commit hashes at commit time
-  - Post-commit hook reads `git rev-parse HEAD`, backfills `git_commit` on events with empty commit field and matching timestamp window
-- [ ] Migration file parser: ingest Alembic / Liquibase / raw SQL migrations to backfill schema history
-  - Parse migration files, extract column/table ops, write ChangeEvents with `change_type` inferred from SQL
-- [ ] `selvedge import` CLI command for the above parsers
-- [ ] `selvedge export` — dump history as JSON/CSV
+### Phase 2 — Integrations (DONE ✓ · v0.2.0)
+- [x] Git hook: `selvedge install-hook` — post-commit hook auto-backfills `git_commit`
+- [x] `selvedge backfill-commit --hash HASH` — manual git hash backfill
+- [x] Migration file parser (`importers.py`) — raw SQL DDL + Alembic Python files
+- [x] `selvedge import PATH` — CLI command with `--dry-run`, `--json`, `--format`, `--project`
+- [x] `selvedge export` — dump history as JSON/CSV with full filter support
 
-### Phase 3 — Team features
+### Phase 2.5 — Quality + Grouping (DONE ✓ · v0.2.1)
+- [x] `changeset_id` field on ChangeEvent — groups related changes under a named slug
+- [x] `changeset` MCP tool — retrieve all events in a changeset, oldest first
+- [x] `storage.list_changesets()` — summary view of all changesets with event counts
+- [x] Reasoning quality validator in `log_change` — warns on empty, short, or generic reasoning
+
+### Phase 2.6 — Correctness pass (DONE ✓ · v0.3.0)
+- [x] `selvedge.timeutil` module — shared relative-time parser and UTC normalizer
+- [x] `m` = minutes / `mo` = months (was: `m` = months, contradicting every CLI convention)
+- [x] Unparseable `--since` raises rather than silently returning empty results
+- [x] `LIKE` queries escape `_` and `%` (was: underscore matched any char in search/prefix queries)
+- [x] All timestamps normalized to UTC `...Z` form on write (was: mixed-tz sorted by ASCII order)
+- [x] `CREATE TABLE` importer emits per-column events (was: zero events for inline columns → blame failed)
+- [x] `RENAME TABLE` / `RENAME COLUMN` emit two events so blame works under both old and new names
+- [x] `ChangeEvent.__post_init__` validates `entity_path`, `change_type`, `entity_type`
+- [x] `get_db_path` requires the DB file (not just dir), warns on global fallback
+- [x] `backfill_git_commit` window 10 → 60 min; `selvedge status` shows missing-commit count
+- [x] `storage.log_event_batch()` for atomic, fast bulk imports
+- [x] `selvedge log` CLI uses `click.Choice` for `change_type`
+- [x] `tests/test_adversarial.py` — 25 tests locking in the new behavior
+- [x] README "What's new in v0.3.0" section + outdated docs fixed (`m`/`mo`, `changeset` CLI)
+
+### Phase 3 — Team features (Next · v0.4.0)
 - [ ] PostgreSQL backend option (configurable via `SELVEDGE_BACKEND=postgresql://...`)
   - Abstract `SelvedgeStorage` behind a protocol/interface so backends are swappable
   - `storage_sqlite.py` and `storage_pg.py` both implement `StorageBackend`
-- [ ] HTTP REST API layer (FastAPI) — exposes the same 5 operations over HTTP
+- [ ] HTTP REST API layer (FastAPI) — exposes the same 6 operations over HTTP
 - [ ] Auth (API keys) for the HTTP layer
 
 ### Phase 4 — Platform (hosted business)
@@ -260,13 +311,35 @@ selvedge --version
 
 ---
 
-## Non-goals (Phase 1)
+## Non-goals (through Phase 2)
 
-- No web UI
-- No PostgreSQL
-- No authentication
+- No web UI (Phase 4)
+- No PostgreSQL (Phase 3)
+- No authentication (Phase 3)
 - No real-time streaming
-- No git integration (Phase 2)
-- No migration file parsing (Phase 2)
 - No multi-user/team features (Phase 3)
 - No LLM calls inside Selvedge itself — reasoning is captured FROM agents, not generated by Selvedge
+
+---
+
+## Cowork instructions
+
+Guidelines for the Cowork AI assistant working on this project.
+
+**Phase plan maintenance**
+- The source of truth for shipped work is `CHANGELOG.md`, not the phase checkboxes.
+- When asked to update the phase plan, read `CHANGELOG.md` and `selvedge/server.py` (for current tool count/names) and compare against the checkboxes in this file. Mark anything shipped as done.
+- Version bumps require updating both `pyproject.toml` AND `selvedge/__init__.py`, then tagging the commit to trigger the PyPI publish workflow.
+
+**Release notes**
+- Pull content from `CHANGELOG.md`. Group into Added / Changed / Fixed sections.
+- The MCP tool docstrings in `server.py` are user-facing — keep them accurate after any tool changes.
+
+**Test suite**
+- Tests live in `tests/`. Run with `pytest` from the repo root.
+- Never write to the real DB in tests — always set `SELVEDGE_DB` env var to a `tmp_path` fixture path.
+- `test_importers.py` covers the migration parsers; `test_server.py` covers MCP tools.
+
+**Scheduled recurring tasks (managed by Cowork)**
+- **Weekly CLAUDE.md drift check** — compare `CHANGELOG.md` against the phase plan and flag any shipped items still showing as unchecked.
+- **Weekly coverage report** — run `scripts/coverage_check.py` against the git log and report the `log_change` call ratio per commit.

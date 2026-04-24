@@ -330,3 +330,126 @@ def test_backfill_git_commit_respects_window(storage):
     new_row = storage.get_blame("new.col")
     assert old_row["git_commit"] == ""
     assert new_row["git_commit"] == "abc1234"
+
+
+# ---------------------------------------------------------------------------
+# changeset_id — log, retrieve, group
+# ---------------------------------------------------------------------------
+
+
+def test_log_event_with_changeset_id(storage):
+    e = ChangeEvent(
+        entity_path="payments.amount", change_type="add",
+        changeset_id="add-stripe-billing"
+    )
+    stored = storage.log_event(e)
+    assert stored.changeset_id == "add-stripe-billing"
+
+    row = storage.get_blame("payments.amount")
+    assert row["changeset_id"] == "add-stripe-billing"
+
+
+def test_log_event_changeset_id_defaults_empty(storage):
+    e = ChangeEvent(entity_path="users.email", change_type="add")
+    storage.log_event(e)
+    row = storage.get_blame("users.email")
+    assert row["changeset_id"] == ""
+
+
+def test_get_changeset_returns_events(storage):
+    cs = "add-payments"
+    storage.log_event(ChangeEvent(entity_path="payments", change_type="create", changeset_id=cs))
+    storage.log_event(ChangeEvent(entity_path="payments.amount", change_type="add", changeset_id=cs))
+    storage.log_event(ChangeEvent(entity_path="payments.currency", change_type="add", changeset_id=cs))
+    # An unrelated event
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add"))
+
+    rows = storage.get_changeset(cs)
+    assert len(rows) == 3
+    assert all(r["changeset_id"] == cs for r in rows)
+
+
+def test_get_changeset_ordered_oldest_first(storage):
+    cs = "my-changeset"
+    e1 = ChangeEvent(entity_path="a.x", change_type="add", changeset_id=cs)
+    e1.timestamp = "2025-01-01T00:00:00+00:00"
+    e2 = ChangeEvent(entity_path="b.y", change_type="add", changeset_id=cs)
+    e2.timestamp = "2025-06-01T00:00:00+00:00"
+    storage.log_event(e1)
+    storage.log_event(e2)
+
+    rows = storage.get_changeset(cs)
+    assert rows[0]["entity_path"] == "a.x"
+    assert rows[1]["entity_path"] == "b.y"
+
+
+def test_get_changeset_empty_for_unknown(storage):
+    assert storage.get_changeset("nonexistent-changeset") == []
+
+
+def test_get_history_changeset_filter(storage):
+    storage.log_event(ChangeEvent(entity_path="a.x", change_type="add", changeset_id="cs-1"))
+    storage.log_event(ChangeEvent(entity_path="b.y", change_type="add", changeset_id="cs-2"))
+    storage.log_event(ChangeEvent(entity_path="c.z", change_type="add"))  # no changeset
+
+    rows = storage.get_history(changeset_id="cs-1")
+    assert len(rows) == 1
+    assert rows[0]["entity_path"] == "a.x"
+
+
+def test_list_changesets(storage):
+    storage.log_event(ChangeEvent(entity_path="a.x", change_type="add", changeset_id="cs-1", project="api"))
+    storage.log_event(ChangeEvent(entity_path="a.y", change_type="add", changeset_id="cs-1", project="api"))
+    storage.log_event(ChangeEvent(entity_path="b.z", change_type="add", changeset_id="cs-2", project="api"))
+    storage.log_event(ChangeEvent(entity_path="c.w", change_type="add"))  # no changeset — excluded
+
+    rows = storage.list_changesets()
+    assert len(rows) == 2
+    cs1 = next(r for r in rows if r["changeset_id"] == "cs-1")
+    assert cs1["event_count"] == 2
+
+
+def test_list_changesets_project_filter(storage):
+    storage.log_event(ChangeEvent(entity_path="a.x", change_type="add", changeset_id="cs-1", project="api"))
+    storage.log_event(ChangeEvent(entity_path="b.y", change_type="add", changeset_id="cs-2", project="shop"))
+
+    rows = storage.list_changesets(project="api")
+    assert len(rows) == 1
+    assert rows[0]["changeset_id"] == "cs-1"
+
+
+def test_migration_adds_changeset_id_column(tmp_path):
+    """Existing DBs without changeset_id get the column added on first open."""
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+
+    # Create a DB without the changeset_id column (simulating a pre-migration DB)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE events (
+            id TEXT PRIMARY KEY, timestamp TEXT NOT NULL,
+            entity_type TEXT NOT NULL DEFAULT 'other',
+            entity_path TEXT NOT NULL, change_type TEXT NOT NULL,
+            diff TEXT NOT NULL DEFAULT '', reasoning TEXT NOT NULL DEFAULT '',
+            agent TEXT NOT NULL DEFAULT '', session_id TEXT NOT NULL DEFAULT '',
+            git_commit TEXT NOT NULL DEFAULT '', project TEXT NOT NULL DEFAULT '',
+            metadata TEXT NOT NULL DEFAULT '{}'
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tool_calls (
+            id TEXT PRIMARY KEY, timestamp TEXT NOT NULL,
+            tool_name TEXT NOT NULL, entity_path TEXT NOT NULL DEFAULT '',
+            success INTEGER NOT NULL DEFAULT 1, error_msg TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    # Opening with SelvedgeStorage should apply the migration
+    storage = SelvedgeStorage(db_path)
+    # Should be able to log an event with changeset_id without error
+    e = ChangeEvent(entity_path="users.email", change_type="add", changeset_id="test-cs")
+    stored = storage.log_event(e)
+    assert stored.changeset_id == "test-cs"

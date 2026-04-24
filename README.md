@@ -1,7 +1,7 @@
 # Selvedge
 
 [![Tests](https://github.com/masondelan/selvedge/actions/workflows/test.yml/badge.svg)](https://github.com/masondelan/selvedge/actions/workflows/test.yml)
-[![PyPI](https://img.shields.io/pypi/v/selvedge)](https://pypi.org/project/selvedge/)
+[![PyPI](https://img.shields.io/pypi/v/selvedge?cacheSeconds=3600)](https://pypi.org/project/selvedge/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Change tracking for AI-era codebases.**

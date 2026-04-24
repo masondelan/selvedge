@@ -270,6 +270,26 @@ Rules:
 - [x] `tests/test_adversarial.py` — 25 tests locking in the new behavior
 - [x] README "What's new in v0.3.0" section + outdated docs fixed (`m`/`mo`, `changeset` CLI)
 
+### Phase 2.7 — Hardening (DONE ✓ · v0.3.1)
+- [x] Concurrency safety: connection-with-retry on `database is locked`,
+      exponential backoff, `PRAGMA busy_timeout = 5000`, multi-threaded
+      writer test
+- [x] `_session()` context manager fixes the long-standing connection leak
+      (`with self._connect()` managed the transaction but never closed)
+- [x] `selvedge.migrations` — explicit `schema_migrations` table, atomic
+      per-migration transactions, bootstrap detection for pre-versioning DBs
+- [x] `selvedge.logging_config` — `SELVEDGE_LOG_LEVEL` env var, namespaced
+      `selvedge.*` loggers, entry-point-only `configure_logging()`
+- [x] `selvedge.validation` — shared reasoning-quality validator used by
+      both `server.log_change` and CLI `selvedge log`
+- [x] Fixed regex bug in generic-reasoning patterns (`^fixed?$` matched
+      "fixe"/"fixed", not "fix"/"fixed"; same for add/remove/update/change)
+- [x] Public API exports in `__init__.py` with `__all__` and frozen-surface
+      test (`tests/test_public_api.py`)
+- [x] CI gates: ruff, mypy (pragmatic strict), pytest-cov ≥85%; current 92%
+- [x] MCP protocol smoke tests (`tests/test_mcp_protocol.py`) — boots real
+      `selvedge-server` subprocess and round-trips every tool over stdio
+
 ### Phase 3 — Team features (Next · v0.4.0)
 - [ ] PostgreSQL backend option (configurable via `SELVEDGE_BACKEND=postgresql://...`)
   - Abstract `SelvedgeStorage` behind a protocol/interface so backends are swappable

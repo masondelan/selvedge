@@ -1,9 +1,11 @@
 """Tests for the SelvedgeStorage layer."""
 
-import pytest
 from pathlib import Path
-from selvedge.storage import SelvedgeStorage
+
+import pytest
+
 from selvedge.models import ChangeEvent
+from selvedge.storage import SelvedgeStorage
 
 
 @pytest.fixture
@@ -75,7 +77,7 @@ def test_entity_history_ordered_newest_first(storage):
 
 
 def test_entity_history_limit(storage):
-    for i in range(10):
+    for _i in range(10):
         storage.log_event(ChangeEvent(entity_path="users.email", change_type="modify"))
     rows = storage.get_entity_history("users.email", limit=3)
     assert len(rows) == 3
@@ -309,8 +311,7 @@ def test_backfill_git_commit_returns_zero_when_nothing_to_update(storage):
 
 
 def test_backfill_git_commit_respects_window(storage):
-    import sqlite3
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     # Insert an event with an old timestamp (outside the window)
     old_event = ChangeEvent(entity_path="old.col", change_type="add")

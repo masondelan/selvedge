@@ -6,6 +6,81 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.1] — 2026-04-23
+
+A hardening release. No new feature surface — concurrency, observability,
+schema-versioning, and developer-quality changes that take the codebase
+from "works on my machine" to "safe to run in a long-lived agent pool."
+
+### Added
+
+- **Connection-with-retry on every storage write.** SQLite `database is locked`
+  errors that escape the C-level `busy_timeout` (5s) now retry with exponential
+  backoff (5 attempts, capped at 1s sleeps) before raising. Combined with WAL
+  mode, this makes Selvedge safe under concurrent writers — `tests/test_concurrency.py`
+  spawns 8 threads writing 25 events each and asserts all 200 land.
+- **`PRAGMA busy_timeout = 5000` set on every connection** so SQLite's own
+  retry handler covers the common contention case before Python ever sees it.
+- **`schema_migrations` table.** Replaces the previous swallow-OperationalError
+  ALTER pattern with an explicit, versioned migration runner. Every migration
+  is recorded with version, name, and applied-at timestamp; partial failures
+  roll back the DDL atomically. Pre-versioning databases (v0.2.1+ with
+  `changeset_id` already present) are bootstrapped without re-running DDL
+  that would error.
+- **Structured logging (`selvedge.logging_config`).** All library modules now
+  log under the `selvedge.*` namespace. Entry points (`selvedge` CLI,
+  `selvedge-server` MCP) call `configure_logging()` once at startup. Set
+  `SELVEDGE_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` to control verbosity.
+- **Public API exports in `selvedge/__init__.py`.** Library users can now
+  `from selvedge import SelvedgeStorage, ChangeEvent, parse_time_string`
+  instead of reaching into internal modules. The frozen surface is locked
+  in by `tests/test_public_api.py`.
+- **Shared `selvedge.validation`.** The reasoning-quality validator moved
+  out of `server.py` so the CLI's `selvedge log` command emits the same
+  warnings as agent-driven `log_change` calls.
+- **MCP protocol smoke tests (`tests/test_mcp_protocol.py`).** Boot the
+  real `selvedge-server` subprocess and round-trip every tool over the
+  actual JSON-RPC stdio transport. Catches contract drift the in-process
+  tool tests miss.
+- **CI gates: `ruff`, `mypy`, coverage ≥85%.** Added a separate `lint` job
+  and `pytest-cov` to the test job. Current coverage is 92%.
+- **`SelvedgeStorage._session()` context manager.** Yields a connection,
+  commits on success, rolls back on error, ALWAYS closes — fixes a
+  long-standing connection leak where `with self._connect()` managed the
+  transaction but never closed the underlying socket.
+
+### Fixed
+
+- **Reasoning-quality regex bug.** Patterns like `^fixed?$` were intended
+  to match both "fix" and "fixed" but actually matched "fixe"/"fixed" —
+  the `?` only made the trailing `d` optional. Rewritten as `^fix(?:ed)?$`
+  (and the same for `add`, `remove`, `update`, `change`, `see (...)`).
+  Previously-uncaught placeholder reasonings now produce warnings.
+- **Connection lifecycle.** Storage methods previously used
+  `with self._connect() as conn:` which calls `Connection.__exit__()` for
+  commit/rollback but never closes the connection — Python's GC eventually
+  reclaimed it. All read/write methods now use `_session()` which closes
+  explicitly. Affects long-running agent sessions where leaked connections
+  could accumulate.
+
+### Changed
+
+- **`record_tool_call()` exception handling.** Still swallows so telemetry
+  failures never crash the parent tool, but now routes through
+  `logger.exception("…")` so the failure is visible at `SELVEDGE_LOG_LEVEL=DEBUG`.
+
+### Internal
+
+- New modules: `selvedge.migrations`, `selvedge.logging_config`,
+  `selvedge.validation`. Imports are flat (no circular deps).
+- New tests: `test_concurrency.py` (9), `test_migrations.py` (8),
+  `test_logging_config.py` (11), `test_validation.py` (32),
+  `test_public_api.py` (7), `test_mcp_protocol.py` (8). Total suite is
+  now 244 tests.
+- `pyproject.toml` configuration for ruff, mypy, and coverage.
+
+---
+
 ## [0.3.0] — 2026-04-23
 
 A correctness and data-quality release. No new feature surface — every

@@ -10,14 +10,14 @@ Exposes 6 tools that AI coding agents call to track and query codebase changes:
   - search       : full-text search across all events
 """
 
-import re
-
 from mcp.server.fastmcp import FastMCP
 
 from .config import get_db_path
+from .logging_config import configure_logging
 from .models import ChangeEvent
 from .storage import SelvedgeStorage
 from .timeutil import parse_time_string
+from .validation import check_reasoning_quality
 
 mcp = FastMCP(
     "selvedge",
@@ -38,60 +38,6 @@ def get_storage() -> SelvedgeStorage:
     if _storage is None:
         _storage = SelvedgeStorage(get_db_path())
     return _storage
-
-
-# Patterns that indicate an agent logged a placeholder instead of real reasoning.
-# These are checked case-insensitively against the stripped reasoning string.
-_GENERIC_REASONING_PATTERNS = [
-    r"^user request$",
-    r"^as requested$",
-    r"^per request$",
-    r"^done$",
-    r"^updated?$",
-    r"^changed?$",
-    r"^fixed?$",
-    r"^added?$",
-    r"^removed?$",
-    r"^n/?a$",
-    r"^none$",
-    r"^todo$",
-    r"^see (diff|code|pr)$",
-]
-
-_REASONING_MIN_LENGTH = 20
-
-
-def _check_reasoning_quality(reasoning: str) -> list[str]:
-    """
-    Return a list of human-readable warning strings if the reasoning field
-    looks low-quality. Empty list means the reasoning looks fine.
-    """
-    warnings: list[str] = []
-    stripped = reasoning.strip()
-
-    if not stripped:
-        warnings.append(
-            "reasoning is empty — log WHY this change was made, not just what. "
-            "Include the user's request or the problem being solved."
-        )
-        return warnings  # No point checking length/patterns if empty
-
-    if len(stripped) < _REASONING_MIN_LENGTH:
-        warnings.append(
-            f"reasoning is very short ({len(stripped)} chars). "
-            "Aim for at least a sentence describing the intent behind this change."
-        )
-
-    for pattern in _GENERIC_REASONING_PATTERNS:
-        if re.fullmatch(pattern, stripped, re.IGNORECASE):
-            warnings.append(
-                f"reasoning looks generic ({stripped!r}). "
-                "Describe the actual intent: what problem this solves, what the user asked for, "
-                "or why this approach was chosen."
-            )
-            break
-
-    return warnings
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +128,7 @@ def log_change(
 
     stored = storage.log_event(event)
 
-    warnings = _check_reasoning_quality(reasoning)
+    warnings = check_reasoning_quality(reasoning)
     result: dict = {"id": stored.id, "timestamp": stored.timestamp, "status": "logged"}
     if warnings:
         result["warnings"] = warnings
@@ -337,6 +283,9 @@ def search(query: str, limit: int = 20) -> list[dict]:
 
 
 def main():
+    # Configure structured logging once per process. Verbosity is controlled
+    # by SELVEDGE_LOG_LEVEL (default WARNING).
+    configure_logging()
     mcp.run()
 
 

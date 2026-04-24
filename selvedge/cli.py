@@ -16,14 +16,16 @@ import sys
 from pathlib import Path
 
 import click
+from rich import box
 from rich.console import Console
 from rich.table import Table
-from rich import box
 
 from .config import get_db_path, init_project
+from .logging_config import configure_logging
 from .models import ChangeEvent, ChangeType
 from .storage import SelvedgeStorage
 from .timeutil import parse_time_string
+from .validation import check_reasoning_quality
 
 console = Console()
 err_console = Console(stderr=True)
@@ -154,7 +156,9 @@ def render_events(rows: list[dict], title: str = "") -> None:
 @click.version_option(package_name="selvedge")
 def cli():
     """Selvedge — change tracking for AI-era codebases."""
-    pass
+    # Configure structured logging once per CLI invocation. Verbosity is
+    # controlled by SELVEDGE_LOG_LEVEL (default WARNING).
+    configure_logging()
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +177,7 @@ def init(path):
     # Touch the DB to confirm it's writable
     SelvedgeStorage(db_path)
 
-    console.print(f"\n[bold green]✓ Selvedge initialized[/bold green]")
+    console.print("\n[bold green]✓ Selvedge initialized[/bold green]")
     console.print(f"  Directory:  [dim]{selvedge_dir}[/dim]")
     console.print(f"  Database:   [dim]{db_path}[/dim]")
     console.print()
@@ -332,7 +336,7 @@ def blame(entity_path, as_json):
     if row.get("diff"):
         console.print(f"  [dim]Diff[/dim]       {row['diff']}")
     if row.get("reasoning"):
-        console.print(f"\n  [dim]Reasoning:[/dim]")
+        console.print("\n  [dim]Reasoning:[/dim]")
         console.print(f"    {row['reasoning']}")
     console.print()
 
@@ -628,6 +632,11 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
     suffix = f"  [dim]changeset:{stored.changeset_id}[/dim]" if stored.changeset_id else ""
     console.print(f"[green]✓[/green] Logged [bold]{entity_path}[/bold] ({change_type})  [dim]{stored.id[:8]}[/dim]{suffix}")
 
+    # Surface reasoning-quality warnings so manual entries get the same
+    # nudges that agent-driven log_change calls do.
+    for warning in check_reasoning_quality(reasoning):
+        err_console.print(f"[yellow]warning:[/yellow] {warning}")
+
 
 # ---------------------------------------------------------------------------
 # install-hook
@@ -691,10 +700,10 @@ def install_hook(path, window):
         # Append to existing hook
         updated = existing.rstrip("\n") + "\n\n" + _HOOK_SCRIPT
         hook_path.write_text(updated)
-        console.print(f"[green]✓[/green] Appended Selvedge hook to existing post-commit")
+        console.print("[green]✓[/green] Appended Selvedge hook to existing post-commit")
     else:
         hook_path.write_text(_HOOK_SCRIPT)
-        console.print(f"[green]✓[/green] Installed post-commit hook")
+        console.print("[green]✓[/green] Installed post-commit hook")
 
     hook_path.chmod(0o755)
     console.print(f"  [dim]{hook_path}[/dim]")

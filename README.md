@@ -57,6 +57,58 @@ Six months later, your team is debugging a schema decision with no trail.
 
 ---
 
+## What's new in v0.3.1
+
+A hardening release — no new feature surface, but Selvedge is now safe to
+run in long-lived agent pools that hammer the database from multiple threads.
+**Drop-in upgrade for anyone on 0.3.0.**
+
+**Concurrent writes no longer blow up.** Every storage write is wrapped in
+a `database is locked` retry with exponential backoff, on top of WAL mode
+and a 5-second `PRAGMA busy_timeout`. The new `tests/test_concurrency.py`
+spawns 8 threads writing 25 events each and asserts all 200 land — that
+test reliably failed before this release.
+
+**Real schema versioning.** The previous `try: ALTER TABLE ... except: pass`
+pattern has been replaced with an explicit `schema_migrations` table that
+records every applied migration with version, name, and timestamp. Partial
+failures roll back atomically. Pre-versioning databases are bootstrapped
+without re-running DDL.
+
+**Structured logging.** Set `SELVEDGE_LOG_LEVEL=DEBUG` (or `INFO`,
+`WARNING`, `ERROR`) to see what's happening inside the storage and
+migration layers. All library modules log under the `selvedge.*`
+namespace — entry points configure a stderr handler at startup.
+
+**Public API surface.** Library users can now import the supported
+surface from the top-level package:
+
+```python
+from selvedge import (
+    SelvedgeStorage, ChangeEvent, ChangeType, EntityType,
+    get_db_path, parse_time_string, check_reasoning_quality,
+)
+```
+
+The frozen surface is locked in by `tests/test_public_api.py` — accidental
+removals fail CI.
+
+**MCP protocol smoke tests.** A new test suite boots the real
+`selvedge-server` subprocess and round-trips every tool over the actual
+JSON-RPC stdio transport. Catches contract drift the in-process tests miss.
+
+**CI gates.** `ruff`, `mypy`, and an 85% coverage floor are now enforced
+on every PR. Current coverage is 92%.
+
+**One sneaky regex fix.** The reasoning-quality validator's `^fixed?$`
+pattern was supposed to match "fix" and "fixed" but actually matched
+"fixe"/"fixed" — the `?` only made the trailing `d` optional. Same bug
+in the `add`, `remove`, `update`, `change`, and `see ...` patterns.
+Rewritten as `^fix(?:ed)?$` etc. Reasoning placeholders that slipped
+through before now get flagged.
+
+---
+
 ## What's new in v0.3.0
 
 A correctness and data-quality release — no new feature surface, but several

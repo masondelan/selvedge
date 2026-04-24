@@ -1,16 +1,18 @@
 """Configuration and database path resolution for Selvedge."""
 
-from pathlib import Path
+from __future__ import annotations
+
 import os
 import sys
-
+from pathlib import Path
 
 SELVEDGE_DIR_NAME = ".selvedge"
 SELVEDGE_DB_NAME = "selvedge.db"
 
 # Module-level guard so we only print the global-fallback warning once
 # per process — avoids spamming stderr when a long-running MCP server
-# resolves the path many times.
+# resolves the path many times. The warning is user-facing UX (suppressed
+# via SELVEDGE_QUIET) rather than a diagnostic log message.
 _warned_fallback = False
 
 
@@ -64,7 +66,7 @@ def get_selvedge_dir() -> Path:
     return get_db_path().parent
 
 
-def init_project(path: Path = None) -> Path:
+def init_project(path: Path | None = None) -> Path:
     """
     Create a .selvedge directory at the given path (or CWD).
     Returns the path to the initialized directory.

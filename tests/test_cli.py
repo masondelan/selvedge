@@ -1,11 +1,12 @@
 """Tests for the Selvedge CLI."""
 
+
 import pytest
 from click.testing import CliRunner
-from pathlib import Path
+
 from selvedge.cli import cli
-from selvedge.storage import SelvedgeStorage
 from selvedge.models import ChangeEvent
+from selvedge.storage import SelvedgeStorage
 
 
 @pytest.fixture
@@ -207,6 +208,7 @@ def test_stats_shows_total_and_ratio(runner):
 
 def test_stats_json_output(runner):
     import json
+
     from selvedge.config import get_db_path
     from selvedge.storage import SelvedgeStorage
     storage = SelvedgeStorage(get_db_path())
@@ -224,12 +226,14 @@ def test_stats_json_output(runner):
 
 def test_stats_since_flag(runner):
     import json
+
     from selvedge.config import get_db_path
     from selvedge.storage import SelvedgeStorage
     storage = SelvedgeStorage(get_db_path())
 
     # Seed one old call (simulate by inserting directly with old timestamp)
-    import sqlite3, uuid
+    import sqlite3
+    import uuid
     db_path = get_db_path()
     conn = sqlite3.connect(str(db_path))
     conn.execute(

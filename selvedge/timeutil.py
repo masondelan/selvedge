@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-
 # Relative time pattern. The 'mo'/'mon' alternatives must precede 'm' so the
 # regex matches them first — '5mo' is months, '5m' is minutes.
 _RELATIVE_RE = re.compile(r"(\d+)(mo|mon|h|d|m|y)$", re.IGNORECASE)

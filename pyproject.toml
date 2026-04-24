@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selvedge"
-version = "0.3.0"
+version = "0.3.1"
 description = "Change tracking for AI-era codebases"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,9 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.6.0",
+    "mypy>=1.10.0",
     "hatchling",
 ]
 
@@ -67,3 +70,61 @@ exclude = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["selvedge"]
+# Test files are excluded from coverage so the gate measures product code only.
+omit = ["selvedge/_version.py"]
+
+[tool.coverage.report]
+# CI gate — keep this in lockstep with the --cov-fail-under flag in test.yml.
+fail_under = 85
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["build", "dist", ".selvedge"]
+
+[tool.ruff.lint]
+# Conservative starter set — extend later, but everything here must stay green.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort (import order)
+    "B",   # flake8-bugbear (likely-buggy patterns)
+    "UP",  # pyupgrade (modern syntax)
+]
+ignore = [
+    "E501",  # line length — handled by formatter; existing code has long docstrings
+    "B008",  # function calls in argument defaults — Click idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # assert False is fine in tests
+
+[tool.mypy]
+python_version = "3.10"
+files = ["selvedge"]
+# Pragmatic strict mode — full --strict is too noisy on a codebase that
+# uses dict-of-dict storage shapes. Enable the high-value flags explicitly.
+strict_equality = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+
+[[tool.mypy.overrides]]
+module = "mcp.*"
+ignore_missing_imports = true

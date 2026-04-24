@@ -22,11 +22,10 @@ Usage::
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from .models import ChangeEvent
-
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -86,7 +85,7 @@ def _collect_files(target: Path, fmt: str) -> list[Path]:
     return results
 
 
-def _pick_parser(f: Path, fmt: str) -> Callable[[Path, str], list[ChangeEvent]]:
+def _pick_parser(f: Path, fmt: str) -> Callable[..., list[ChangeEvent]]:
     """Choose the right parser for a file."""
     if fmt == "alembic":
         return parse_alembic_file

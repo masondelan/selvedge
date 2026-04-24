@@ -1,13 +1,38 @@
 """SQLite storage layer for Selvedge."""
 
+import functools
+import logging
 import sqlite3
+import time
 import uuid
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import TypeVar
 
+from .migrations import apply_migrations
 from .models import ChangeEvent
 from .timeutil import normalize_timestamp, utc_now_iso
+
+logger = logging.getLogger(__name__)
+
+# How long SQLite's internal busy handler will wait for a lock before giving up,
+# in milliseconds. Set via PRAGMA on every connection. WAL mode handles most
+# concurrent reads + a single writer cleanly; this timeout covers brief
+# contention windows during write-write conflicts.
+_BUSY_TIMEOUT_MS = 5_000
+
+# Application-level retry on top of the C-level busy_timeout. Handles the
+# rare cases where the busy handler can't engage (e.g. snapshot-isolation
+# conflicts in WAL mode that surface as `database is locked` even after
+# the busy_timeout expires).
+_RETRY_MAX_ATTEMPTS = 5
+_RETRY_INITIAL_BACKOFF = 0.05  # seconds
+_RETRY_BACKOFF_MULTIPLIER = 2.0
+_RETRY_BACKOFF_MAX = 1.0  # cap individual sleeps
+
+T = TypeVar("T")
 
 
 CREATE_TABLE_SQL = """
@@ -48,16 +73,9 @@ CREATE_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_tc_timestamp  ON tool_calls(timestamp);",
 ]
 
-# Columns added after initial release — applied via _migrate_db() for existing DBs.
-# Each entry is (table, column, col_def, post_index_sql | None).
-MIGRATION_COLUMNS: list[tuple[str, str, str, str | None]] = [
-    (
-        "events",
-        "changeset_id",
-        "TEXT NOT NULL DEFAULT ''",
-        "CREATE INDEX IF NOT EXISTS idx_changeset_id ON events(changeset_id);",
-    ),
-]
+# Schema migrations are now declared in selvedge.migrations as an explicit,
+# versioned list with bootstrap detection for pre-versioning databases. Each
+# migration runs at most once per database, recorded in ``schema_migrations``.
 
 
 # All LIKE patterns use this escape character so that user-supplied input
@@ -77,6 +95,76 @@ def _escape_like(s: str) -> str:
     )
 
 
+def _is_locked_error(exc: BaseException) -> bool:
+    """Return True if ``exc`` represents a transient SQLite lock contention."""
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
+
+
+def _retry_on_locked(fn: Callable[..., T]) -> Callable[..., T]:
+    """
+    Decorator: retry on SQLite ``database is locked`` / ``busy`` errors
+    with exponential backoff. Other exceptions propagate immediately.
+
+    The PRAGMA ``busy_timeout`` set on each connection handles the common
+    case at the C level; this decorator is defense in depth for snapshot
+    conflicts in WAL mode that escape the busy handler.
+
+    Safe under retry: SQLite returns ``locked``/``busy`` *before* the
+    write is applied, so re-running the wrapped method does not produce
+    duplicate inserts.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: object, **kwargs: object) -> T:
+        backoff = _RETRY_INITIAL_BACKOFF
+        for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+            try:
+                return fn(*args, **kwargs)
+            except sqlite3.OperationalError as exc:
+                if not _is_locked_error(exc):
+                    raise
+                if attempt == _RETRY_MAX_ATTEMPTS:
+                    logger.error(
+                        "selvedge.storage: database still locked after %d attempts; giving up",
+                        attempt,
+                    )
+                    raise
+                logger.warning(
+                    "selvedge.storage: database busy on attempt %d/%d, retrying in %.2fs",
+                    attempt,
+                    _RETRY_MAX_ATTEMPTS,
+                    backoff,
+                )
+                time.sleep(backoff)
+                backoff = min(backoff * _RETRY_BACKOFF_MULTIPLIER, _RETRY_BACKOFF_MAX)
+        # Unreachable — the loop either returns or raises on the final attempt
+        raise RuntimeError("retry loop exited without returning")
+
+    return wrapper
+
+
+def _open_connection(db_path: Path) -> sqlite3.Connection:
+    """
+    Open a SQLite connection tuned for Selvedge.
+
+    Caller is responsible for closing — prefer :meth:`SelvedgeStorage._session`
+    which handles commit/rollback/close as a context manager.
+    """
+    conn = sqlite3.connect(str(db_path), timeout=_BUSY_TIMEOUT_MS / 1000)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+    except sqlite3.OperationalError:
+        # WAL mode unsupported on some filesystems (e.g. network mounts).
+        # Fall back to default DELETE journal mode — still fully functional.
+        logger.debug("selvedge.storage: WAL mode unavailable; using default journal mode")
+    conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS};")
+    return conn
+
+
 class SelvedgeStorage:
     """Thread-safe SQLite-backed event store."""
 
@@ -90,35 +178,53 @@ class SelvedgeStorage:
     # ------------------------------------------------------------------
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
+        """
+        Return a raw connection. Prefer :meth:`_session` which manages the
+        transaction and connection lifecycle correctly.
+
+        Retained for backward compatibility — direct use leaks connections
+        unless the caller explicitly closes them.
+        """
+        return _open_connection(self.db_path)
+
+    @contextmanager
+    def _session(self) -> Iterator[sqlite3.Connection]:
+        """
+        Context manager that yields a connection and guarantees
+        ``commit-on-success / rollback-on-error / always-close``.
+
+        Use for every read or write — fixes the connection-leak that
+        ``with self._connect() as conn`` had (sqlite3.Connection's own
+        context manager handles the transaction but does NOT close the
+        connection on exit).
+        """
+        conn = _open_connection(self.db_path)
         try:
-            conn.execute("PRAGMA journal_mode=WAL;")
-        except sqlite3.OperationalError:
-            # WAL mode unsupported on some filesystems (e.g. network mounts)
-            # Fall back to default DELETE journal mode — still fully functional
-            pass
-        return conn
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        """
+        Create the base tables and run any pending schema migrations.
+
+        Base tables are idempotent (``CREATE TABLE IF NOT EXISTS``); the
+        migration runner uses a separate ``schema_migrations`` ledger so
+        every additive change after v0.1.0 runs exactly once per DB.
+        """
+        with self._session() as conn:
             conn.execute(CREATE_TABLE_SQL)
             conn.execute(CREATE_TOOL_CALLS_SQL)
             for idx_sql in CREATE_INDEXES_SQL:
                 conn.execute(idx_sql)
-        self._migrate_db()
-
-    def _migrate_db(self) -> None:
-        """Apply additive schema migrations for columns added after initial release."""
-        with self._connect() as conn:
-            for table, column, col_def, post_index_sql in MIGRATION_COLUMNS:
-                try:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
-                except sqlite3.OperationalError:
-                    # Column already exists — expected on fresh DBs or re-runs
-                    pass
-                if post_index_sql:
-                    conn.execute(post_index_sql)
+        # Migrations open their own connection and manage transactions
+        # per-migration so a partial failure leaves the DB in a known state.
+        with self._session() as conn:
+            apply_migrations(conn)
 
     # ------------------------------------------------------------------
     # Write — change events
@@ -143,10 +249,11 @@ class SelvedgeStorage:
             event.metadata,
         )
 
+    @_retry_on_locked
     def log_event(self, event: ChangeEvent) -> ChangeEvent:
         """Persist a ChangeEvent and return it (with id/timestamp set)."""
         self._normalize_for_storage(event)
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 """
                 INSERT INTO events
@@ -159,6 +266,7 @@ class SelvedgeStorage:
             )
         return event
 
+    @_retry_on_locked
     def log_event_batch(self, events: Iterable[ChangeEvent]) -> list[ChangeEvent]:
         """
         Persist multiple ChangeEvents in a single transaction.
@@ -172,7 +280,7 @@ class SelvedgeStorage:
         if not events:
             return events
         rows = [self._event_row(self._normalize_for_storage(e)) for e in events]
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.executemany(
                 """
                 INSERT INTO events
@@ -189,6 +297,7 @@ class SelvedgeStorage:
     # Write — tool call telemetry (local only, never networked)
     # ------------------------------------------------------------------
 
+    @_retry_on_locked
     def backfill_git_commit(self, commit_hash: str, window_minutes: int = 60) -> int:
         """
         Backfill ``git_commit`` on recent events that don't have one yet.
@@ -208,7 +317,7 @@ class SelvedgeStorage:
         cutoff = normalize_timestamp(
             (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
         )
-        with self._connect() as conn:
+        with self._session() as conn:
             cursor = conn.execute(
                 "UPDATE events SET git_commit = ? WHERE git_commit = '' AND timestamp >= ?",
                 (commit_hash, cutoff),
@@ -229,9 +338,10 @@ class SelvedgeStorage:
             clauses.append("timestamp >= ?")
             params.append(since)
         sql = f"SELECT COUNT(*) FROM events WHERE {' AND '.join(clauses)}"
-        with self._connect() as conn:
+        with self._session() as conn:
             return conn.execute(sql, params).fetchone()[0]
 
+    @_retry_on_locked
     def record_tool_call(
         self,
         tool_name: str,
@@ -246,7 +356,7 @@ class SelvedgeStorage:
         Use ``get_tool_stats()`` or ``selvedge stats`` to view coverage.
         """
         try:
-            with self._connect() as conn:
+            with self._session() as conn:
                 conn.execute(
                     """
                     INSERT INTO tool_calls
@@ -263,8 +373,9 @@ class SelvedgeStorage:
                     ),
                 )
         except Exception:
-            # Telemetry must never crash the tool that called it
-            pass
+            # Telemetry must never crash the tool that called it. Log so the
+            # failure is visible if SELVEDGE_LOG_LEVEL=DEBUG, but swallow.
+            logger.exception("selvedge.storage: failed to record tool call %r", tool_name)
 
     # ------------------------------------------------------------------
     # Read — change events
@@ -278,7 +389,7 @@ class SelvedgeStorage:
         e.g. "users" matches "users", "users.email", "users.created_at".
         """
         prefix_pattern = f"{_escape_like(entity_path)}.%"
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM events
@@ -290,9 +401,9 @@ class SelvedgeStorage:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_blame(self, entity_path: str) -> Optional[dict]:
+    def get_blame(self, entity_path: str) -> dict | None:
         """Return the most recent event for an exact entity path."""
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 """
                 SELECT * FROM events
@@ -332,7 +443,7 @@ class SelvedgeStorage:
         params.append(limit)
         sql = f"SELECT * FROM events WHERE {' AND '.join(clauses)} ORDER BY timestamp DESC LIMIT ?"
 
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
@@ -343,7 +454,7 @@ class SelvedgeStorage:
         A changeset groups related changes made as part of a single feature
         or task (e.g. "add stripe billing" touching multiple entities).
         """
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 "SELECT * FROM events WHERE changeset_id = ? ORDER BY timestamp ASC",
                 (changeset_id,),
@@ -379,14 +490,14 @@ class SelvedgeStorage:
             GROUP BY changeset_id
             ORDER BY last_event DESC
         """
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def search(self, query: str, limit: int = 20) -> list[dict]:
         """Full-text search across entity_path, diff, and reasoning."""
         pattern = f"%{_escape_like(query)}%"
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM events
@@ -404,7 +515,7 @@ class SelvedgeStorage:
 
     def count(self) -> int:
         """Total number of change events logged."""
-        with self._connect() as conn:
+        with self._session() as conn:
             return conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
 
     # ------------------------------------------------------------------
@@ -425,7 +536,7 @@ class SelvedgeStorage:
         clause = "WHERE timestamp >= ?" if since else ""
         params = [since] if since else []
 
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 f"SELECT tool_name, COUNT(*) as cnt FROM tool_calls {clause} "
                 "GROUP BY tool_name ORDER BY cnt DESC",

@@ -10,14 +10,14 @@ These tests exist to lock in behavior that broke in subtle ways before:
   - mixed-timezone timestamps sorting wrong lexicographically
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from selvedge.importers import parse_sql_file
 from selvedge.models import ChangeEvent
 from selvedge.storage import SelvedgeStorage
 from selvedge.timeutil import normalize_timestamp, parse_time_string
-
 
 # ---------------------------------------------------------------------------
 # search() and prefix matching must not treat '_' or '%' as wildcards
@@ -115,7 +115,7 @@ def test_parse_time_5mo_is_months():
 
 
 def test_parse_time_5mon_alias():
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime
     five_mo = parse_time_string("5mo")
     five_mon = parse_time_string("5mon")
     a = datetime.fromisoformat(five_mo.replace("Z", "+00:00"))
@@ -361,6 +361,7 @@ def test_cli_history_since_unparseable_exits_error(tmp_path, monkeypatch):
     """`selvedge history --since yesterday` exits non-zero with an error
     message, not silently returning empty results."""
     from click.testing import CliRunner
+
     from selvedge.cli import cli
 
     monkeypatch.setenv("SELVEDGE_DB", str(tmp_path / "test.db"))
@@ -380,6 +381,7 @@ def test_cli_history_since_unparseable_exits_error(tmp_path, monkeypatch):
 
 def test_cli_log_rejects_invalid_change_type(tmp_path, monkeypatch):
     from click.testing import CliRunner
+
     from selvedge.cli import cli
 
     monkeypatch.setenv("SELVEDGE_DB", str(tmp_path / "test.db"))

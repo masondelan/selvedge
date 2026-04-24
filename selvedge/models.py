@@ -1,8 +1,8 @@
 """Core data models for Selvedge."""
 
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-import uuid
 
 from .timeutil import normalize_timestamp, utc_now_iso
 

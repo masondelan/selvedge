@@ -1,9 +1,6 @@
 """Tests for selvedge.importers — SQL DDL and Alembic migration parsers."""
 
-import pytest
-from pathlib import Path
-from selvedge.importers import parse_sql_file, parse_alembic_file, import_path
-
+from selvedge.importers import import_path, parse_alembic_file, parse_sql_file
 
 # ---------------------------------------------------------------------------
 # SQL parser — CREATE / DROP TABLE

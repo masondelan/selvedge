@@ -1,9 +1,7 @@
 """Tests for the MCP server tools (exercised directly, not via MCP protocol)."""
 
-import os
+
 import pytest
-from pathlib import Path
-from unittest.mock import patch
 
 
 @pytest.fixture(autouse=True)
@@ -20,8 +18,7 @@ def isolate_db(tmp_path, monkeypatch):
 
 
 # Import server tools after the fixture patches the env
-from selvedge.server import log_change, diff, blame, history, search, changeset
-
+from selvedge.server import blame, changeset, diff, history, log_change, search  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # log_change

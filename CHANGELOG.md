@@ -6,6 +6,71 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.2] — 2026-04-25
+
+An observability-polish release. No new feature surface — the focus is
+making existing functionality discoverable and debuggable, plus locking
+in WAL/`busy_timeout` assumptions across SQLite versions in CI.
+**Drop-in upgrade for anyone on 0.3.1.**
+
+### Added
+
+- **`selvedge doctor` command.** Walks the ambient state agents typically
+  run into and reports each row PASS / WARN / FAIL / INFO:
+    * which DB path is being resolved (and which precedence step matched —
+      `SELVEDGE_DB`, walkup, or global fallback)
+    * whether `.selvedge/` exists where you think it does
+    * whether the schema is at the latest migration version
+    * whether the post-commit hook is installed
+    * whether the post-commit hook has been failing silently
+    * last `tool_calls` entry timestamp (proxy for "is the agent wired up?")
+    * whether `SELVEDGE_LOG_LEVEL` is set to a recognized value
+  Exits 1 if any FAIL row is present so doctor can be wired into CI.
+  Supports `--json` for machine-readable output.
+- **Post-commit hook failure surfacing.** The previous hook silently died
+  when `selvedge` wasn't on the shell PATH that git launched (a common
+  symptom under macOS GUI git clients with stripped PATHs). The new hook
+  appends a single line to `.selvedge/hook.log` on failure, and both
+  `selvedge status` and `selvedge doctor` surface the most recent failure.
+  Old hooks keep working — re-running `selvedge install-hook` is enough
+  to upgrade.
+- **`selvedge stats` upgrades:**
+    * **Per-agent breakdown.** Catches the case where one agent (e.g.
+      claude-code) is well-instrumented but another (e.g. cursor) is
+      only querying history and never logging changes. Each agent shows
+      total calls, log_change calls, and coverage ratio.
+    * **Missing-reasoning count.** Counts events whose stored reasoning
+      fails the quality validator (empty, too short, or generic
+      placeholder). A non-zero count means an agent saw a warning at
+      log time and shipped the event anyway.
+- **`agent` column on `tool_calls` (migration v2).** The MCP server now
+  passes the calling agent's name through to the telemetry table, so
+  the per-agent stats break down correctly. v0.3.1 databases are
+  migrated automatically; fresh DBs get the column from the create
+  schema and the migration is recorded via the bootstrap path.
+- **Public `selvedge.config.resolve_db_path()`.** Returns both the
+  resolved path AND the precedence step that produced it (`env`,
+  `walkup`, or `global`). Used by doctor; available for any tool that
+  needs to know not just *which* DB is in effect but *why*.
+- **Pinned-SQLite CI matrix.** A new `sqlite-matrix` job builds SQLite
+  3.37.2, 3.42.0, and 3.45.3 from source and runs the suite against
+  each via `LD_PRELOAD`. The implicit Python-bundled-SQLite matrix is
+  also expanded with Python 3.13, and each row prints the active
+  SQLite version so the matrix is visible in CI logs.
+
+### Internal
+
+- New tests: `test_doctor.py` (20), expanded `test_cli.py`,
+  `test_storage.py`, and `test_migrations.py` for the v2 migration and
+  the per-agent / missing-reasoning paths. Total suite is now 282 tests.
+- `selvedge.cli.last_hook_failure()` and `selvedge.cli.hook_log_path()`
+  expose the hook log to both status and doctor without duplication.
+- `selvedge.migrations.latest_version()` so doctor can compare a DB's
+  applied set against "what should be there" without knowing the
+  migration list itself.
+
+---
+
 ## [0.3.1] — 2026-04-23
 
 A hardening release. No new feature surface — concurrency, observability,

@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     tool_name   TEXT NOT NULL,
     entity_path TEXT NOT NULL DEFAULT '',
     success     INTEGER NOT NULL DEFAULT 1,
-    error_msg   TEXT NOT NULL DEFAULT ''
+    error_msg   TEXT NOT NULL DEFAULT '',
+    agent       TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -348,20 +349,28 @@ class SelvedgeStorage:
         entity_path: str = "",
         success: bool = True,
         error_msg: str = "",
+        agent: str = "",
     ) -> None:
         """
         Record a single MCP tool invocation for coverage analysis.
 
         This is local-only telemetry — nothing leaves the machine.
         Use ``get_tool_stats()`` or ``selvedge stats`` to view coverage.
+
+        ``agent`` enables the per-agent breakdown in ``selvedge stats`` —
+        catches the case where one agent (e.g. claude-code) is well
+        instrumented but another (e.g. cursor) isn't logging changes.
+        Older callers passing only the original five positional args
+        keep working: ``agent`` defaults to ''.
         """
         try:
             with self._session() as conn:
                 conn.execute(
                     """
                     INSERT INTO tool_calls
-                        (id, timestamp, tool_name, entity_path, success, error_msg)
-                    VALUES (?,?,?,?,?,?)
+                        (id, timestamp, tool_name, entity_path,
+                         success, error_msg, agent)
+                    VALUES (?,?,?,?,?,?,?)
                     """,
                     (
                         str(uuid.uuid4()),
@@ -370,12 +379,27 @@ class SelvedgeStorage:
                         entity_path,
                         int(success),
                         error_msg,
+                        agent,
                     ),
                 )
         except Exception:
             # Telemetry must never crash the tool that called it. Log so the
             # failure is visible if SELVEDGE_LOG_LEVEL=DEBUG, but swallow.
             logger.exception("selvedge.storage: failed to record tool call %r", tool_name)
+
+    def get_last_tool_call_timestamp(self) -> str | None:
+        """
+        Return the most recent ``tool_calls`` timestamp, or None if empty.
+
+        Used by ``selvedge doctor`` as a proxy for "is the agent actually
+        wired up to this DB" — a long gap (or no entries at all) usually
+        means the MCP server isn't connected to the right database.
+        """
+        with self._session() as conn:
+            row = conn.execute(
+                "SELECT timestamp FROM tool_calls ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+        return row[0] if row else None
 
     # ------------------------------------------------------------------
     # Read — change events
@@ -527,14 +551,24 @@ class SelvedgeStorage:
         Return tool call statistics for coverage analysis.
 
         Returns a dict with:
-          - by_tool:           call count per tool name
-          - total_calls:       total MCP tool invocations recorded
-          - log_change_calls:  how many of those were log_change
-          - log_change_ratio:  log_change / total (0.0–1.0)
-          - recent:            10 most recent tool call records
+          - by_tool:              call count per tool name
+          - by_agent:             {agent_name: {"total": int, "log_change": int,
+                                                "ratio": float}}, sorted by
+                                  total calls desc. Catches under-instrumented
+                                  agents — e.g. claude-code is logging changes
+                                  but cursor is only querying history.
+          - total_calls:          total MCP tool invocations recorded
+          - log_change_calls:     how many of those were log_change
+          - log_change_ratio:     log_change / total (0.0–1.0)
+          - missing_reasoning:    count of log_change events in the same window
+                                  whose reasoning fails the quality validator
+                                  (empty, too short, or generic placeholder).
+                                  An agent that ignores the warnings shows up
+                                  here.
+          - recent:               10 most recent tool call records
         """
         clause = "WHERE timestamp >= ?" if since else ""
-        params = [since] if since else []
+        params: list = [since] if since else []
 
         with self._session() as conn:
             rows = conn.execute(
@@ -545,19 +579,68 @@ class SelvedgeStorage:
             by_tool = {r["tool_name"]: r["cnt"] for r in rows}
 
             recent_rows = conn.execute(
-                f"SELECT timestamp, tool_name, entity_path, success, error_msg "
+                f"SELECT timestamp, tool_name, entity_path, success, error_msg, agent "
                 f"FROM tool_calls {clause} ORDER BY timestamp DESC LIMIT 10",
                 params,
             ).fetchall()
             recent = [dict(r) for r in recent_rows]
+
+            # Per-agent breakdown: total calls and log_change calls.
+            # Agents are reported under the literal string they passed —
+            # empty agent rolls up into "(unknown)" so the breakdown
+            # always sums to total_calls without surprises.
+            agent_rows = conn.execute(
+                f"SELECT agent, tool_name, COUNT(*) as cnt FROM tool_calls "
+                f"{clause} GROUP BY agent, tool_name",
+                params,
+            ).fetchall()
+
+            # Missing-reasoning count: scan log_change events in the same
+            # window through the validator, tally the ones that fail.
+            # Doing this at query time (rather than persisting a flag at
+            # insert time) means the count works retroactively for events
+            # logged before the v0.3.1 validator regex was fixed.
+            reasoning_clause = "WHERE timestamp >= ?" if since else ""
+            reasoning_rows = conn.execute(
+                f"SELECT reasoning FROM events {reasoning_clause}",
+                params,
+            ).fetchall()
+
+        # Aggregate per-agent.
+        from .validation import check_reasoning_quality
+
+        per_agent: dict[str, dict[str, float]] = {}
+        for r in agent_rows:
+            agent_name = r["agent"] or "(unknown)"
+            entry = per_agent.setdefault(
+                agent_name, {"total": 0, "log_change": 0, "ratio": 0.0}
+            )
+            entry["total"] = int(entry["total"]) + int(r["cnt"])
+            if r["tool_name"] == "log_change":
+                entry["log_change"] = int(entry["log_change"]) + int(r["cnt"])
+        for entry in per_agent.values():
+            t = int(entry["total"])
+            entry["ratio"] = (
+                round(int(entry["log_change"]) / t, 3) if t > 0 else 0.0
+            )
+        # Sort by total desc for stable, useful display order.
+        by_agent = dict(
+            sorted(per_agent.items(), key=lambda kv: int(kv[1]["total"]), reverse=True)
+        )
+
+        missing_reasoning = sum(
+            1 for r in reasoning_rows if check_reasoning_quality(r["reasoning"] or "")
+        )
 
         total = sum(by_tool.values())
         log_calls = by_tool.get("log_change", 0)
 
         return {
             "by_tool": by_tool,
+            "by_agent": by_agent,
             "total_calls": total,
             "log_change_calls": log_calls,
             "log_change_ratio": round(log_calls / total, 3) if total > 0 else 0.0,
+            "missing_reasoning": missing_reasoning,
             "recent": recent,
         }

@@ -140,7 +140,8 @@ selvedge history --entity users --since 30d
 selvedge history --project my-api
 selvedge search "billing"                  # full-text search
 selvedge log users.phone add --reasoning "2FA" --agent me  # manual entry
-selvedge stats                             # tool call coverage report
+selvedge stats                             # tool call coverage (per-tool, per-agent, missing-reasoning)
+selvedge doctor                            # PASS/WARN/FAIL health check (DB path, schema, hook, MCP wiring)
 selvedge import ./migrations/              # backfill from SQL/Alembic migration files
 selvedge import ./migrations/ --dry-run   # preview without writing
 selvedge export --since 30d --output history.json
@@ -290,39 +291,26 @@ Rules:
 - [x] MCP protocol smoke tests (`tests/test_mcp_protocol.py`) — boots real
       `selvedge-server` subprocess and round-trips every tool over stdio
 
-### Phase 2.8 — Observability polish (Next · v0.3.2)
-> Next planned release. Stays inside the robustness-first lane of v0.3.0/0.3.1
-> — no new feature surface, just makes existing functionality discoverable and
-> debuggable. ~2–3 days of work, no breaking changes.
-
-- [ ] **`selvedge doctor` command** — single health-check that walks the
-      ambient state agents run into and reports each one PASS/WARN/FAIL:
-  - Which DB path is being resolved (and which step of the precedence chain
-    hit: `SELVEDGE_DB` env var, walk-up `.selvedge/`, or global fallback)
-  - Whether `.selvedge/` exists where the user thinks it does
-  - Whether the schema is at the latest migration version
-  - Whether the post-commit hook is installed
-  - Last `tool_calls` entry timestamp (proxy for "is the agent actually
-    wired up")
-  - Whether `SELVEDGE_LOG_LEVEL` is set to a recognized value
-  - Replaces the "why isn't this working" debug loop where right now you
-    have to grep two files and read three docs.
-- [ ] **Hook failure surfacing** — the post-commit hook silently dies if
-      `selvedge` isn't on PATH for the shell git launches. Add a wrapper
-      that writes a single line to `.selvedge/hook.log` on failure, and
-      surface "post-commit hook last failed at X" in `selvedge status`
-      and `selvedge doctor`.
-- [ ] **`selvedge stats` upgrades**:
-  - `--since` filter so coverage can be measured for "the last week"
-    instead of all time
-  - Per-agent breakdown (catches the case where claude-code is
-    well-instrumented but Cursor isn't)
-  - "Missing reasoning" count (events where the validator warned but
-    the agent logged anyway)
-- [ ] **CI matrix for SQLite versions** — the bundled `sqlite3` module
-      varies across Python builds; WAL + `PRAGMA busy_timeout` behavior
-      is technically implementation-defined. Run the suite against at
-      least 3 SQLite versions to lock in current assumptions.
+### Phase 2.8 — Observability polish (DONE ✓ · v0.3.2)
+- [x] **`selvedge doctor` command** — single health-check that walks the
+      ambient state agents run into and reports each one PASS/WARN/FAIL/INFO:
+      DB path resolution (with precedence step), `.selvedge/` existence,
+      schema migration version, post-commit hook status, last hook failure,
+      last `tool_calls` timestamp, `SELVEDGE_LOG_LEVEL` validity. `--json`
+      for machine output, exits 1 on any FAIL.
+- [x] **Hook failure surfacing** — post-commit hook now writes to
+      `.selvedge/hook.log` on failure (shell PATH missing, backfill error),
+      and both `selvedge status` and `selvedge doctor` surface the most
+      recent failure line.
+- [x] **`selvedge stats` upgrades**: per-agent breakdown (catches
+      under-instrumented agents) and `missing_reasoning` count (events
+      whose validator-flagged reasoning was logged anyway). `--since`
+      filter already shipped in v0.3.0.
+- [x] **CI matrix for SQLite versions** — `sqlite-matrix` job builds
+      SQLite 3.37.2 / 3.42.0 / 3.45.3 from source and runs the suite
+      against each via LD_PRELOAD; verifies the swap took before running.
+      Python matrix expanded to 3.10–3.13 with bundled-SQLite version
+      printed per row.
 
 ### Phase 3 — Team features (v0.4.0)
 - [ ] PostgreSQL backend option (configurable via `SELVEDGE_BACKEND=postgresql://...`)

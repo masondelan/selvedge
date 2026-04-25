@@ -216,3 +216,91 @@ def test_failed_migration_does_not_record_version(tmp_path: Path) -> None:
         assert "this_will_succeed" not in tables
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# v0.3.2 — agent column on tool_calls (migration v2)
+# ---------------------------------------------------------------------------
+
+
+def _make_pre_v2_db(db_path: Path) -> None:
+    """Build a DB with the v0.3.1 schema (no `agent` column on tool_calls)."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE events (
+                id TEXT PRIMARY KEY, timestamp TEXT NOT NULL,
+                entity_type TEXT NOT NULL DEFAULT 'other',
+                entity_path TEXT NOT NULL, change_type TEXT NOT NULL,
+                diff TEXT NOT NULL DEFAULT '', reasoning TEXT NOT NULL DEFAULT '',
+                agent TEXT NOT NULL DEFAULT '', session_id TEXT NOT NULL DEFAULT '',
+                git_commit TEXT NOT NULL DEFAULT '', project TEXT NOT NULL DEFAULT '',
+                changeset_id TEXT NOT NULL DEFAULT '',
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE tool_calls (
+                id TEXT PRIMARY KEY, timestamp TEXT NOT NULL,
+                tool_name TEXT NOT NULL, entity_path TEXT NOT NULL DEFAULT '',
+                success INTEGER NOT NULL DEFAULT 1, error_msg TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        # Mark v1 as applied — this DB shipped after the changeset_id migration
+        conn.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, "
+            "name TEXT NOT NULL, applied_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) "
+            "VALUES (1, 'add_changeset_id_to_events', '2026-01-01T00:00:00Z')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_v2_adds_agent_column_to_tool_calls(tmp_path: Path) -> None:
+    """A v0.3.1 DB upgraded to v0.3.2 gets the agent column added."""
+    db_path = tmp_path / "pre_v2.db"
+    _make_pre_v2_db(db_path)
+
+    SelvedgeStorage(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cols = [
+            row[1] for row in conn.execute("PRAGMA table_info(tool_calls)").fetchall()
+        ]
+        assert "agent" in cols, f"agent column missing from tool_calls: {cols}"
+        applied = get_applied_versions(conn)
+        assert 2 in applied
+    finally:
+        conn.close()
+
+
+def test_v2_bootstrap_on_fresh_db(tmp_path: Path) -> None:
+    """Fresh DBs already have the agent column from CREATE_TOOL_CALLS_SQL —
+    migration v2 is recorded via bootstrap_check, not by re-running ALTER."""
+    db_path = tmp_path / "fresh.db"
+    SelvedgeStorage(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        applied = get_applied_versions(conn)
+        assert 2 in applied
+        cols = [
+            row[1] for row in conn.execute("PRAGMA table_info(tool_calls)").fetchall()
+        ]
+        assert "agent" in cols
+    finally:
+        conn.close()
+
+
+def test_latest_version_includes_v2() -> None:
+    from selvedge.migrations import latest_version
+    assert latest_version() >= 2

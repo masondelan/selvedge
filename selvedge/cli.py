@@ -12,6 +12,8 @@ Commands:
 """
 
 import json
+import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -20,8 +22,9 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .config import get_db_path, init_project
-from .logging_config import configure_logging
+from .config import get_db_path, init_project, resolve_db_path
+from .logging_config import LOG_LEVEL_ENV, configure_logging
+from .migrations import get_applied_versions, latest_version
 from .models import ChangeEvent, ChangeType
 from .storage import SelvedgeStorage
 from .timeutil import parse_time_string
@@ -29,6 +32,33 @@ from .validation import check_reasoning_quality
 
 console = Console()
 err_console = Console(stderr=True)
+
+
+HOOK_LOG_NAME = "hook.log"
+
+
+def hook_log_path() -> Path:
+    """Path to the post-commit hook's failure log inside ``.selvedge/``."""
+    return get_db_path().parent / HOOK_LOG_NAME
+
+
+def last_hook_failure() -> str | None:
+    """
+    Return the last line of the post-commit hook failure log, or None.
+
+    Each failure writes one line in the form ``<utc-iso>\\t<message>``.
+    Read the tail rather than the whole file so a chatty hook history
+    doesn't blow up `selvedge doctor` or `selvedge status`.
+    """
+    p = hook_log_path()
+    if not p.exists():
+        return None
+    try:
+        # Hook log is line-oriented and small in practice — readlines is fine.
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    return lines[-1].strip() if lines else None
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +241,7 @@ def status():
     total = storage.count()
     recent = storage.get_history(limit=5)
     missing_commit = storage.count_missing_git_commit()
+    hook_failure = last_hook_failure()
 
     db_path = get_db_path()
     console.print(f"\n[bold]Selvedge[/bold]  [dim]{db_path}[/dim]")
@@ -222,6 +253,14 @@ def status():
         console.print(
             f"  [yellow]{missing_commit}[/yellow] event(s) missing [bold]git_commit[/bold]  "
             "[dim]run `selvedge install-hook` to auto-stamp future commits[/dim]"
+        )
+    if hook_failure:
+        # The post-commit hook silently dies if `selvedge` isn't on the
+        # shell PATH that git launches. Surface the most recent failure
+        # line here so the user notices instead of wondering why git_commit
+        # values stopped landing.
+        console.print(
+            f"  [red]post-commit hook last failed:[/red] [dim]{hook_failure}[/dim]"
         )
     console.print()
 
@@ -239,6 +278,244 @@ def status():
             f"[green]{row['change_type']}[/green]  "
             f"{agent}"
         )
+    console.print()
+
+
+# ---------------------------------------------------------------------------
+# doctor (health check)
+# ---------------------------------------------------------------------------
+
+
+# Recognized log levels for the SELVEDGE_LOG_LEVEL env var. Used by the
+# doctor command to surface a typo'd value (which is silently coerced to
+# WARNING by configure_logging — easy to miss without doctor flagging it).
+_KNOWN_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+# Maximum age (in seconds) for the last tool_calls entry to count as
+# "recent" — a fresher entry suggests the MCP server is actually wired up
+# to this DB right now. Tuned for typical agent-pool cadence: anything
+# inside a week feels live, anything older suggests stale wiring.
+_RECENT_TOOL_CALL_SECONDS = 7 * 24 * 60 * 60
+
+
+def _check(label: str, status: str, detail: str = "") -> dict:
+    """Build a single doctor check row, used for both Rich and JSON output."""
+    return {"label": label, "status": status, "detail": detail}
+
+
+def _doctor_checks() -> list[dict]:
+    """
+    Run all doctor checks and return them in display order.
+
+    Each check is a dict with ``label``, ``status`` (PASS/WARN/FAIL/INFO),
+    and ``detail`` (free-form one-liner). Failures don't raise — a single
+    broken check shouldn't prevent the rest from running, since the whole
+    point of `doctor` is to give the user a complete picture in one shot.
+    """
+    from datetime import datetime, timezone
+
+    checks: list[dict] = []
+
+    # 1. DB path resolution chain
+    resolved = resolve_db_path()
+    source_label = {
+        "env": "SELVEDGE_DB env var",
+        "walkup": "walked up from CWD to project .selvedge/",
+        "global": "global fallback (~/.selvedge/)",
+    }[resolved.source]
+    db_status = "INFO" if resolved.source != "global" else "WARN"
+    db_detail = f"{resolved.path}  [via {source_label}]"
+    checks.append(_check("Database path", db_status, db_detail))
+
+    # 2. .selvedge/ existence
+    selvedge_dir = resolved.path.parent
+    if selvedge_dir.is_dir():
+        checks.append(_check(
+            ".selvedge/ directory", "PASS", str(selvedge_dir)
+        ))
+    else:
+        checks.append(_check(
+            ".selvedge/ directory", "FAIL",
+            "missing — run `selvedge init` in your project root"
+        ))
+
+    # 3. Schema migration version
+    db_exists = resolved.path.is_file()
+    if not db_exists:
+        checks.append(_check(
+            "Schema version", "WARN",
+            "DB file does not exist yet — first write will create it"
+        ))
+    else:
+        try:
+            with sqlite3.connect(resolved.path) as conn:
+                applied = get_applied_versions(conn)
+            target = latest_version()
+            missing = sorted(set(range(1, target + 1)) - applied)
+            if not missing:
+                checks.append(_check(
+                    "Schema version", "PASS",
+                    f"at v{target} (latest)"
+                ))
+            else:
+                checks.append(_check(
+                    "Schema version", "WARN",
+                    f"missing migration(s) {missing} — they will apply on next "
+                    f"connection through SelvedgeStorage"
+                ))
+        except sqlite3.Error as e:
+            checks.append(_check("Schema version", "FAIL", f"sqlite error: {e}"))
+
+    # 4. Post-commit hook installed?
+    hook_path = Path.cwd() / ".git" / "hooks" / "post-commit"
+    if not (Path.cwd() / ".git").exists():
+        checks.append(_check(
+            "Post-commit hook", "INFO",
+            "not in a git repo — skipping hook check"
+        ))
+    elif not hook_path.exists():
+        checks.append(_check(
+            "Post-commit hook", "WARN",
+            "not installed — run `selvedge install-hook` to auto-stamp git_commit"
+        ))
+    else:
+        contents = hook_path.read_text(errors="replace")
+        if _HOOK_MARKER in contents:
+            checks.append(_check(
+                "Post-commit hook", "PASS", str(hook_path)
+            ))
+        else:
+            checks.append(_check(
+                "Post-commit hook", "WARN",
+                f"hook exists at {hook_path} but does not contain Selvedge"
+            ))
+
+    # 5. Hook failure log — surface the most recent failure if any
+    last_fail = last_hook_failure()
+    if last_fail:
+        checks.append(_check(
+            "Last hook failure", "WARN", last_fail
+        ))
+    else:
+        checks.append(_check(
+            "Last hook failure", "PASS", "no failures recorded"
+        ))
+
+    # 6. Last tool_calls entry — proxy for "is the MCP server wired up"
+    if not db_exists:
+        checks.append(_check(
+            "MCP wiring", "WARN", "no DB yet — connect the MCP server and try again"
+        ))
+    else:
+        try:
+            storage = get_storage()
+            last_ts = storage.get_last_tool_call_timestamp()
+        except sqlite3.Error as e:
+            checks.append(_check("MCP wiring", "FAIL", f"sqlite error: {e}"))
+        else:
+            if last_ts is None:
+                checks.append(_check(
+                    "MCP wiring", "WARN",
+                    "no tool_calls recorded — MCP server may not be connected"
+                ))
+            else:
+                try:
+                    parsed = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+                    age = (datetime.now(timezone.utc) - parsed).total_seconds()
+                    if age <= _RECENT_TOOL_CALL_SECONDS:
+                        checks.append(_check(
+                            "MCP wiring", "PASS", f"last tool_call at {last_ts}"
+                        ))
+                    else:
+                        days = int(age // 86400)
+                        checks.append(_check(
+                            "MCP wiring", "WARN",
+                            f"last tool_call was {days}d ago ({last_ts}) — "
+                            f"agent may have been disconnected"
+                        ))
+                except ValueError:
+                    checks.append(_check(
+                        "MCP wiring", "WARN",
+                        f"last tool_call timestamp unparseable: {last_ts}"
+                    ))
+
+    # 7. SELVEDGE_LOG_LEVEL value
+    raw_level = os.environ.get(LOG_LEVEL_ENV)
+    if raw_level is None:
+        checks.append(_check(
+            f"{LOG_LEVEL_ENV}", "INFO", "unset (defaults to WARNING)"
+        ))
+    elif raw_level.upper().strip() in _KNOWN_LOG_LEVELS:
+        checks.append(_check(
+            f"{LOG_LEVEL_ENV}", "PASS", raw_level
+        ))
+    else:
+        checks.append(_check(
+            f"{LOG_LEVEL_ENV}", "WARN",
+            f"unrecognized value {raw_level!r} — silently treated as WARNING; "
+            f"valid: {', '.join(_KNOWN_LOG_LEVELS)}"
+        ))
+
+    return checks
+
+
+@cli.command()
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def doctor(as_json):
+    """Check Selvedge's ambient state and report PASS/WARN/FAIL per check.
+
+    \b
+    Walks the things agents typically run into:
+      • which DB path is being resolved (and which step of the precedence chain hit)
+      • whether .selvedge/ exists where it should
+      • whether the schema is at the latest migration version
+      • whether the post-commit hook is installed
+      • whether the post-commit hook has been failing silently
+      • last tool_calls entry timestamp (proxy for "is the agent wired up?")
+      • whether SELVEDGE_LOG_LEVEL is set to a recognized value
+
+    \b
+    Exit codes:
+      0 — all PASS/INFO/WARN
+      1 — any FAIL
+    """
+    checks = _doctor_checks()
+
+    if as_json:
+        click.echo(json.dumps({"checks": checks}, indent=2))
+        sys.exit(1 if any(c["status"] == "FAIL" for c in checks) else 0)
+
+    console.print("\n[bold]Selvedge doctor[/bold]\n")
+
+    style_for = {
+        "PASS": "[green]✓ PASS[/green]",
+        "WARN": "[yellow]! WARN[/yellow]",
+        "FAIL": "[red]✗ FAIL[/red]",
+        "INFO": "[cyan]i INFO[/cyan]",
+    }
+
+    table = Table(box=box.SIMPLE_HEAD, show_header=True, header_style="bold")
+    table.add_column("Check", style="bold")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Detail", style="dim", overflow="fold")
+
+    for c in checks:
+        table.add_row(
+            c["label"],
+            style_for.get(c["status"], c["status"]),
+            c["detail"],
+        )
+    console.print(table)
+
+    fail_count = sum(1 for c in checks if c["status"] == "FAIL")
+    warn_count = sum(1 for c in checks if c["status"] == "WARN")
+    if fail_count:
+        console.print(f"\n[red]{fail_count} check(s) failed.[/red]")
+        sys.exit(1)
+    if warn_count:
+        console.print(f"\n[yellow]{warn_count} warning(s).[/yellow]")
+    else:
+        console.print("\n[green]All checks passed.[/green]")
     console.print()
 
 
@@ -562,15 +839,57 @@ def stats(since, as_json):
 
     console.print(table)
 
+    # Per-agent breakdown — surfaces the case where one agent is
+    # well-instrumented but another isn't logging changes.
+    by_agent = data.get("by_agent") or {}
+    if by_agent:
+        agent_table = Table(
+            box=box.SIMPLE_HEAD, show_header=True, header_style="bold"
+        )
+        agent_table.add_column("Agent", style="magenta")
+        agent_table.add_column("Calls", justify="right")
+        agent_table.add_column("log_change", justify="right")
+        agent_table.add_column("Coverage", justify="right")
+        for agent_name, breakdown in by_agent.items():
+            agent_total = int(breakdown["total"])
+            agent_log = int(breakdown["log_change"])
+            agent_ratio = float(breakdown["ratio"])
+            color = (
+                "green" if agent_ratio >= 0.2
+                else "yellow" if agent_ratio >= 0.1
+                else "red"
+            )
+            agent_table.add_row(
+                agent_name,
+                str(agent_total),
+                str(agent_log),
+                f"[{color}]{agent_ratio:.0%}[/{color}]",
+            )
+        console.print(agent_table)
+
+    # Reasoning quality — count of stored events whose reasoning fails
+    # the validator. A non-zero value means the agent saw a warning at
+    # log time and shipped the event anyway.
+    missing = data.get("missing_reasoning", 0)
+    if missing:
+        console.print(
+            f"  [yellow]{missing}[/yellow] event(s) with low-quality reasoning  "
+            "[dim](empty, too short, or generic placeholder)[/dim]\n"
+        )
+
     # Recent calls
     if data.get("recent"):
         console.print("  [bold]Recent tool calls[/bold]")
         for call in data["recent"][:5]:
             entity = f"  [cyan]{call['entity_path']}[/cyan]" if call.get("entity_path") else ""
             status = "[green]✓[/green]" if call.get("success") else "[red]✗[/red]"
+            agent_str = (
+                f"  [magenta dim]{call['agent']}[/magenta dim]"
+                if call.get("agent") else ""
+            )
             console.print(
                 f"    {status}  [dim]{fmt_ts(call['timestamp'])}[/dim]  "
-                f"[magenta]{call['tool_name']}[/magenta]{entity}"
+                f"[magenta]{call['tool_name']}[/magenta]{entity}{agent_str}"
             )
     console.print()
 
@@ -647,9 +966,24 @@ _HOOK_SCRIPT = """\
 # Selvedge post-commit hook
 # Backfills git_commit on Selvedge events logged during this session.
 # Installed by: selvedge install-hook
-if command -v selvedge >/dev/null 2>&1; then
-  selvedge backfill-commit --hash "$(git rev-parse HEAD)" --quiet
+_selvedge_log_failure() {
+    _root="$(git rev-parse --show-toplevel 2>/dev/null)"
+    if [ -n "$_root" ] && [ -d "$_root/.selvedge" ]; then
+        printf '%sZ\\t%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%S)" "$1" \\
+            >> "$_root/.selvedge/hook.log"
+    fi
+}
+if ! command -v selvedge >/dev/null 2>&1; then
+    # Most common silent-fail mode: git launches a shell with a stripped
+    # PATH (especially under macOS GUI clients) and `selvedge` isn't on it.
+    # Without this log line, the symptom is just "git_commit values stopped
+    # landing" with no breadcrumb to follow.
+    _selvedge_log_failure "selvedge command not on PATH"
+    exit 0
 fi
+_selvedge_err=$(selvedge backfill-commit \\
+    --hash "$(git rev-parse HEAD)" --quiet 2>&1) || \\
+    _selvedge_log_failure "backfill-commit failed: $_selvedge_err"
 """
 
 _HOOK_MARKER = "# Selvedge post-commit hook"

@@ -76,7 +76,29 @@ MIGRATIONS: tuple[Migration, ...] = (
         # cases are detected by checking for the column directly.
         bootstrap_check=lambda conn: _column_exists(conn, "events", "changeset_id"),
     ),
+    Migration(
+        version=2,
+        name="add_agent_to_tool_calls",
+        statements=(
+            "ALTER TABLE tool_calls ADD COLUMN agent TEXT NOT NULL DEFAULT ''",
+        ),
+        # v0.3.2 fresh databases also get this column from CREATE_TOOL_CALLS_SQL.
+        # On those, the bootstrap path records the migration as applied without
+        # re-running the ALTER (which would error).
+        bootstrap_check=lambda conn: _column_exists(conn, "tool_calls", "agent"),
+    ),
 )
+
+
+def latest_version() -> int:
+    """
+    Return the highest migration version number declared in :data:`MIGRATIONS`.
+
+    Used by ``selvedge doctor`` to compare the DB's applied set against
+    "what should be there now" without the doctor command needing to know
+    the migration list itself.
+    """
+    return max((m.version for m in MIGRATIONS), default=0)
 
 
 def get_applied_versions(conn: sqlite3.Connection) -> set[int]:

@@ -2,7 +2,7 @@
   "namespace": "io.github.masondelan",
   "name": "selvedge",
   "description": "Change tracking for AI-era codebases. Captures why AI agents made each change — entity, diff, and reasoning — to a local SQLite database before the session ends. Answers questions like 'when was users.stripe_customer_id added and why?' and 'who added the payments table?'",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "repository": "https://github.com/masondelan/selvedge",
   "homepage": "https://github.com/masondelan/selvedge",
   "license": "MIT",
@@ -10,7 +10,7 @@
     {
       "registry_name": "pypi",
       "name": "selvedge",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "command": "selvedge-server",
       "runtime_arguments": []
     }

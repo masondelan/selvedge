@@ -279,6 +279,92 @@ def test_tool_calls_independent_of_change_events(storage):
 
 
 # ---------------------------------------------------------------------------
+# v0.3.2: per-agent breakdown, missing reasoning, last tool call
+# ---------------------------------------------------------------------------
+
+
+def test_record_tool_call_persists_agent(storage):
+    storage.record_tool_call("log_change", entity_path="x", agent="claude-code")
+    stats = storage.get_tool_stats()
+    assert "claude-code" in stats["by_agent"]
+    assert stats["by_agent"]["claude-code"]["total"] == 1
+    assert stats["by_agent"]["claude-code"]["log_change"] == 1
+
+
+def test_get_tool_stats_per_agent_ratio(storage):
+    storage.record_tool_call("log_change", agent="claude-code")
+    storage.record_tool_call("log_change", agent="claude-code")
+    storage.record_tool_call("blame", agent="claude-code")
+    storage.record_tool_call("history", agent="cursor")
+    storage.record_tool_call("history", agent="cursor")
+
+    stats = storage.get_tool_stats()
+    assert stats["by_agent"]["claude-code"]["ratio"] > 0.6  # 2/3
+    assert stats["by_agent"]["cursor"]["ratio"] == 0.0
+
+
+def test_get_tool_stats_unknown_agent_bucket(storage):
+    """Empty agent rolls up under '(unknown)'."""
+    storage.record_tool_call("blame")
+    stats = storage.get_tool_stats()
+    assert stats["by_agent"]["(unknown)"]["total"] == 1
+
+
+def test_get_tool_stats_per_agent_sorted_by_total(storage):
+    """The by_agent dict is sorted by total calls descending."""
+    storage.record_tool_call("log_change", agent="rare-agent")
+    for _ in range(3):
+        storage.record_tool_call("log_change", agent="busy-agent")
+
+    stats = storage.get_tool_stats()
+    keys = list(stats["by_agent"].keys())
+    assert keys[0] == "busy-agent"
+
+
+def test_get_tool_stats_missing_reasoning_counts_validator_failures(storage):
+    """missing_reasoning equals the count of stored events that fail the validator."""
+    storage.log_event(ChangeEvent(
+        entity_path="a", change_type="add",
+        reasoning="A long, real explanation of why we did this work — no placeholder.",
+    ))
+    storage.log_event(ChangeEvent(
+        entity_path="b", change_type="add",
+        reasoning="done",  # generic
+    ))
+    storage.log_event(ChangeEvent(
+        entity_path="c", change_type="add",
+        reasoning="",  # empty
+    ))
+    storage.log_event(ChangeEvent(
+        entity_path="d", change_type="add",
+        reasoning="too short",  # under 20 chars
+    ))
+
+    stats = storage.get_tool_stats()
+    assert stats["missing_reasoning"] == 3
+
+
+def test_get_last_tool_call_timestamp_returns_none_when_empty(storage):
+    assert storage.get_last_tool_call_timestamp() is None
+
+
+def test_get_last_tool_call_timestamp_returns_most_recent(storage):
+    storage.record_tool_call("log_change")
+    storage.record_tool_call("blame")
+    ts = storage.get_last_tool_call_timestamp()
+    assert ts is not None
+    assert ts.endswith("Z") or "+" in ts  # UTC ISO
+
+
+def test_record_tool_call_backward_compatible_without_agent(storage):
+    """Old callers passing positional args (no agent) still work."""
+    storage.record_tool_call("log_change", entity_path="x")
+    stats = storage.get_tool_stats()
+    assert stats["total_calls"] == 1
+    assert "(unknown)" in stats["by_agent"]
+
+
+# ---------------------------------------------------------------------------
 # backfill_git_commit
 # ---------------------------------------------------------------------------
 

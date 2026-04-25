@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v6
@@ -43,5 +43,64 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
+      - name: Echo bundled SQLite version
+        # Each Python build ships with its own bundled SQLite. Logging the
+        # version makes the implicit matrix visible in CI output — if a
+        # future row regresses, this is the breadcrumb for "which SQLite
+        # was actually under test."
+        run: python -c "import sqlite3; print('Python sqlite3 version:', sqlite3.sqlite_version)"
+
       - name: Run tests with coverage
         run: pytest --cov=selvedge --cov-report=term-missing --tb=short
+
+  # Run the suite against pinned SQLite versions to lock in WAL +
+  # busy_timeout assumptions. Uses system Python (dynamically linked
+  # against libsqlite3) plus LD_PRELOAD to swap the loaded library;
+  # the verify step fails loudly if the swap didn't take.
+  sqlite-matrix:
+    name: sqlite ${{ matrix.sqlite }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { sqlite: "3.37.2", year: "2022", numeric: "3370200" }
+          - { sqlite: "3.42.0", year: "2023", numeric: "3420000" }
+          - { sqlite: "3.45.3", year: "2024", numeric: "3450300" }
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system Python and build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yqq python3 python3-venv python3-pip build-essential curl
+
+      - name: Build SQLite ${{ matrix.sqlite }} from source
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/sqlite-build && cd /tmp/sqlite-build
+          curl -fsSL "https://www.sqlite.org/${{ matrix.year }}/sqlite-autoconf-${{ matrix.numeric }}.tar.gz" | tar xz
+          cd "sqlite-autoconf-${{ matrix.numeric }}"
+          ./configure --prefix="$HOME/sqlite" --enable-shared >/dev/null
+          make -j"$(nproc)" >/dev/null
+          make install >/dev/null
+
+      - name: Install dependencies in a venv
+        run: |
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --upgrade pip
+          /tmp/venv/bin/pip install -e ".[dev]"
+
+      - name: Verify LD_PRELOAD swapped SQLite
+        env:
+          LD_PRELOAD: /home/runner/sqlite/lib/libsqlite3.so
+        run: |
+          DETECTED=$(/tmp/venv/bin/python -c 'import sqlite3; print(sqlite3.sqlite_version)')
+          echo "Expected: ${{ matrix.sqlite }}"
+          echo "Detected: $DETECTED"
+          [ "$DETECTED" = "${{ matrix.sqlite }}" ]
+
+      - name: Run tests
+        env:
+          LD_PRELOAD: /home/runner/sqlite/lib/libsqlite3.so
+        run: /tmp/venv/bin/pytest --tb=short

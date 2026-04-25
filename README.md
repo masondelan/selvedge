@@ -90,6 +90,63 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.2
+
+An observability-polish release. No new feature surface — the focus is
+making existing functionality discoverable and debuggable, plus locking
+in WAL/`busy_timeout` assumptions across SQLite versions.
+**Drop-in upgrade for anyone on 0.3.1.**
+
+**`selvedge doctor`.** A single health-check that walks the ambient state
+agents typically run into and reports each row PASS / WARN / FAIL / INFO:
+which DB path is being resolved (and which precedence step matched —
+`SELVEDGE_DB`, walkup, or global fallback), whether `.selvedge/` exists,
+whether the schema is at the latest migration version, whether the
+post-commit hook is installed and not silently failing, last `tool_calls`
+timestamp (proxy for "is the agent wired up?"), and whether
+`SELVEDGE_LOG_LEVEL` is set to a recognized value. Exits 1 on any FAIL,
+so `doctor` can be wired into CI. `--json` for machine-readable output.
+
+```bash
+$ selvedge doctor
+Selvedge doctor
+
+  Check                  Status      Detail
+ ───────────────────────────────────────────────────────────────────
+  Database path          i INFO      ~/.selvedge/selvedge.db  [via SELVEDGE_DB env var]
+  .selvedge/ directory   ✓ PASS      ~/.selvedge
+  Schema version         ✓ PASS      at v2 (latest)
+  Post-commit hook       ✓ PASS      ~/code/myapp/.git/hooks/post-commit
+  Last hook failure      ✓ PASS      no failures recorded
+  MCP wiring             ✓ PASS      last tool_call at 2026-04-25T14:21:08Z
+  SELVEDGE_LOG_LEVEL     i INFO      unset (defaults to WARNING)
+
+All checks passed.
+```
+
+**Post-commit hook no longer fails silently.** The previous hook silently
+died when `selvedge` wasn't on the PATH that git launched (a common
+symptom under macOS GUI git clients with stripped PATHs). The new hook
+appends a single line to `.selvedge/hook.log` on failure, and both
+`selvedge status` and `selvedge doctor` surface the most recent failure.
+Old hooks keep working — re-running `selvedge install-hook` upgrades to
+the new wrapper.
+
+**`selvedge stats` upgrades.** The coverage report now breaks calls
+down per-agent so you can catch the case where claude-code is logging
+changes but cursor is only querying history. A separate
+`missing_reasoning` count surfaces stored events whose reasoning fails
+the quality validator — empty, too short, or a generic placeholder the
+agent shipped despite the warning.
+
+**Pinned-SQLite CI matrix.** A new CI job builds SQLite 3.37.2, 3.42.0,
+and 3.45.3 from source and runs the suite against each via `LD_PRELOAD`,
+locking in WAL + `busy_timeout` behavior across the SQLite versions
+selvedge users are most likely to be on. The Python matrix also gains
+3.13.
+
+---
+
 ## What's new in v0.3.1
 
 A hardening release — no new feature surface, but Selvedge is now safe to
@@ -139,72 +196,6 @@ pattern was supposed to match "fix" and "fixed" but actually matched
 in the `add`, `remove`, `update`, `change`, and `see ...` patterns.
 Rewritten as `^fix(?:ed)?$` etc. Reasoning placeholders that slipped
 through before now get flagged.
-
----
-
-## What's new in v0.3.0
-
-A correctness and data-quality release — no new feature surface, but several
-silent-wrong-answer bugs are now fixed. **Recommended upgrade for everyone
-on 0.2.x.**
-
-**Time parsing now follows every other CLI's convention.** `5m` means
-5 *minutes*, not 5 months. Use `5mo` (or `5mon`) for months. Unparseable
-inputs like `--since yesterday` now exit with a clear error instead of
-silently returning empty results from a string-vs-string compare.
-
-```bash
-selvedge history --since 15m    # last 15 minutes (was: last ~15 months)
-selvedge history --since 5mo    # last 5 months
-selvedge history --since 1y     # last year
-```
-
-**`search()` no longer treats `_` as a wildcard.** Searching for
-`stripe_customer_id` used to match `stripeXcustomerXid`, `stripeYcustomerYid`,
-and so on, because SQL `LIKE` treats underscore as "any single character."
-All `LIKE` queries now `ESCAPE '\'` and escape the input — so the literal
-underscore in your column name does what you expect.
-
-**`selvedge import` finally works for columns defined in `CREATE TABLE`.**
-Previously, importing `CREATE TABLE users (id INT, email TEXT)` produced
-exactly one event — for the table — and zero for its columns. Six months
-later, `selvedge blame users.email` returned "no history found." Now every
-column in a `CREATE TABLE` (and every `sa.Column(...)` in `op.create_table`)
-gets its own `column.add` event.
-
-**Timestamps normalized to UTC on write.** Mixed-timezone events
-(`2025-01-01T09:00:00-08:00` vs `2025-01-01T10:00:00+00:00`) now sort
-correctly by real time. Previously they sorted by ASCII order of the
-timezone suffix.
-
-**Two events on rename, not one.** Both SQL `ALTER TABLE old RENAME TO new`
-and Alembic `op.rename_table('old', 'new')` now emit a `rename` event for
-the old name *and* a `create` event for the new name — so `selvedge blame
-new_name` returns the rename context instead of "no history found."
-
-**Schema migration on rename for `git_commit` coverage.** The post-commit
-hook's default lookback widened from 10 to 60 minutes — long agent
-sessions no longer lose their git stamp. `selvedge status` now surfaces
-the count of events still missing a `git_commit` so unstamped events
-are visible at a glance.
-
-**Validation in `ChangeEvent`.** Empty `entity_path`, hallucinated
-`change_type` values like `"banana"`, and typos like `"modifyed"` are now
-rejected at write time instead of silently inserting orphan rows.
-
-**Faster bulk imports.** `selvedge import` wraps inserts in a single
-transaction (`storage.log_event_batch`) — orders of magnitude faster on
-large Alembic histories, and atomic.
-
-**Better project DB resolution.** `get_db_path` now walks up looking for
-the actual `selvedge.db` file rather than just the `.selvedge/` directory.
-A stray empty `.selvedge/` upstream no longer hijacks resolution. Falling
-back to the global `~/.selvedge/selvedge.db` prints a one-time stderr
-warning so unintentional global use is visible. (Set `SELVEDGE_QUIET=1`
-to suppress.)
-
-**Adversarial test suite.** 25 new tests covering the bug classes above,
-so these regressions stay fixed.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list and reasoning.
 
@@ -379,7 +370,8 @@ selvedge changeset [CHANGESET_ID]         Show events in a changeset
                   [--project NAME]
                   [--since SINCE]
 selvedge search QUERY [--limit N]         Full-text search
-selvedge stats [--since SINCE]            Tool call coverage report
+selvedge stats [--since SINCE]            Tool call coverage report (per-tool, per-agent)
+selvedge doctor [--json]                  Health check: DB path, schema, hook, MCP wiring
 selvedge install-hook [--path PATH]       Install git post-commit hook
                      [--window MIN]       (default 60 minutes)
 selvedge backfill-commit --hash HASH      Backfill git_commit on recent events

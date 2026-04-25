@@ -109,7 +109,7 @@ def log_change(
         On validation failure returns ``{"status": "error", "error": "..."}``.
     """
     storage = get_storage()
-    storage.record_tool_call("log_change", entity_path=entity_path)
+    storage.record_tool_call("log_change", entity_path=entity_path, agent=agent)
     try:
         event = ChangeEvent(
             entity_path=entity_path,

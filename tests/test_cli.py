@@ -255,6 +255,108 @@ def test_stats_since_flag(runner):
     assert "blame" in data["by_tool"]
 
 
+def test_stats_per_agent_breakdown(runner):
+    """v0.3.2: per-agent breakdown surfaces under-instrumented agents."""
+    import json
+
+    from selvedge.config import get_db_path
+    from selvedge.storage import SelvedgeStorage
+    storage = SelvedgeStorage(get_db_path())
+    # claude-code logs and queries; cursor only queries
+    storage.record_tool_call("log_change", entity_path="users.email", agent="claude-code")
+    storage.record_tool_call("log_change", entity_path="users.name", agent="claude-code")
+    storage.record_tool_call("blame", entity_path="users", agent="claude-code")
+    storage.record_tool_call("history", entity_path="", agent="cursor")
+    storage.record_tool_call("history", entity_path="", agent="cursor")
+
+    result = runner.invoke(cli, ["stats", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "by_agent" in data
+    # claude-code: 2/3 = 0.667
+    assert data["by_agent"]["claude-code"]["total"] == 3
+    assert data["by_agent"]["claude-code"]["log_change"] == 2
+    assert data["by_agent"]["claude-code"]["ratio"] > 0.6
+    # cursor: 0/2 = 0
+    assert data["by_agent"]["cursor"]["total"] == 2
+    assert data["by_agent"]["cursor"]["log_change"] == 0
+    assert data["by_agent"]["cursor"]["ratio"] == 0.0
+
+
+def test_stats_unknown_agent_rolls_up(runner):
+    """Calls with empty agent show under '(unknown)' so totals add up."""
+    import json
+
+    from selvedge.config import get_db_path
+    from selvedge.storage import SelvedgeStorage
+    storage = SelvedgeStorage(get_db_path())
+    storage.record_tool_call("log_change", entity_path="x")  # no agent
+    storage.record_tool_call("blame", entity_path="x", agent="claude-code")
+
+    result = runner.invoke(cli, ["stats", "--json"])
+    data = json.loads(result.output)
+    assert data["by_agent"]["(unknown)"]["total"] == 1
+    assert data["by_agent"]["claude-code"]["total"] == 1
+    summed = sum(int(v["total"]) for v in data["by_agent"].values())
+    assert summed == data["total_calls"]
+
+
+def test_stats_missing_reasoning_count(runner):
+    """v0.3.2: missing_reasoning counts events whose reasoning fails the validator."""
+    import json
+
+    from selvedge.config import get_db_path
+    from selvedge.storage import SelvedgeStorage
+    storage = SelvedgeStorage(get_db_path())
+    # Three events, two of which are flagged
+    storage.log_event(ChangeEvent(
+        entity_path="users.email", change_type="add",
+        reasoning="Need to add email column for password reset flow",
+    ))
+    storage.log_event(ChangeEvent(
+        entity_path="users.phone", change_type="add",
+        reasoning="done",  # generic placeholder → flagged
+    ))
+    storage.log_event(ChangeEvent(
+        entity_path="users.name", change_type="add",
+        reasoning="",  # empty → flagged
+    ))
+
+    result = runner.invoke(cli, ["stats", "--json"])
+    data = json.loads(result.output)
+    assert data["missing_reasoning"] == 2
+
+
+# ---------------------------------------------------------------------------
+# status — hook failure surfacing (v0.3.2)
+# ---------------------------------------------------------------------------
+
+
+def test_status_surfaces_hook_failure(runner, tmp_path, monkeypatch):
+    """A line in .selvedge/hook.log shows up under status."""
+    # Override the DB to a path inside a real .selvedge/ dir we control
+    sd = tmp_path / ".selvedge"
+    sd.mkdir()
+    monkeypatch.setenv("SELVEDGE_DB", str(sd / "selvedge.db"))
+    (sd / "hook.log").write_text(
+        "2026-04-25T05:30:00Z\tselvedge command not on PATH\n"
+    )
+
+    result = runner.invoke(cli, ["status"])
+    assert result.exit_code == 0
+    assert "post-commit hook last failed" in result.output
+    # Rich may insert line breaks inside the message — collapse whitespace
+    # before checking content.
+    flat = " ".join(result.output.split())
+    assert "not on PATH" in flat
+
+
+def test_status_no_hook_failure_when_log_clean(runner):
+    """No hook.log → status doesn't mention failures."""
+    result = runner.invoke(cli, ["status"])
+    assert "post-commit hook last failed" not in result.output
+
+
 # ---------------------------------------------------------------------------
 # install-hook
 # ---------------------------------------------------------------------------

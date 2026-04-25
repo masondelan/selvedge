@@ -312,6 +312,106 @@ Rules:
       Python matrix expanded to 3.10–3.13 with bundled-SQLite version
       printed per row.
 
+### Phase 2.9 — First-run that just works (Next · v0.3.3)
+> The biggest user-funnel cliff today is first-run: pip install, edit
+> `~/.claude/config.json`, restart agent, `selvedge init`, copy-paste a
+> system prompt, install the git hook — six steps and three of them are
+> documentation lookups. Goal: collapse this to one command and make the
+> agent integration discoverable instead of memorized.
+
+- [ ] **`selvedge setup` interactive wizard** — detects installed AI
+      tooling (Claude Code, Cursor, Copilot) by looking for their config
+      files, offers to install the MCP entry into each one in place,
+      runs `selvedge init` if not already done, prompts to install the
+      post-commit hook, and offers to drop the recommended agent prompt
+      block into `CLAUDE.md` / `.cursorrules`. `--non-interactive` for
+      scripted installs (CI bootstrap, devcontainer postCreate).
+- [ ] **`selvedge prompt` command** — prints the canonical agent
+      instructions paragraph; `--install <file>` writes the block to a
+      target file (idempotent, preserves the rest of the file). Lets
+      users keep the prompt in source control without copy-paste drift.
+- [ ] **`selvedge watch`** — live-tail of new events as they're logged.
+      Trust-but-verify for users who want to see what their agent is
+      capturing in real time, and a much better debugging surface than
+      "run `selvedge status` repeatedly." Should respect `--since`,
+      `--entity`, `--project`, and `--agent` filters.
+- [ ] **Better first-run errors** — replace "no tool calls recorded yet"
+      with a one-liner that points at `selvedge setup`. Detect the
+      common "MCP entry exists but agent not restarted" case from
+      `tool_calls` being empty for ≥5 minutes after install.
+- [ ] **Onboarding test coverage** — `tests/test_setup.py` covering the
+      detect/install paths for each agent type (uses tmp_path config
+      fixtures, no real config touched).
+
+### Phase 2.10 — Recovery and retention (v0.3.4)
+> v0.3.1 made the runtime safe; v0.3.2 made problems visible. This phase
+> handles what happens AFTER something has already gone wrong (corruption,
+> orphaned data, runaway growth). All of these have a "Selvedge took down
+> the agent's working DB" failure mode if we don't ship them — the bigger
+> the install base gets, the more these matter.
+
+- [ ] **`selvedge verify` command** — runs SQLite's
+      `PRAGMA integrity_check`, validates the `schema_migrations` set
+      against `MIGRATIONS`, and walks both tables for invariants
+      (entity_path non-empty, change_type in valid set, timestamp
+      parseable, no orphaned tool_calls). Exits non-zero on any failure
+      so it can run in CI.
+- [ ] **`selvedge repair` command** — wraps SQLite's `.recover` to dump
+      events from a corrupted DB into a salvage file, plus a
+      `--from-recover` mode that re-imports the dump into a fresh DB.
+      Default behavior is dry-run; `--apply` actually writes.
+- [ ] **Retention policy** — `selvedge prune` command and a config
+      setting (`retention_days` in `.selvedge/config.toml`). Prunes
+      `tool_calls` (low value over time) by default; events table only
+      with `--include-events` and a confirmation prompt. Doctor learns
+      to warn when DB size exceeds a configurable threshold (default
+      500 MB).
+- [ ] **Bounds on event size at log time** — configurable max
+      `diff_bytes` and `reasoning_bytes`. Over-the-limit values are
+      truncated with a marker (`…[truncated 12KB]`) and logged as a
+      validator warning. Prevents an agent dumping a huge generated SQL
+      file from blowing up the DB.
+- [ ] **Doctor expansion** — detect orphan rows (events with
+      `changeset_id` referencing nothing else), oversized tables, and
+      `schema_migrations` rows for versions that aren't in the current
+      `MIGRATIONS` tuple (indicates a downgrade).
+- [ ] **`.selvedge/config.toml`** — first-class project config file
+      read on every entry point. Houses retention, size bounds, default
+      project name. Backwards compatible: missing file = current defaults.
+
+### Phase 2.11 — Developer integrations (v0.3.5)
+> Selvedge today is a CLI you query when you remember to. This phase
+> moves it into the developer's existing surface area — PR review,
+> standups, IDE — so the captured intent gets used, not just stored.
+> Robustness without integration doesn't compound.
+
+- [ ] **`selvedge audit` command** — produces a PR-review-ready quality
+      report for a given branch or commit range:
+      `selvedge audit --branch feature/x` lists every entity touched in
+      the range, flags missing/short reasoning, surfaces unstamped
+      commits, and renders a table grouped by changeset. `--format
+      markdown` for posting as a PR comment.
+- [ ] **`selvedge ci-check` exit-code gate** — runs in CI on PR
+      branches; non-zero exit if reasoning quality, coverage ratio, or
+      changeset coverage falls below configurable thresholds. The
+      "selvedge says this PR is missing context" early warning.
+- [ ] **`summary` MCP tool** — new server tool so agents/IDEs can ask
+      "what's been happening in this codebase since X?" Returns a
+      grouped, human-prose-shaped digest (changesets touched, agents
+      involved, top entities by activity) instead of raw events. Useful
+      for standup-bot integrations and IDE side-panels.
+- [ ] **`selvedge digest` CLI command** — same shape as the MCP
+      `summary` tool but renders to terminal. Default `--since 24h`,
+      designed to be fed into Slack/email cron jobs.
+- [ ] **PR comment helper** — `selvedge pr-comment --pr 123` that
+      formats `audit` output for posting via `gh pr comment`. No GitHub
+      API calls in core (keeps the dep footprint small); just emits the
+      markdown.
+- [ ] **VS Code extension scaffolding (separate repo)** — design doc
+      lands in `docs/vscode-integration.md` this phase; actual
+      extension built outside this repo. Hover a column name to see
+      blame inline; `:SelvedgeBlame` command palette entry.
+
 ### Phase 3 — Team features (v0.4.0)
 - [ ] PostgreSQL backend option (configurable via `SELVEDGE_BACKEND=postgresql://...`)
   - Abstract `SelvedgeStorage` behind a protocol/interface so backends are swappable

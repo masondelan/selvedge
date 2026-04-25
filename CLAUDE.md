@@ -234,7 +234,7 @@ Rules:
 > A weekly Cowork task flags any mismatch automatically.
 
 ### Phase 1 — Core (DONE ✓ · v0.1.0)
-- [x] MCP server with 5 tools (log_change, diff, blame, history, search)
+- [x] MCP server with 5 tools (log_change, diff, blame, history, search) — `changeset` added in v0.2.1, current count is 6
 - [x] SQLite storage with WAL mode
 - [x] CLI (init, status, diff, blame, history, search, log, stats)
 - [x] Local tool call telemetry + `scripts/coverage_check.py`

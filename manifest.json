@@ -1,5 +1,5 @@
 {
-  "manifest_version": "0.4",
+  "manifest_version": "0.3",
   "name": "selvedge",
   "display_name": "Selvedge",
   "version": "0.3.2",
@@ -20,7 +20,7 @@
   "license": "MIT",
   "keywords": ["mcp", "ai", "changelog", "codebase", "tracking", "devtools", "git", "blame", "history"],
   "server": {
-    "type": "uv",
+    "type": "python",
     "entry_point": "selvedge/server.py",
     "mcp_config": {
       "command": "uv",

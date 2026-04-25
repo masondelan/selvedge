@@ -296,6 +296,11 @@ Rules:
   - `storage_sqlite.py` and `storage_pg.py` both implement `StorageBackend`
 - [ ] HTTP REST API layer (FastAPI) — exposes the same 6 operations over HTTP
 - [ ] Auth (API keys) for the HTTP layer
+- [ ] **Agent Trace interop** — `selvedge export --format agent-trace` and
+      `selvedge import --format agent-trace` (Cursor/Cognition open RFC, Jan 2026).
+      Design doc: [`docs/agent-trace-interop.md`](docs/agent-trace-interop.md).
+      Selvedge stays entity-centric internally; AT is purely a wire format
+      for cross-tool readers and compliance audits.
 
 ### Phase 4 — Platform (hosted business)
 - [ ] Web dashboard (React + the REST API)

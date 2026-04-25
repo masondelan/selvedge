@@ -4,13 +4,16 @@
 [![PyPI](https://img.shields.io/pypi/v/selvedge?cacheSeconds=3600)](https://pypi.org/project/selvedge/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Change tracking for AI-era codebases.**
+**Long-term memory for AI-coded codebases.**
+A `git blame` for AI agents — but for the *why*, not just which line which
+model touched. Captured live, by the agent, as the change happens.
 
 ---
 
 Six months ago, your AI agent added a column called `user_tier_v2`. You don't
-know why. Git blame points to a commit message that says "Update schema." The
-agent session that made the change is long gone.
+know why. `git blame` points to a commit from `claude-code` with a generated
+message that says "Update schema." The session that made the change is long
+gone — and so is the prompt that produced it.
 
 With Selvedge, you run this instead:
 
@@ -26,8 +29,9 @@ $ selvedge blame user_tier_v2
               so we can backfill discounts without touching billing history.
 ```
 
-That reasoning came from the original request — captured by the agent in the
-moment, before the session ended.
+That reasoning was **captured by the agent in the moment** — written into
+Selvedge from the same context that produced the change. Not inferred from
+the diff afterward by a second LLM. Not a hand-typed commit message.
 
 ---
 
@@ -43,17 +47,46 @@ moment, before the session ended.
 
 ---
 
+## Who Selvedge is for
+
+Selvedge has two audiences. Same tool, same `pip install`, same SQLite
+file under `.selvedge/`. Different scale of pain.
+
+**Teams running long-term, AI-coded codebases.**
+When the project is big enough that you (or someone else) will touch it
+again in six months, twelve months, three years — but most of it was written
+by an agent whose context evaporated the day each PR shipped. `git blame`
+tells you what changed. Selvedge tells you *why* — even after the agent
+session, the prompt template, the developer who asked for it, and the model
+version are all long gone. This is the original use case: production
+codebases, schema decisions, migrations, dependency changes that need an
+audit trail that survives turnover.
+
+**Solo developers using Claude Code on everyday projects.**
+Side projects, weekend builds, the small internal tool you keep poking at.
+You don't need enterprise governance — you just need to remember why you (or
+your agent) did the thing you did yesterday, last week, last sprint. Run
+`selvedge init` once. Add four lines to your `CLAUDE.md`. From then on,
+`selvedge blame` is muscle memory — a way to talk to your past self when
+your past self was an LLM.
+
+If you've ever come back to your own AI-built project and thought "what was
+this *for* again?", Selvedge is the missing piece.
+
+---
+
 ## The problem
 
 Human-written code leaks intent everywhere — commit messages, PR descriptions,
-inline comments. AI-written code doesn't. The agent knows exactly why it made
-each decision, but that context lives in the prompt and evaporates when the
-conversation ends.
+inline comments, the Slack thread that preceded it. AI-written code doesn't.
+The agent has perfect clarity about why it made each decision, but that
+context lives in the prompt and evaporates when the conversation ends.
 
 Six months later, your team is debugging a schema decision with no trail.
 `git blame` tells you *what* changed and *when*. It can't tell you *why*.
 
-**Selvedge captures the why.**
+**Selvedge captures the why — live, by the agent itself, as the change is
+made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
@@ -174,6 +207,49 @@ to suppress.)
 so these regressions stay fixed.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list and reasoning.
+
+---
+
+## How Selvedge compares
+
+There's a fast-growing "git blame for AI agents" category. Here's where
+Selvedge fits — and where it deliberately doesn't.
+
+|  | Reasoning source | Granularity | Mechanism | Grouping | Storage |
+|---|---|---|---|---|---|
+| **Selvedge** | **Captured live**, by the agent in the same context that produced the change | **Entity** — DB column, table, env var, dep, API route, function | **MCP server** — agent calls it as work happens | **Changesets** — named feature/task slugs across many entities | SQLite, zero deps |
+| AgentDiff | **Inferred post-hoc** by Claude Haiku from the diff at session end | Line | Git pre/post-commit hook | None | JSONL on disk |
+| Origin | Captured at commit time | Line | Git hook | None | Local |
+| Git AI | Attribution metadata | Line | Git hook + Agent Trace alliance | None | Git notes |
+| BlamePrompt | Prompt-only | Line | Git hook | None | Local |
+
+**Why "captured live" matters.** AgentDiff and Origin generate reasoning
+*after* the change is made, by feeding the diff back to a second LLM call.
+Selvedge's reasoning is the agent's own intent, written from the same
+context window that produced the change — no inference, no hallucinated
+explanations, and an empty `reasoning` field is itself a useful signal
+(the agent didn't have one).
+
+**Why "entity-level" matters.** Most tools attribute *lines*. Selvedge
+attributes *things you actually search for*: `users.email`,
+`env/STRIPE_SECRET_KEY`, `api/v1/checkout`, `deps/stripe`. The first
+question after `git blame` is usually *"what's the history of this column"*,
+not *"what's the history of lines 40–48 of users.py"*.
+
+**Why "changesets" matter.** A Stripe billing rollout touches the `users`
+table, two new env vars, three new API routes, one dependency, and four
+functions across the codebase. Tag every event with `changeset:add-stripe-billing`
+and you can pull the entire scope back later — even if the original PR was
+broken into eight smaller ones over a month.
+
+**Selvedge ↔ Agent Trace.** [Agent Trace](https://github.com/cursor/agent-trace)
+(Cursor + Cognition AI, RFC Jan 2026, backed by Cloudflare, Vercel, Google
+Jules, Amp, OpenCode, and git-ai) is an emerging *open standard* for AI
+code attribution traces. Selvedge isn't a competitor to it — it's a
+compatible producer. The design for `selvedge export --format agent-trace`
+is at [`docs/agent-trace-interop.md`](docs/agent-trace-interop.md). Agent
+Trace is the wire format. Selvedge is the live capture + query layer that
+emits it.
 
 ---
 

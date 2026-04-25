@@ -3,12 +3,39 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Selvedge — Change tracking for AI-era codebases</title>
-  <meta name="description" content="An MCP server that captures why your code changed — not just what. Ask selvedge blame and get the reasoning that evaporated when the AI session ended." />
-  <meta property="og:title" content="Selvedge — Change tracking for AI-era codebases" />
-  <meta property="og:description" content="AI agents write your code now. Selvedge captures the why before it disappears." />
+  <title>Selvedge — Long-term memory for AI-coded codebases · git blame for AI agents</title>
+  <meta name="description" content="Selvedge is an open-source MCP server that captures why your AI agent made every change, live, in context — so six months later you can run selvedge blame on any DB column, env var, or function and see the reasoning. Long-term codebase change tracking for Claude Code, Cursor, and any MCP-compatible agent." />
+  <meta name="keywords" content="git blame for AI, AI code provenance, AI codebase change tracking, MCP server, claude code change tracking, cursor change tracking, long-term codebase memory, AI agent reasoning capture, selvedge, agent trace, schema change history" />
+  <meta name="author" content="Mason Delan" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Selvedge — Long-term memory for AI-coded codebases" />
+  <meta property="og:description" content="A git blame for AI agents — but for the why, not just which line which model touched. Captured live, by the agent, as the change happens. Open source, MCP-native, SQLite local." />
   <meta property="og:url" content="https://masondelan.github.io/selvedge" />
+  <meta property="og:site_name" content="Selvedge" />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Selvedge — Long-term memory for AI-coded codebases" />
+  <meta name="twitter:description" content="A git blame for AI agents — for the why, not just which line which model touched. Captured live, in context." />
+  <link rel="canonical" href="https://masondelan.github.io/selvedge" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Selvedge",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS, Linux, Windows",
+    "description": "Open-source MCP server that captures why an AI agent made every code change, live in context, for long-term codebase change tracking.",
+    "url": "https://masondelan.github.io/selvedge",
+    "downloadUrl": "https://pypi.org/project/selvedge",
+    "softwareVersion": "0.3.1",
+    "author": {
+      "@type": "Person",
+      "name": "Mason Delan",
+      "url": "https://github.com/masondelan"
+    },
+    "license": "https://opensource.org/licenses/MIT",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
@@ -407,8 +434,9 @@
   </div>
   <h1>The <span>why</span> behind<br/>your AI-written code</h1>
   <p>
-    AI agents write your code now. But when the session ends,
-    the reasoning disappears forever. Selvedge captures it before it's gone.
+    A <strong>git blame for AI agents</strong> — but for the <em>why</em>, not just which line
+    which model touched. Captured live, by the agent, in the moment. So six months
+    later you still know what each schema change, env var, and dependency was actually for.
   </p>
   <div class="hero-actions">
     <a href="https://github.com/masondelan/selvedge" target="_blank" class="btn-primary">View on GitHub</a>

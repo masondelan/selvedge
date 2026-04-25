@@ -1,0 +1,62 @@
+{
+  "manifest_version": "0.4",
+  "name": "selvedge",
+  "display_name": "Selvedge",
+  "version": "0.3.2",
+  "description": "Change tracking for AI-era codebases — captures the why behind every change.",
+  "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning — the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code — your data stays yours.",
+  "author": {
+    "name": "Mason Delan",
+    "email": "masondelan@gmail.com",
+    "url": "https://github.com/masondelan"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/masondelan/selvedge.git"
+  },
+  "homepage": "https://github.com/masondelan/selvedge",
+  "documentation": "https://github.com/masondelan/selvedge/blob/main/README.md",
+  "support": "https://github.com/masondelan/selvedge/issues",
+  "license": "MIT",
+  "keywords": ["mcp", "ai", "changelog", "codebase", "tracking", "devtools", "git", "blame", "history"],
+  "server": {
+    "type": "uv",
+    "entry_point": "selvedge/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "python", "-m", "selvedge.server"]
+    }
+  },
+  "tools": [
+    {
+      "name": "log_change",
+      "description": "Record a change to a codebase entity (DB column/table, function, file, API endpoint, dependency, env var) with the reasoning behind it. Captures the intent that would otherwise evaporate when the agent session ends."
+    },
+    {
+      "name": "diff",
+      "description": "Get change history for an entity or entity prefix. 'users' returns history for the users table and all its columns; 'src/auth.py' returns all changes to that file."
+    },
+    {
+      "name": "blame",
+      "description": "Get the most recent change to an entity — what changed, when, which agent made the change, and why. Like git blame, but for semantic entities and AI agents."
+    },
+    {
+      "name": "history",
+      "description": "Filtered history across all entities. Supports since (24h, 7d, 5mo, 1y), entity_path, project, and changeset_id filters."
+    },
+    {
+      "name": "changeset",
+      "description": "Get all events belonging to a named changeset. Use to reconstruct the full scope of a feature or task across multiple entities."
+    },
+    {
+      "name": "search",
+      "description": "Full-text substring search across entity paths, diffs, reasoning, and agents."
+    }
+  ],
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}

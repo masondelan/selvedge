@@ -1,0 +1,48 @@
+# Files excluded from the MCPB bundle.
+# Bundle contents: manifest.json, pyproject.toml, selvedge/, README.md, LICENSE.
+
+# Local DB / dev caches — never bake project-specific data into the bundle.
+.selvedge/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Build / venv / test caches
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Repo machinery — irrelevant to the runtime bundle
+.git/
+.github/
+.gitignore
+.dockerignore
+
+# Internal docs that shouldn't ship to end users
+CLAUDE.md
+docs/
+launch/
+scripts/
+tests/
+
+# UV-runtime constraint: must NOT include server/lib or server/venv
+server/lib/
+server/venv/

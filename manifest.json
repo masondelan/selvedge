@@ -30,27 +30,89 @@
   "tools": [
     {
       "name": "log_change",
-      "description": "Record a change to a codebase entity (DB column/table, function, file, API endpoint, dependency, env var) with the reasoning behind it. Captures the intent that would otherwise evaporate when the agent session ends."
+      "description": "Record a change to a codebase entity (DB column/table, function, file, API endpoint, dependency, env var) with the reasoning behind it. Captures the intent that would otherwise evaporate when the agent session ends.",
+      "inputSchema": {
+        "type": "object",
+        "title": "log_changeArguments",
+        "properties": {
+          "entity_path": { "type": "string", "title": "Entity Path" },
+          "change_type": { "type": "string", "title": "Change Type" },
+          "diff": { "type": "string", "title": "Diff", "default": "" },
+          "entity_type": { "type": "string", "title": "Entity Type", "default": "other" },
+          "reasoning": { "type": "string", "title": "Reasoning", "default": "" },
+          "agent": { "type": "string", "title": "Agent", "default": "" },
+          "session_id": { "type": "string", "title": "Session Id", "default": "" },
+          "git_commit": { "type": "string", "title": "Git Commit", "default": "" },
+          "project": { "type": "string", "title": "Project", "default": "" },
+          "changeset_id": { "type": "string", "title": "Changeset Id", "default": "" }
+        },
+        "required": ["entity_path", "change_type"]
+      }
     },
     {
       "name": "diff",
-      "description": "Get change history for an entity or entity prefix. 'users' returns history for the users table and all its columns; 'src/auth.py' returns all changes to that file."
+      "description": "Get change history for an entity or entity prefix. 'users' returns history for the users table and all its columns; 'src/auth.py' returns all changes to that file.",
+      "inputSchema": {
+        "type": "object",
+        "title": "diffArguments",
+        "properties": {
+          "entity_path": { "type": "string", "title": "Entity Path" },
+          "limit": { "type": "integer", "title": "Limit", "default": 20 }
+        },
+        "required": ["entity_path"]
+      }
     },
     {
       "name": "blame",
-      "description": "Get the most recent change to an entity — what changed, when, which agent made the change, and why. Like git blame, but for semantic entities and AI agents."
+      "description": "Get the most recent change to an entity — what changed, when, which agent made the change, and why. Like git blame, but for semantic entities and AI agents.",
+      "inputSchema": {
+        "type": "object",
+        "title": "blameArguments",
+        "properties": {
+          "entity_path": { "type": "string", "title": "Entity Path" }
+        },
+        "required": ["entity_path"]
+      }
     },
     {
       "name": "history",
-      "description": "Filtered history across all entities. Supports since (24h, 7d, 5mo, 1y), entity_path, project, and changeset_id filters."
+      "description": "Filtered history across all entities. Supports since (24h, 7d, 5mo, 1y), entity_path, project, and changeset_id filters.",
+      "inputSchema": {
+        "type": "object",
+        "title": "historyArguments",
+        "properties": {
+          "since": { "type": "string", "title": "Since", "default": "" },
+          "entity_path": { "type": "string", "title": "Entity Path", "default": "" },
+          "project": { "type": "string", "title": "Project", "default": "" },
+          "changeset_id": { "type": "string", "title": "Changeset Id", "default": "" },
+          "limit": { "type": "integer", "title": "Limit", "default": 50 }
+        }
+      }
     },
     {
       "name": "changeset",
-      "description": "Get all events belonging to a named changeset. Use to reconstruct the full scope of a feature or task across multiple entities."
+      "description": "Get all events belonging to a named changeset. Use to reconstruct the full scope of a feature or task across multiple entities.",
+      "inputSchema": {
+        "type": "object",
+        "title": "changesetArguments",
+        "properties": {
+          "changeset_id": { "type": "string", "title": "Changeset Id" }
+        },
+        "required": ["changeset_id"]
+      }
     },
     {
       "name": "search",
-      "description": "Full-text substring search across entity paths, diffs, reasoning, and agents."
+      "description": "Full-text substring search across entity paths, diffs, reasoning, and agents.",
+      "inputSchema": {
+        "type": "object",
+        "title": "searchArguments",
+        "properties": {
+          "query": { "type": "string", "title": "Query" },
+          "limit": { "type": "integer", "title": "Limit", "default": 20 }
+        },
+        "required": ["query"]
+      }
     }
   ],
   "compatibility": {

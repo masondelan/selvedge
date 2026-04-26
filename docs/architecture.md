@@ -313,12 +313,81 @@ Rules:
       Python matrix expanded to 3.10–3.13 with bundled-SQLite version
       printed per row.
 
-### Phase 2.9 — First-run that just works (Next · v0.3.3)
+### Phase 2.9 — Discoverability + ergonomics (DONE ✓ · v0.3.3)
+> Originally scoped as "First-run that just works" — but a stronger
+> need surfaced mid-cycle around MCP tool schema completeness for
+> directory scoring (Smithery quality score 78/100, blocking the
+> verified badge). The first-run wizard work moved to Phase 2.10; this
+> phase shipped as a discoverability + DX-polish release. No new tools,
+> no behavior changes that affect stored data.
+
+- [x] **Per-parameter descriptions on every MCP tool.** All 6 tools
+      now declare each parameter via `Annotated[T, Field(description=...)]`,
+      populating `inputSchema.properties.<param>.description` in the
+      live tool listing. Coverage went 0/21 → 21/21. Helps any agent
+      reading `tools/list` to pick the right tool — Claude Code,
+      Cursor, Copilot, MCP Inspector all surface these at decision
+      time. Knock-on benefit for every directory that introspects the
+      live server (Smithery, Glama, PulseMCP).
+- [x] **MCP tool annotations on every tool.** `readOnlyHint`,
+      `destructiveHint`, `idempotentHint`, `openWorldHint`, and a
+      human-friendly `title`. `log_change` is the only writer
+      (append-only, not idempotent). The five readers are all
+      read-only + idempotent. None are open-world. Lets MCP clients
+      gate or surface tools appropriately.
+- [x] **`outputSchema` on `log_change` and `blame`.** New
+      `LogChangeResult` and `BlameResult` TypedDicts in
+      `selvedge.server` give the JSON-RPC layer concrete output
+      schemas to advertise. The four list-returning tools already had
+      auto-generated schemas; this brings the dict returners in line
+      so all 6 tools advertise their output.
+- [x] **Stable response shapes.** `log_change` always returns `id`,
+      `timestamp`, `status`, `error`, and `warnings` — empty values
+      when not applicable, easier to type-check without branching.
+      `blame` does the same on miss: every event field empty, `error`
+      carries the "no history found" message. The `isError` convention
+      (empty-history → `{"error": "..."}` with protocol-level
+      `isError: false`) is now codified in the module docstring so
+      the decision is intentional, not accidental.
+- [x] **Custom server icon.** "Stitched timeline" mark — a horizontal
+      running stitch where each visible stitch is a captured change
+      event. Lives at `assets/icon.svg` and a 512×512 `assets/icon.png`,
+      shipped in the Smithery bundle. Replaces the auto-generated
+      mosaic.
+- [x] **Tool-level descriptions dedented at startup.** Each tool's
+      docstring runs through `inspect.cleandoc` once at import time so
+      `tools/list` doesn't leak the function-body indent.
+- [x] **`CLAUDE.md` ↔ `docs/architecture.md` split.** `CLAUDE.md` is
+      now a thin agent-instructions file (sources of truth, code
+      conventions, version bump checklist, scheduled tasks). The
+      architecture, data model, MCP tool reference, full CLI
+      reference, phase plan, and non-goals all moved to
+      `docs/architecture.md`. Reduces noise on every Claude Code /
+      Cowork session boot and gives the architecture doc a stable home.
+- [x] **MCP Inspector smoke test in CI parity.** The new test helper
+      in `tests/test_mcp_protocol.py::_payload` handles all three
+      FastMCP response shapes (list-wrapped, dict-direct, content-only),
+      so the round-trip suite works against the new TypedDict returns.
+- [x] **Naming (+6pt) — deferred to v0.4.x.** Smithery flags `diff`,
+      `history`, `search` as too-generic tool names. Adding a
+      `selvedge_` prefix would clear it but is a breaking change for
+      users with existing `CLAUDE.md` instructions referencing
+      `selvedge.diff` etc. Wait for v0.4.x where breaking changes are
+      already on the table.
+
+Outcome: projected Smithery quality score 78 → ~94, clearing the >80
+threshold for the **verified** badge (the only other verification
+route — TXT record on homepage host — is blocked while homepage is
+github.com).
+
+### Phase 2.10 — First-run that just works (Next · v0.3.4)
 > The biggest user-funnel cliff today is first-run: pip install, edit
 > `~/.claude/config.json`, restart agent, `selvedge init`, copy-paste a
 > system prompt, install the git hook — six steps and three of them are
 > documentation lookups. Goal: collapse this to one command and make the
-> agent integration discoverable instead of memorized.
+> agent integration discoverable instead of memorized. (Originally
+> scoped as Phase 2.9 / v0.3.3; deferred when v0.3.3 became a
+> discoverability-only release.)
 
 - [ ] **`selvedge setup` interactive wizard** — detects installed AI
       tooling (Claude Code, Cursor, Copilot) by looking for their config
@@ -343,66 +412,8 @@ Rules:
 - [ ] **Onboarding test coverage** — `tests/test_setup.py` covering the
       detect/install paths for each agent type (uses tmp_path config
       fixtures, no real config touched).
-- [ ] **`manifest.json` discoverability pass — push Smithery quality
-      score 78 → ~94, unlock the verified badge.** Smithery's score
-      breakdown (Releases tab → Quality Score) flags three concrete
-      `manifest.json` gaps that all ship in the next bundle:
-  - **Per-parameter descriptions (+12pt).** Every tool's
-    `inputSchema.properties.<param>` currently has `type` and `title`
-    only. Source of truth is `selvedge/server.py` — switch each tool's
-    parameters to `Annotated[<type>, Field(description=...)]` (Pydantic
-    via FastMCP) so the description propagates into the JSON-RPC tool
-    listing AND into `manifest.json` when the bundle is rebuilt. The
-    docstrings already document each arg in prose — pull them down to
-    the parameters. Agents read these directly when deciding which tool
-    to call, so this is also a DX win for live MCP usage, not just
-    Smithery score. Knock-on benefit for any other directory that
-    introspects the live server (Glama, PulseMCP, MCP Inspector
-    output). Six tools with ~3–10 params each — one focused PR.
-  - **MCP tool annotations (+8pt).** Add the standard annotation block
-    per tool (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
-    `openWorldHint`, plus a human-friendly `title`). `log_change` is
-    destructive + non-idempotent; `diff`, `blame`, `history`,
-    `changeset`, and `search` are all read-only + idempotent. None are
-    open-world.
-  - **Custom server icon (+8pt).** Default mosaic favicon today.
-    Generate a Selvedge mark (suggested motif: a literal selvedge edge
-    on woven fabric — ties to the project name and reads well at
-    directory thumbnail size). Upload via Smithery Settings → General
-    → Server Icon, OR ship as `icon.png` referenced in `manifest.json`
-    so the next bundle picks it up automatically.
-  - **Naming (+6pt) — deferred.** Smithery flags `diff`, `history`,
-    `search` as too-generic tool names. Adding a `selvedge_` prefix
-    would clear it but is a breaking change for users with existing
-    `CLAUDE.md` instructions referencing `selvedge.diff` etc. Defer
-    until a v0.4.x bump where breaking changes are already on the
-    table.
 
-  Outcome: with the first three changes the score should land near
-  94/100, clearing Smithery's >80 threshold for the **verified** badge
-  (the only other route — TXT record on homepage host — is blocked
-  while homepage is github.com).
-
-  **Two extra cleanups discovered via MCP Inspector smoke test
-  (2026-04-26)** — fold into the same PR:
-  - **`outputSchema` on `log_change` and `blame`.** The four
-    list-returning tools auto-generate an `outputSchema` from their
-    `list[dict]` annotation; the two `dict`-returning tools don't.
-    Either return a TypedDict or add an explicit Pydantic return model
-    so all six tools advertise an output schema.
-  - **Tighten docstring whitespace.** Tool-level `description` in the
-    schema includes leading `\n    ` from the docstring indent. Run
-    each tool's docstring through `inspect.cleandoc` (or just dedent
-    the source). Reads better in any directory that surfaces the raw
-    description.
-  - **Decide deliberately on the `isError` convention.** `blame` for a
-    nonexistent entity currently returns `{"error": "..."}` with
-    protocol-level `isError: false`. Defensible (not a protocol
-    failure, just empty history) but some evaluators flag it. Either
-    raise an MCP error, or document it as the convention so the
-    decision is intentional.
-
-### Phase 2.10 — Recovery and retention (v0.3.4)
+### Phase 2.11 — Recovery and retention (v0.3.5)
 > v0.3.1 made the runtime safe; v0.3.2 made problems visible. This phase
 > handles what happens AFTER something has already gone wrong (corruption,
 > orphaned data, runaway growth). All of these have a "Selvedge took down
@@ -438,7 +449,7 @@ Rules:
       read on every entry point. Houses retention, size bounds, default
       project name. Backwards compatible: missing file = current defaults.
 
-### Phase 2.11 — Developer integrations (v0.3.5)
+### Phase 2.12 — Developer integrations (v0.3.6)
 > Selvedge today is a CLI you query when you remember to. This phase
 > moves it into the developer's existing surface area — PR review,
 > standups, IDE — so the captured intent gets used, not just stored.

@@ -6,6 +6,96 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.4] — 2026-04-26
+
+The first-run release. The install funnel was six manual steps with
+three documentation lookups; v0.3.4 collapses it to one command and
+makes the agent integration discoverable from inside the tool instead
+of from the README. **Drop-in upgrade for anyone on 0.3.3.**
+
+### Added
+
+- **`selvedge setup` — interactive first-run wizard.** Detects the AI
+  tooling already on your machine (Claude Code via
+  `~/.claude/config.json`, Cursor via `~/.cursor/mcp.json` and
+  `.cursorrules`, GitHub Copilot via `.github/copilot-instructions.md`)
+  and walks through every install step in one pass: adds the Selvedge
+  MCP entry to each tool's config, drops the canonical agent-instructions
+  block into the project's prompt file (`CLAUDE.md` / `.cursorrules` /
+  copilot-instructions.md), runs `selvedge init` if `.selvedge/`
+  doesn't exist, and installs the post-commit hook. Every modified
+  file gets a `.bak` written next to it before any change reaches
+  disk. Re-running on an already-set-up project is a no-op
+  (idempotent). Existing-but-different MCP entries trigger a conflict
+  warning rather than silent overwrite — pass `--force` to overwrite,
+  or update by hand. For CI / devcontainer `postCreateCommand`:
+  `selvedge setup --non-interactive --yes`.
+- **`selvedge prompt` — canonical agent instructions on tap.** Prints
+  the recommended system-prompt block to stdout
+  (pipe-friendly: `selvedge prompt | tee -a CLAUDE.md`) or installs it
+  idempotently into a target file with `--install <file>`. The block
+  is wrapped in `<!-- selvedge:start -->` / `<!-- selvedge:end -->`
+  sentinel markers, so re-running `--install` updates the bracketed
+  region without disturbing anything else in the file. The block
+  source lives at `selvedge.prompt.PROMPT_BLOCK` — single source of
+  truth, so it stays in lockstep with the docs.
+- **`selvedge watch` — live tail of newly-logged events.** Polls the
+  SQLite store at a configurable `--interval` (default 1s) and prints
+  each new event as it lands, Rich-formatted. Filters mirror
+  `selvedge history` exactly: `--since`, `--entity`, `--project`,
+  `--agent`. `--json` emits one compact JSON object per line for
+  piping into other tools. WAL mode means the polling SELECT never
+  blocks the writer; the runtime cost is one indexed query per second
+  while the command is running. Ctrl-C exits cleanly.
+- **`selvedge.prompt.PROMPT_BLOCK` is now public.** Library users can
+  import the canonical agent-instructions block as a constant for
+  templating into their own onboarding flows.
+
+### Changed
+
+- **Better empty-state diagnosis in `selvedge status`.** Replaces the
+  generic "No changes logged yet" with a decision-tree-driven hint:
+    * MCP entry installed in some agent's config but no tool_calls
+      received → "MCP entry installed but no tool_calls received yet…
+      try restarting your agent" (with the config path printed)
+    * MCP entry not detected anywhere → "Run `selvedge setup` to wire
+      Selvedge into your AI tools"
+    * Detection error → falls back to the setup nudge gracefully
+  Detects "MCP entry installed but agent never reloaded" by reading
+  the agent config files, comparing modification times against the
+  current time. Five-minute grace window before the hint shifts from
+  "restart your agent" to "run `selvedge doctor` for a full health
+  check."
+- **`selvedge doctor`'s "MCP wiring" check now points at `selvedge
+  setup`.** Same diagnostic improvement, surfaced through the doctor
+  table for users who hit that command first.
+- **`server.json` (Glama / catalog descriptor) regenerated from live
+  server.py.** Was still showing v0.3.2 tool descriptions through the
+  v0.3.3 release; now in lockstep with `manifest.json`. Folded into
+  the version-bump checklist so this can't drift again.
+
+### Tests
+
+- **`tests/test_setup.py`** — 18 tests covering detect-and-install for
+  every agent type. Uses `tmp_path` + a fake home/project — never
+  touches real `~/.claude/`, `~/.cursor/`, or `.git/`. Idempotent
+  re-runs, malformed JSON handling, conflict detection, `--force`
+  overwrites, errors don't abort later steps, hook step skipped when
+  not in a git repo, prompt-block wired correctly.
+- **`tests/test_prompt.py`** — 18 tests covering the prompt installer.
+  Greenfield install, append, in-place update, idempotence, backup
+  numbering (consecutive edits don't overwrite the first `.bak`),
+  trailing-newline-convention preservation, sentinel-bracketed block
+  detection survives whitespace around markers.
+- **`tests/test_watch.py`** — 18 tests covering filter semantics
+  (entity prefix-aware, project/agent exact-match), cursor advancement
+  (no re-emission across polls), interval clamping, catch-up window
+  emits chronologically before the loop starts, `--json` mode emits
+  one compact line per event. Uses a `max_iterations` test seam so
+  the loop exits deterministically without needing SIGINT delivery.
+
+---
+
 ## [0.3.3] — 2026-04-26
 
 A discoverability + ergonomics release. No new MCP tools, no behavior

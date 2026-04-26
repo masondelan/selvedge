@@ -90,6 +90,51 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.4
+
+The first-run release. The install funnel was six manual steps with
+three documentation lookups; v0.3.4 collapses it to one command.
+**Drop-in upgrade for anyone on 0.3.3.**
+
+**`selvedge setup` — interactive first-run wizard.** Detects which AI
+tools are already on your machine (Claude Code, Cursor, Copilot) and
+walks through every install step in one pass: writes the MCP entry
+into each tool's config, drops the canonical agent-instructions block
+into your project's `CLAUDE.md` / `.cursorrules` / copilot-instructions
+file, runs `selvedge init` if needed, installs the post-commit hook.
+Every modified file gets a `.bak` next to it before any change reaches
+disk; re-running is a no-op. For CI bootstrap and devcontainer
+`postCreateCommand`: `selvedge setup --non-interactive --yes`.
+
+**`selvedge prompt` — canonical agent instructions on tap.** Prints
+the recommended system-prompt block to stdout, or installs it
+idempotently into a target file with `--install <file>`. The block is
+sentinel-bracketed (`<!-- selvedge:start -->` / `<!-- selvedge:end -->`),
+so re-running `--install` updates the bracketed region without
+disturbing the rest of the file. No more copy-paste drift between
+releases.
+
+**`selvedge watch` — live tail of new events.** Polls the SQLite store
+at `--interval` (default 1s) and prints each new event as it lands,
+Rich-formatted. Filters mirror `selvedge history` exactly: `--since`,
+`--entity`, `--project`, `--agent`. `--json` for piping into `jq`.
+Ctrl-C exits cleanly. Trust-but-verify surface for users who want to
+see what their agent is actually capturing in real time, and a much
+better debugging tool than running `selvedge status` repeatedly.
+
+**Better empty-state diagnosis in `selvedge status` and `doctor`.**
+The "no events yet" message now distinguishes "MCP entry installed
+but agent hasn't reloaded" (5-minute restart-your-agent grace) from
+"MCP entry not installed anywhere we can see" (run `selvedge setup`).
+Surfaces the actual config path in either case so you know where to
+look.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the full list including the
+test-coverage additions (54 new tests across `test_setup.py`,
+`test_prompt.py`, `test_watch.py`).
+
+---
+
 ## What's new in v0.3.3
 
 A discoverability + ergonomics release. No new MCP tools, no behavior
@@ -139,63 +184,6 @@ full CLI reference, and the phase plan all moved to
 `docs/architecture.md`.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list and reasoning.
-
----
-
-## What's new in v0.3.2
-
-An observability-polish release. No new feature surface — the focus is
-making existing functionality discoverable and debuggable, plus locking
-in WAL/`busy_timeout` assumptions across SQLite versions.
-**Drop-in upgrade for anyone on 0.3.1.**
-
-**`selvedge doctor`.** A single health-check that walks the ambient state
-agents typically run into and reports each row PASS / WARN / FAIL / INFO:
-which DB path is being resolved (and which precedence step matched —
-`SELVEDGE_DB`, walkup, or global fallback), whether `.selvedge/` exists,
-whether the schema is at the latest migration version, whether the
-post-commit hook is installed and not silently failing, last `tool_calls`
-timestamp (proxy for "is the agent wired up?"), and whether
-`SELVEDGE_LOG_LEVEL` is set to a recognized value. Exits 1 on any FAIL,
-so `doctor` can be wired into CI. `--json` for machine-readable output.
-
-```bash
-$ selvedge doctor
-Selvedge doctor
-
-  Check                  Status      Detail
- ───────────────────────────────────────────────────────────────────
-  Database path          i INFO      ~/.selvedge/selvedge.db  [via SELVEDGE_DB env var]
-  .selvedge/ directory   ✓ PASS      ~/.selvedge
-  Schema version         ✓ PASS      at v2 (latest)
-  Post-commit hook       ✓ PASS      ~/code/myapp/.git/hooks/post-commit
-  Last hook failure      ✓ PASS      no failures recorded
-  MCP wiring             ✓ PASS      last tool_call at 2026-04-25T14:21:08Z
-  SELVEDGE_LOG_LEVEL     i INFO      unset (defaults to WARNING)
-
-All checks passed.
-```
-
-**Post-commit hook no longer fails silently.** The previous hook silently
-died when `selvedge` wasn't on the PATH that git launched (a common
-symptom under macOS GUI git clients with stripped PATHs). The new hook
-appends a single line to `.selvedge/hook.log` on failure, and both
-`selvedge status` and `selvedge doctor` surface the most recent failure.
-Old hooks keep working — re-running `selvedge install-hook` upgrades to
-the new wrapper.
-
-**`selvedge stats` upgrades.** The coverage report now breaks calls
-down per-agent so you can catch the case where claude-code is logging
-changes but cursor is only querying history. A separate
-`missing_reasoning` count surfaces stored events whose reasoning fails
-the quality validator — empty, too short, or a generic placeholder the
-agent shipped despite the warning.
-
-**Pinned-SQLite CI matrix.** A new CI job builds SQLite 3.37.2, 3.42.0,
-and 3.45.3 from source and runs the suite against each via `LD_PRELOAD`,
-locking in WAL + `busy_timeout` behavior across the SQLite versions
-selvedge users are most likely to be on. The Python matrix also gains
-3.13.
 
 ---
 

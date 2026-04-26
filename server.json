@@ -1,8 +1,8 @@
 {
   "namespace": "io.github.masondelan",
   "name": "selvedge",
-  "description": "Change tracking for AI-era codebases. Captures why AI agents made each change — entity, diff, and reasoning — to a local SQLite database before the session ends. Answers questions like 'when was users.stripe_customer_id added and why?' and 'who added the payments table?'",
-  "version": "0.3.2",
+  "description": "Change tracking for AI-era codebases \u2014 captures the why behind every change as the agent makes it. git blame for semantic entities (DB columns, functions, env vars, deps), with reasoning written by the agent in the same context that produced the change.",
+  "version": "0.3.4",
   "repository": "https://github.com/masondelan/selvedge",
   "homepage": "https://github.com/masondelan/selvedge",
   "license": "MIT",
@@ -10,7 +10,7 @@
     {
       "registry_name": "pypi",
       "name": "selvedge",
-      "version": "0.3.2",
+      "version": "0.3.4",
       "command": "selvedge-server",
       "runtime_arguments": []
     }
@@ -18,27 +18,27 @@
   "tools": [
     {
       "name": "log_change",
-      "description": "Record a change to a codebase entity (DB column/table, function, file, API endpoint, dependency, env var, etc.). Set reasoning to the user's original request — captures the intent that would otherwise evaporate when the agent session ends. Supports changeset_id to group related changes under a named feature."
+      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), the result includes a `warnings`\narray \u2014 the event is still stored.\n\nOn validation failure (invalid change_type, missing entity_path) the\nresult is `{\"status\": \"error\", \"error\": \"...\"}` with no event written."
     },
     {
       "name": "diff",
-      "description": "Get change history for an entity or entity prefix. 'users' returns history for the users table and all its columns; 'src/auth.py' returns all changes to that file."
+      "description": "Get change history for a codebase entity, newest first.\n\nSupports prefix matching \u2014 e.g. 'users' returns all events for the users\ntable and any users.* column."
     },
     {
       "name": "blame",
-      "description": "Get the most recent change to an entity — what changed, when, which agent made the change, and why. Like git blame, but for semantic entities and AI agents."
+      "description": "Most recent change to an entity \u2014 what changed, when, who, why.\n\nLike `git blame` but for semantic entities (DB columns, functions, env\nvars, dependencies) and AI agents. If no history exists for the entity,\nreturns `{\"error\": \"...\"}` with protocol-level `isError: false`."
     },
     {
       "name": "history",
-      "description": "Filtered history across all entities. Supports since (24h, 7d, 30d, 5mo, 1y), entity_path prefix, project, and changeset_id filters."
+      "description": "Filtered change history across all entities, newest first.\n\nCombine `since`, `entity_path`, `project`, and `changeset_id` to scope\nthe result. On unparseable `since` input the response is\n`[{\"error\": \"...\"}]` so the caller sees the problem."
     },
     {
       "name": "changeset",
-      "description": "Get all events belonging to a named changeset. Use to reconstruct the full scope of a feature or task across multiple entities — e.g. all DB columns, endpoints, and dependencies added for 'add-stripe-billing'."
+      "description": "All events that share a `changeset_id`, oldest first.\n\nUse to reconstruct the full scope of a feature or task across multiple\nentities. If the changeset has no events, returns\n`[{\"error\": \"...\"}]` so the caller can distinguish \"unknown changeset\"\nfrom \"empty history.\""
     },
     {
       "name": "search",
-      "description": "Full-text substring search across entity paths, diffs, reasoning, and agents. SQL LIKE wildcards in the query are escaped automatically."
+      "description": "Full-text search across entity paths, diffs, reasoning, and agents.\n\nUseful for questions like 'what changes were made for the billing\nfeature?', 'which columns were added by cursor?', or 'show everything\nrelated to authentication'."
     }
   ]
 }

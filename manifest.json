@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "selvedge",
   "display_name": "Selvedge",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Change tracking for AI-era codebases \u2014 captures the why behind every change as the agent makes it. git blame for semantic entities (DB columns, functions, env vars, deps), with reasoning written by the agent in the same context that produced the change.",
   "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning \u2014 the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code \u2014 your data stays yours.",
   "author": {

@@ -2,19 +2,29 @@
 Selvedge CLI.
 
 Commands:
+  selvedge setup              Interactive first-run wizard (v0.3.4)
+  selvedge prompt             Print or install the canonical agent prompt
+  selvedge watch              Live-tail of new events as they're logged
   selvedge init               Initialize Selvedge in the current project
   selvedge status             Show recent activity summary
+  selvedge doctor             PASS/WARN/FAIL ambient-state health check
   selvedge diff <entity>      Change history for an entity
   selvedge blame <entity>     Most recent change + context for an entity
   selvedge history            Filtered history across all entities
   selvedge search <query>     Full-text search across all events
   selvedge log                Manually log a change event
+  selvedge stats              Tool-call coverage report
+  selvedge install-hook       Install git post-commit hook
+  selvedge backfill-commit    Stamp git_commit on recent events
+  selvedge import             Import migration files
+  selvedge export             Export history as JSON or CSV
 """
 
 import json
 import os
 import sqlite3
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import click
@@ -265,8 +275,18 @@ def status():
     console.print()
 
     if not recent:
-        console.print("  [dim]No changes logged yet.[/dim]")
-        console.print("  [dim]Connect your AI agent and start tracking.[/dim]")
+        # Differentiated empty-state — surface the most likely cause
+        # of "no events" so the user knows what to do next instead of
+        # staring at a generic message. Three branches:
+        #   1. MCP entry installed somewhere but no tool_calls received
+        #      → agent likely needs a restart to pick up the new config
+        #   2. MCP entry NOT installed anywhere we can detect
+        #      → user hasn't run setup yet
+        #   3. We can't tell either way (no agents detected)
+        #      → fall back to a friendly nudge toward `selvedge setup`
+        diagnosis = _diagnose_empty_state(storage)
+        for line in diagnosis:
+            console.print(f"  {line}")
         return
 
     console.print("  [bold]Recent changes[/bold]")
@@ -416,7 +436,9 @@ def _doctor_checks() -> list[dict]:
             if last_ts is None:
                 checks.append(_check(
                     "MCP wiring", "WARN",
-                    "no tool_calls recorded — MCP server may not be connected"
+                    "no tool_calls recorded — run `selvedge setup` to wire "
+                    "Selvedge into your AI tools, or restart your agent if "
+                    "an MCP entry is already installed"
                 ))
             else:
                 try:
@@ -1203,3 +1225,357 @@ def import_migrations(path, fmt, project, dry_run, as_json):
         f"[green]✓[/green] Imported [bold]{len(events)}[/bold] events from "
         f"[dim]{target.name}[/dim]"
     )
+
+
+# ---------------------------------------------------------------------------
+# Empty-state diagnosis (used by `selvedge status` and `doctor`)
+# ---------------------------------------------------------------------------
+
+
+# How long after installing the MCP entry we stop assuming "agent just
+# needs a restart" and start treating the silence as the user's
+# problem. Five minutes is the documented v0.3.4 cutoff.
+_AGENT_RESTART_GRACE_SECONDS = 5 * 60
+
+
+def _diagnose_empty_state(storage: SelvedgeStorage) -> list[str]:
+    """Return Rich-formatted diagnosis lines for the no-events empty state.
+
+    The decision tree:
+      - If a Selvedge MCP entry exists in any detected agent's config
+        AND the config was modified more than 5 minutes ago AND no
+        tool_calls have been received → the agent probably needs a
+        restart. Surface the config path so the user knows where to
+        look.
+      - Otherwise → point at `selvedge setup` so they install the
+        wiring instead of guessing.
+
+    The returned list is rendered one item per line by ``status``.
+    Reused by ``doctor`` so both commands give consistent advice.
+    """
+    from datetime import datetime, timezone
+
+    from .setup import detect_agents
+
+    try:
+        agents = detect_agents(project=Path.cwd())
+    except OSError:
+        agents = []
+
+    # Find any detected agent whose config file actually contains a
+    # ``selvedge`` mcpServers entry. Skip agents without a config_path
+    # (Copilot doesn't have a JSON registry).
+    installed_in: list[Path] = []
+    for agent in agents:
+        if agent.config_path is None or not agent.config_path.exists():
+            continue
+        try:
+            data = json.loads(agent.config_path.read_text() or "{}")
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        servers = data.get("mcpServers")
+        if isinstance(servers, dict) and "selvedge" in servers:
+            installed_in.append(agent.config_path)
+
+    if installed_in:
+        # The wiring is in place; the most likely cause is "agent
+        # process is running but loaded the config before our entry
+        # was added." Compare config mtime against now — if recent,
+        # tell the user the agent just needs a restart.
+        most_recent = max(p.stat().st_mtime for p in installed_in)
+        age = datetime.now(timezone.utc).timestamp() - most_recent
+        if age < _AGENT_RESTART_GRACE_SECONDS:
+            paths = ", ".join(str(p) for p in installed_in)
+            return [
+                "[yellow]MCP entry installed but no tool_calls received yet.[/yellow]",
+                f"[dim]Config(s): {paths}[/dim]",
+                "[dim]Try restarting your agent — the running process "
+                "loaded its config before we added Selvedge.[/dim]",
+            ]
+        # Older than 5 minutes → real problem worth diagnosing harder.
+        return [
+            "[yellow]MCP entry installed but no tool_calls received.[/yellow]",
+            f"[dim]Config(s): {', '.join(str(p) for p in installed_in)}[/dim]",
+            "[dim]Run [bold]selvedge doctor[/bold] for a full health check.[/dim]",
+        ]
+
+    # No MCP entry anywhere → user hasn't run setup
+    return [
+        "[dim]No changes logged yet.[/dim]",
+        "[dim]Run [bold]selvedge setup[/bold] to wire Selvedge into your AI tools.[/dim]",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# setup (interactive first-run wizard, v0.3.4)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("setup")
+@click.option(
+    "--path",
+    "-p",
+    default=".",
+    help="Project root to set up (default: current directory)",
+)
+@click.option(
+    "--non-interactive",
+    is_flag=True,
+    help="Don't prompt — only run steps that are safe without confirmation.",
+)
+@click.option(
+    "-y",
+    "--yes",
+    "assume_yes",
+    is_flag=True,
+    help="Answer 'yes' to every confirmation. Pairs with --non-interactive for CI.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Overwrite existing non-matching MCP entries instead of treating them as conflicts.",
+)
+@click.option(
+    "--skip-init",
+    is_flag=True,
+    help="Don't run `selvedge init` — useful when the project already has a .selvedge/.",
+)
+@click.option(
+    "--skip-hook",
+    is_flag=True,
+    help="Don't install the git post-commit hook.",
+)
+def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook):
+    """Interactive first-run wizard — wires Selvedge into your AI tools.
+
+    \b
+    Detects which AI tools you have installed (Claude Code, Cursor,
+    GitHub Copilot), offers to:
+      • install Selvedge's MCP entry into each tool's config
+      • drop the canonical agent-instructions block into CLAUDE.md /
+        .cursorrules / copilot-instructions.md
+      • run `selvedge init` if .selvedge/ doesn't exist
+      • install the post-commit hook for git_commit backfill
+
+    \b
+    Every modified file gets a `.bak` written next to it before any
+    change reaches disk. Re-running the wizard is a no-op (idempotent).
+    Existing MCP entries that differ from ours raise a conflict — pass
+    --force to overwrite, or update them by hand.
+
+    \b
+    For CI bootstrap and devcontainer postCreateCommand:
+      selvedge setup --non-interactive --yes
+    """
+    from .setup import run_wizard
+
+    project = Path(path).resolve()
+
+    # Resolve the confirm callback. ``--non-interactive`` without
+    # ``--yes`` means "list what would be done but don't write" — we
+    # implement that by saying "no" to every prompt.
+    if non_interactive:
+        if assume_yes:
+            confirm: Callable[[str, bool], bool] | None = lambda *_: True  # noqa: E731
+        else:
+            confirm = lambda *_: False  # noqa: E731
+    else:
+        confirm = None  # use the default click.confirm
+
+    outcome = run_wizard(
+        project=project,
+        interactive=not non_interactive,
+        force=force,
+        install_hook=not skip_hook,
+        init_project_dir=not skip_init,
+        confirm=confirm,
+    )
+
+    _render_wizard_summary(outcome)
+    if outcome.exit_code:
+        sys.exit(outcome.exit_code)
+
+
+def _render_wizard_summary(outcome) -> None:
+    """Render the wizard's per-step result table at end of run."""
+    style_for = {
+        "ok": "[green]✓ ok[/green]",
+        "noop": "[dim]· noop[/dim]",
+        "skipped": "[yellow]→ skipped[/yellow]",
+        "error": "[red]✗ error[/red]",
+    }
+
+    console.print("\n[bold]Setup summary[/bold]\n")
+    table = Table(box=box.SIMPLE_HEAD, show_header=True, header_style="bold")
+    table.add_column("Step", style="bold")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Detail", style="dim", overflow="fold")
+    for step in outcome.steps:
+        table.add_row(
+            step.label,
+            style_for.get(step.status, step.status),
+            step.detail,
+        )
+    console.print(table)
+
+    backups = [s for s in outcome.steps if s.backup_path is not None]
+    if backups:
+        console.print("\n  [bold]Backups written:[/bold]")
+        for step in backups:
+            console.print(f"    [dim]{step.backup_path}[/dim]  (from {step.label})")
+
+    if outcome.exit_code:
+        console.print(
+            "\n[red]Setup completed with errors.[/red] "
+            "[dim]Fix the offending file(s) and re-run with --force if needed.[/dim]\n"
+        )
+    else:
+        console.print(
+            "\n[green]Setup complete.[/green] "
+            "[dim]Restart your agent to pick up the new MCP entry.[/dim]\n"
+        )
+
+
+# ---------------------------------------------------------------------------
+# prompt (print / install canonical agent instructions, v0.3.4)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("prompt")
+@click.option(
+    "--install",
+    "install_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Append/update the prompt block in this file (idempotent, sentinel-bracketed).",
+)
+@click.option(
+    "--no-backup",
+    is_flag=True,
+    help="Skip writing the .bak file before --install modifies an existing file.",
+)
+def prompt_cmd(install_path, no_backup):
+    """Print the canonical Selvedge agent-instructions block.
+
+    \b
+    With no flags, prints the block to stdout — pipe-friendly:
+      selvedge prompt | tee -a CLAUDE.md
+
+    \b
+    With --install <file>, idempotently writes the block to <file>:
+      • file doesn't exist  → created with just the block
+      • file exists, no Selvedge block → block appended after a blank line
+      • file exists, has an old Selvedge block → block replaced in place
+      • file already has the current block → unchanged
+
+    \b
+    The block is wrapped in <!-- selvedge:start --> / <!-- selvedge:end -->
+    sentinel markers so re-running --install never duplicates content.
+    A `.bak` is written before any modification unless --no-backup is set.
+
+    \b
+    Examples:
+      selvedge prompt
+      selvedge prompt --install CLAUDE.md
+      selvedge prompt --install .cursorrules --no-backup
+    """
+    from .prompt import PROMPT_BLOCK, install_to_file, render_block
+
+    if install_path is None:
+        click.echo(render_block())
+        return
+
+    action, backup = install_to_file(install_path, write_backup=not no_backup)
+    label = {
+        "created": "Created",
+        "appended": "Appended block to",
+        "updated": "Updated existing block in",
+        "unchanged": "Already up to date in",
+    }[action]
+    color = "green" if action != "unchanged" else "dim"
+    console.print(
+        f"[{color}]{'✓' if action != 'unchanged' else '·'}[/{color}] "
+        f"{label} [bold]{install_path}[/bold]"
+    )
+    if backup is not None:
+        console.print(f"  [dim]backup: {backup}[/dim]")
+    # Stash the prompt body so static analyzers don't complain about
+    # the import being unused on the print-only path.
+    _ = PROMPT_BLOCK
+
+
+# ---------------------------------------------------------------------------
+# watch (live tail, v0.3.4)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("watch")
+@click.option("--since", "-s", default="", help=_SINCE_HELP)
+@click.option("--entity", "-e", default="", help="Filter to entity path or prefix.")
+@click.option("--project", "-p", default="", help="Filter to a project name.")
+@click.option("--agent", "-a", default="", help="Filter to a single agent name.")
+@click.option(
+    "--interval",
+    "-i",
+    default=1.0,
+    show_default=True,
+    type=float,
+    help="Poll interval in seconds (range: 0.1 to 60).",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit one JSON object per event (pipe-friendly).",
+)
+def watch_cmd(since, entity, project, agent, interval, as_json):
+    """Live-tail of new events as they're logged.
+
+    \b
+    Polls the SQLite store at --interval (default 1s) and prints each
+    new event as it lands. Same filters as `selvedge history`. WAL
+    mode means watch never blocks the writer, but it does add one
+    SQLite SELECT per second while running — opt-in foreground only,
+    not a daemon.
+
+    \b
+    Examples:
+      selvedge watch
+      selvedge watch --since 1h
+      selvedge watch --entity users --agent claude-code
+      selvedge watch --project my-api --json | jq .
+      selvedge watch --interval 5
+    """
+    from .watch import render_header
+    from .watch import watch as run_watch
+
+    resolved_since = resolve_since(since)
+    db_path = get_db_path()
+
+    if not as_json:
+        render_header(
+            console,
+            db_path=str(db_path),
+            interval=interval,
+            since=since,
+            entity_path=entity,
+            project=project,
+            agent=agent,
+        )
+
+    try:
+        exit_code = run_watch(
+            since=resolved_since,
+            entity_path=entity,
+            project=project,
+            agent=agent,
+            interval=interval,
+            as_json=as_json,
+            console=console,
+        )
+    except ValueError as e:
+        err_console.print(f"[red]error:[/red] {e}")
+        sys.exit(2)
+    sys.exit(exit_code)

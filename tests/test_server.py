@@ -229,7 +229,9 @@ def test_log_change_no_warning_for_good_reasoning():
         change_type="add",
         reasoning="User asked to add phone number field to support SMS 2FA verification.",
     )
-    assert "warnings" not in result
+    # v0.3.3+: every LogChangeResult key is always populated; empty list
+    # means "reasoning passed the quality validator."
+    assert result["warnings"] == []
 
 
 def test_log_change_warns_empty_reasoning():

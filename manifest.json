@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "selvedge",
   "display_name": "Selvedge",
-  "version": "0.3.2",
-  "description": "Change tracking for AI-era codebases — captures the why behind every change.",
-  "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning — the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code — your data stays yours.",
+  "version": "0.3.3",
+  "description": "Change tracking for AI-era codebases \u2014 captures the why behind every change as the agent makes it. git blame for semantic entities (DB columns, functions, env vars, deps), with reasoning written by the agent in the same context that produced the change.",
+  "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning \u2014 the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code \u2014 your data stays yours.",
   "author": {
     "name": "Mason Delan",
     "email": "masondelan@gmail.com",
@@ -18,107 +18,473 @@
   "documentation": "https://github.com/masondelan/selvedge/blob/main/README.md",
   "support": "https://github.com/masondelan/selvedge/issues",
   "license": "MIT",
-  "keywords": ["mcp", "ai", "changelog", "codebase", "tracking", "devtools", "git", "blame", "history"],
+  "keywords": [
+    "mcp",
+    "ai",
+    "changelog",
+    "codebase",
+    "tracking",
+    "devtools",
+    "git",
+    "blame",
+    "history",
+    "changeset",
+    "audit",
+    "ai-agents",
+    "claude-code",
+    "cursor",
+    "copilot"
+  ],
   "server": {
     "type": "python",
     "entry_point": "selvedge/server.py",
     "mcp_config": {
       "command": "uv",
-      "args": ["run", "--directory", "${__dirname}", "python", "-m", "selvedge.server"]
+      "args": [
+        "run",
+        "--directory",
+        "${__dirname}",
+        "python",
+        "-m",
+        "selvedge.server"
+      ]
     }
   },
   "tools": [
     {
       "name": "log_change",
-      "description": "Record a change to a codebase entity (DB column/table, function, file, API endpoint, dependency, env var) with the reasoning behind it. Captures the intent that would otherwise evaporate when the agent session ends.",
+      "title": "Log a code change",
+      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), the result includes a `warnings`\narray \u2014 the event is still stored.\n\nOn validation failure (invalid change_type, missing entity_path) the\nresult is `{\"status\": \"error\", \"error\": \"...\"}` with no event written.",
       "inputSchema": {
-        "type": "object",
-        "title": "log_changeArguments",
         "properties": {
-          "entity_path": { "type": "string", "title": "Entity Path" },
-          "change_type": { "type": "string", "title": "Change Type" },
-          "diff": { "type": "string", "title": "Diff", "default": "" },
-          "entity_type": { "type": "string", "title": "Entity Type", "default": "other" },
-          "reasoning": { "type": "string", "title": "Reasoning", "default": "" },
-          "agent": { "type": "string", "title": "Agent", "default": "" },
-          "session_id": { "type": "string", "title": "Session Id", "default": "" },
-          "git_commit": { "type": "string", "title": "Git Commit", "default": "" },
-          "project": { "type": "string", "title": "Project", "default": "" },
-          "changeset_id": { "type": "string", "title": "Changeset Id", "default": "" }
+          "entity_path": {
+            "description": "Dot/slash-notation path to the entity. Required and non-empty. Examples: 'users.email' (DB column), 'users' (DB table), 'src/auth.py::login' (function in file), 'src/auth.py' (file), 'api/v1/users' (API route), 'deps/stripe' (dependency), 'env/STRIPE_SECRET_KEY' (env variable).",
+            "title": "Entity Path",
+            "type": "string"
+          },
+          "change_type": {
+            "description": "What kind of change. One of: add, remove, modify, rename, retype, create, delete, index_add, index_remove, migrate. Invalid values are rejected \u2014 pick the closest match.",
+            "title": "Change Type",
+            "type": "string"
+          },
+          "diff": {
+            "default": "",
+            "description": "The actual change \u2014 SQL migration text, code diff, or a human-readable description of what changed. Optional but strongly recommended for non-trivial changes.",
+            "title": "Diff",
+            "type": "string"
+          },
+          "entity_type": {
+            "default": "other",
+            "description": "Category of entity. One of: column, table, file, function, class, endpoint, dependency, env_var, index, schema, config, other. Unknown values are coerced to 'other'.",
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "reasoning": {
+            "default": "",
+            "description": "Why the change was made. Include the user's original request, the problem being solved, or any context that won't be obvious from the diff alone. Good example: 'User asked to add 2FA \u2014 needs phone number to send SMS verification codes.' Avoid generic placeholders like 'user request' or 'done' \u2014 these are flagged by the quality validator and returned in `warnings`.",
+            "title": "Reasoning",
+            "type": "string"
+          },
+          "agent": {
+            "default": "",
+            "description": "Name/ID of the AI agent making the change (e.g. 'claude-code', 'cursor', 'copilot', 'human').",
+            "title": "Agent",
+            "type": "string"
+          },
+          "session_id": {
+            "default": "",
+            "description": "The agent session or conversation ID, if available.",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "git_commit": {
+            "default": "",
+            "description": "The git commit hash this change will land in. Can be backfilled later via `selvedge backfill-commit` or the post-commit hook.",
+            "title": "Git Commit",
+            "type": "string"
+          },
+          "project": {
+            "default": "",
+            "description": "Repository or project name. Useful when one DB tracks multiple projects.",
+            "title": "Project",
+            "type": "string"
+          },
+          "changeset_id": {
+            "default": "",
+            "description": "Optional grouping ID for related changes that belong to the same feature or task. Use a short slug like 'add-stripe-billing'. All events sharing a changeset_id can be queried together via the `changeset` tool.",
+            "title": "Changeset Id",
+            "type": "string"
+          }
         },
-        "required": ["entity_path", "change_type"]
+        "required": [
+          "entity_path",
+          "change_type"
+        ],
+        "title": "log_changeArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "timestamp",
+          "status",
+          "error",
+          "warnings"
+        ],
+        "title": "LogChangeResult",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
       }
     },
     {
       "name": "diff",
-      "description": "Get change history for an entity or entity prefix. 'users' returns history for the users table and all its columns; 'src/auth.py' returns all changes to that file.",
+      "title": "Diff an entity's history",
+      "description": "Get change history for a codebase entity, newest first.\n\nSupports prefix matching \u2014 e.g. 'users' returns all events for the users\ntable and any users.* column.",
       "inputSchema": {
-        "type": "object",
-        "title": "diffArguments",
         "properties": {
-          "entity_path": { "type": "string", "title": "Entity Path" },
-          "limit": { "type": "integer", "title": "Limit", "default": 20 }
+          "entity_path": {
+            "description": "Entity path or path prefix. Prefix matching is supported: 'users' returns history for the users table AND all its columns ('users.email', 'users.created_at', etc.). Use a more specific path to narrow the result.",
+            "title": "Entity Path",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Maximum number of events to return.",
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
         },
-        "required": ["entity_path"]
+        "required": [
+          "entity_path"
+        ],
+        "title": "diffArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "diffOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     {
       "name": "blame",
-      "description": "Get the most recent change to an entity — what changed, when, which agent made the change, and why. Like git blame, but for semantic entities and AI agents.",
+      "title": "Blame an entity",
+      "description": "Most recent change to an entity \u2014 what changed, when, who, why.\n\nLike `git blame` but for semantic entities (DB columns, functions, env\nvars, dependencies) and AI agents. If no history exists for the entity,\nreturns `{\"error\": \"...\"}` with protocol-level `isError: false`.",
       "inputSchema": {
-        "type": "object",
-        "title": "blameArguments",
         "properties": {
-          "entity_path": { "type": "string", "title": "Entity Path" }
+          "entity_path": {
+            "description": "Exact entity path (no prefix matching). Examples: 'users.email', 'src/auth.py::login', 'env/STRIPE_SECRET_KEY'.",
+            "title": "Entity Path",
+            "type": "string"
+          }
         },
-        "required": ["entity_path"]
+        "required": [
+          "entity_path"
+        ],
+        "title": "blameArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "entity_type": {
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "entity_path": {
+            "title": "Entity Path",
+            "type": "string"
+          },
+          "change_type": {
+            "title": "Change Type",
+            "type": "string"
+          },
+          "diff": {
+            "title": "Diff",
+            "type": "string"
+          },
+          "reasoning": {
+            "title": "Reasoning",
+            "type": "string"
+          },
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "git_commit": {
+            "title": "Git Commit",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "changeset_id": {
+            "title": "Changeset Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "timestamp",
+          "entity_type",
+          "entity_path",
+          "change_type",
+          "diff",
+          "reasoning",
+          "agent",
+          "session_id",
+          "git_commit",
+          "project",
+          "changeset_id",
+          "metadata",
+          "error"
+        ],
+        "title": "BlameResult",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     {
       "name": "history",
-      "description": "Filtered history across all entities. Supports since (24h, 7d, 5mo, 1y), entity_path, project, and changeset_id filters.",
+      "title": "Browse history",
+      "description": "Filtered change history across all entities, newest first.\n\nCombine `since`, `entity_path`, `project`, and `changeset_id` to scope\nthe result. On unparseable `since` input the response is\n`[{\"error\": \"...\"}]` so the caller sees the problem.",
       "inputSchema": {
-        "type": "object",
-        "title": "historyArguments",
         "properties": {
-          "since": { "type": "string", "title": "Since", "default": "" },
-          "entity_path": { "type": "string", "title": "Entity Path", "default": "" },
-          "project": { "type": "string", "title": "Project", "default": "" },
-          "changeset_id": { "type": "string", "title": "Changeset Id", "default": "" },
-          "limit": { "type": "integer", "title": "Limit", "default": 50 }
-        }
+          "since": {
+            "default": "",
+            "description": "Time window \u2014 ISO 8601 datetime OR relative shorthand: '15m' (last 15 minutes), '24h' (last 24 hours), '7d' (last 7 days), '5mo' (last 5 months), '1y' (last year). 'm' means minutes; 'mo' or 'mon' means months. Unparseable values produce an error rather than silently returning empty results. Empty = all time.",
+            "title": "Since",
+            "type": "string"
+          },
+          "entity_path": {
+            "default": "",
+            "description": "Filter to a specific entity or path prefix.",
+            "title": "Entity Path",
+            "type": "string"
+          },
+          "project": {
+            "default": "",
+            "description": "Filter to a specific project/repository.",
+            "title": "Project",
+            "type": "string"
+          },
+          "changeset_id": {
+            "default": "",
+            "description": "Filter to a specific changeset (feature/task group).",
+            "title": "Changeset Id",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Maximum number of results.",
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "historyArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "historyOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     {
       "name": "changeset",
-      "description": "Get all events belonging to a named changeset. Use to reconstruct the full scope of a feature or task across multiple entities.",
+      "title": "Get a changeset",
+      "description": "All events that share a `changeset_id`, oldest first.\n\nUse to reconstruct the full scope of a feature or task across multiple\nentities. If the changeset has no events, returns\n`[{\"error\": \"...\"}]` so the caller can distinguish \"unknown changeset\"\nfrom \"empty history.\"",
       "inputSchema": {
-        "type": "object",
-        "title": "changesetArguments",
         "properties": {
-          "changeset_id": { "type": "string", "title": "Changeset Id" }
+          "changeset_id": {
+            "description": "The changeset identifier (the same slug or UUID passed to `log_change`'s changeset_id parameter). Examples: 'add-stripe-billing', 'fix-auth-redirect'.",
+            "title": "Changeset Id",
+            "type": "string"
+          }
         },
-        "required": ["changeset_id"]
+        "required": [
+          "changeset_id"
+        ],
+        "title": "changesetArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "changesetOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     {
       "name": "search",
-      "description": "Full-text substring search across entity paths, diffs, reasoning, and agents.",
+      "title": "Search events",
+      "description": "Full-text search across entity paths, diffs, reasoning, and agents.\n\nUseful for questions like 'what changes were made for the billing\nfeature?', 'which columns were added by cursor?', or 'show everything\nrelated to authentication'.",
       "inputSchema": {
-        "type": "object",
-        "title": "searchArguments",
         "properties": {
-          "query": { "type": "string", "title": "Query" },
-          "limit": { "type": "integer", "title": "Limit", "default": 20 }
+          "query": {
+            "description": "Search string (case-insensitive substring). Searches across entity_path, diff, reasoning, and agent fields. SQL LIKE wildcards (`_` and `%`) are escaped, so 'stripe_customer_id' matches the literal underscore rather than any single char.",
+            "title": "Query",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Maximum number of results.",
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ],
+        "title": "searchArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "searchOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     }
   ],
   "compatibility": {
-    "platforms": ["darwin", "linux", "win32"],
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ],
     "runtimes": {
       "python": ">=3.10"
     }
-  }
+  },
+  "icon": "assets/icon.png"
 }

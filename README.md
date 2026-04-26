@@ -90,6 +90,58 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.3
+
+A discoverability + ergonomics release. No new MCP tools, no behavior
+changes that affect stored data — but the live tool schema is now
+substantially richer for the agents that call it and the directories
+that score it. **Drop-in upgrade for anyone on 0.3.2.**
+
+**Per-parameter descriptions on every tool.** All 6 MCP tools now
+declare each parameter via `Annotated[T, Field(description=...)]`,
+populating the per-parameter `description` field in `tools/list`.
+Previously each parameter shipped only `type` and `title`; the rich
+docstrings sat in the function body where agents couldn't see them at
+tool-call time. Coverage went 0/21 → 21/21. Agents picking which tool
+to call read these directly, so it's a DX win for Claude Code / Cursor
+use — not just a directory-score win.
+
+**MCP tool annotations.** Each tool now declares `readOnlyHint`,
+`destructiveHint`, `idempotentHint`, `openWorldHint`, and a
+human-friendly `title`. `log_change` is the only writer (append-only,
+not idempotent — each call mints a new event). The five readers
+(`diff`, `blame`, `history`, `changeset`, `search`) are read-only and
+idempotent. None are open-world. Lets MCP clients gate or surface the
+tools appropriately.
+
+**Output schemas on every tool.** New `LogChangeResult` and
+`BlameResult` TypedDicts give the JSON-RPC layer concrete output
+schemas to advertise — was missing on the two `dict`-returning tools.
+The list-returning ones already had auto-generated schemas, so all 6
+are now consistent.
+
+**Custom server icon.** A "stitched timeline" mark — a horizontal
+running stitch where each visible stitch is a captured change event.
+Lives at `assets/icon.svg` and a 512×512 `assets/icon.png`, shipped
+in the Smithery bundle.
+
+**`log_change` and `blame` return stable shapes.** `log_change` now
+always returns `id`, `timestamp`, `status`, `error`, and `warnings`
+keys (with empty values when not applicable) — easier to type-check
+without branching. `blame` does the same on miss: every event field is
+empty, `error` carries the "no history found" message. Same conventions
+as before, just consistent payloads.
+
+**`CLAUDE.md` ↔ `docs/architecture.md` split.** `CLAUDE.md` is now a
+slim agent-instructions file (sources of truth, code conventions,
+version bump checklist). Architecture, data model, MCP tool reference,
+full CLI reference, and the phase plan all moved to
+`docs/architecture.md`.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the full list and reasoning.
+
+---
+
 ## What's new in v0.3.2
 
 An observability-polish release. No new feature surface — the focus is
@@ -144,60 +196,6 @@ and 3.45.3 from source and runs the suite against each via `LD_PRELOAD`,
 locking in WAL + `busy_timeout` behavior across the SQLite versions
 selvedge users are most likely to be on. The Python matrix also gains
 3.13.
-
----
-
-## What's new in v0.3.1
-
-A hardening release — no new feature surface, but Selvedge is now safe to
-run in long-lived agent pools that hammer the database from multiple threads.
-**Drop-in upgrade for anyone on 0.3.0.**
-
-**Concurrent writes no longer blow up.** Every storage write is wrapped in
-a `database is locked` retry with exponential backoff, on top of WAL mode
-and a 5-second `PRAGMA busy_timeout`. The new `tests/test_concurrency.py`
-spawns 8 threads writing 25 events each and asserts all 200 land — that
-test reliably failed before this release.
-
-**Real schema versioning.** The previous `try: ALTER TABLE ... except: pass`
-pattern has been replaced with an explicit `schema_migrations` table that
-records every applied migration with version, name, and timestamp. Partial
-failures roll back atomically. Pre-versioning databases are bootstrapped
-without re-running DDL.
-
-**Structured logging.** Set `SELVEDGE_LOG_LEVEL=DEBUG` (or `INFO`,
-`WARNING`, `ERROR`) to see what's happening inside the storage and
-migration layers. All library modules log under the `selvedge.*`
-namespace — entry points configure a stderr handler at startup.
-
-**Public API surface.** Library users can now import the supported
-surface from the top-level package:
-
-```python
-from selvedge import (
-    SelvedgeStorage, ChangeEvent, ChangeType, EntityType,
-    get_db_path, parse_time_string, check_reasoning_quality,
-)
-```
-
-The frozen surface is locked in by `tests/test_public_api.py` — accidental
-removals fail CI.
-
-**MCP protocol smoke tests.** A new test suite boots the real
-`selvedge-server` subprocess and round-trips every tool over the actual
-JSON-RPC stdio transport. Catches contract drift the in-process tests miss.
-
-**CI gates.** `ruff`, `mypy`, and an 85% coverage floor are now enforced
-on every PR. Current coverage is 92%.
-
-**One sneaky regex fix.** The reasoning-quality validator's `^fixed?$`
-pattern was supposed to match "fix" and "fixed" but actually matched
-"fixe"/"fixed" — the `?` only made the trailing `d` optional. Same bug
-in the `add`, `remove`, `update`, `change`, and `see ...` patterns.
-Rewritten as `^fix(?:ed)?$` etc. Reasoning placeholders that slipped
-through before now get flagged.
-
-See [`CHANGELOG.md`](CHANGELOG.md) for the full list and reasoning.
 
 ---
 

@@ -6,6 +6,91 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.3] — 2026-04-26
+
+A discoverability + ergonomics release. No new MCP tools, no behavior
+changes that affect stored data — but the live tool schema is now
+substantially richer for the agents that read it and the directories
+that score it. **Drop-in upgrade for anyone on 0.3.2.**
+
+### Added
+
+- **Per-parameter descriptions on every MCP tool.** All 6 tools now
+  declare each parameter via `Annotated[T, Field(description=...)]`,
+  populating `inputSchema.properties.<param>.description` in the live
+  tool listing. Previously each parameter shipped only `type` and
+  `title`; the rich docstrings sat in the function body where agents
+  couldn't see them at tool-call time. Agents picking which tool to
+  call read these descriptions directly, so this is a DX win for
+  Claude Code / Cursor / Copilot use, not just a directory-score
+  improvement. Coverage went 0/21 → 21/21.
+- **MCP tool annotations on every tool.** Each tool now declares
+  `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`,
+  and a human-friendly `title`. `log_change` is the only writer (not
+  destructive — it's append-only — but not idempotent, since each call
+  mints a new event). The five readers (`diff`, `blame`, `history`,
+  `changeset`, `search`) are all read-only + idempotent. None are
+  open-world. Lets MCP clients gate or surface tools appropriately.
+- **`outputSchema` on `log_change` and `blame`.** New `LogChangeResult`
+  and `BlameResult` TypedDicts (in `selvedge.server`) give the JSON-RPC
+  layer something concrete to advertise. The four list-returning tools
+  (`diff`, `history`, `changeset`, `search`) already had auto-generated
+  schemas from their `list[dict]` annotation; this brings the dict
+  returners in line so all 6 tools advertise their output.
+- **Custom server icon.** A "stitched timeline" mark — a horizontal
+  running stitch crossing the icon, where each visible stitch is a
+  captured change event. Lives at `assets/icon.svg` and a 512×512
+  `assets/icon.png`. Referenced from `manifest.json` so it ships with
+  the Smithery bundle and renders in the directory's thumbnail.
+
+### Changed
+
+- **`log_change` always returns a complete result payload.** The
+  result now always includes `id`, `timestamp`, `status`, `error`, and
+  `warnings` keys (not just present-when-non-empty). On success,
+  `error` is `""` and `warnings` is `[]` if reasoning passed the
+  quality validator. On validation failure, `id`/`timestamp`/
+  `warnings` are empty and `status` == "error". Required for the new
+  `outputSchema` to validate cleanly. Tests updated to match.
+- **`blame` returns a stable shape on miss.** Empty-history responses
+  now populate every event field with the empty value of its type and
+  set `error` to the "no history found" message. Previously returned
+  the slim `{"error": "..."}`. Same `error`-key convention, fuller
+  payload — easier for callers to type-check without branching.
+- **Tool-level descriptions are dedented at startup.** Each tool's
+  docstring is run through `inspect.cleandoc` once at import time so
+  `tools/list` doesn't leak the function-body indent
+  (`"\n    Get change..."` → `"Get change..."`). Cosmetic but visible
+  in any directory that surfaces the raw description.
+
+### Documentation
+
+- **`CLAUDE.md` ↔ `docs/architecture.md` split.** `CLAUDE.md` is now a
+  thin agent-instructions file (sources of truth, code conventions,
+  version bump checklist, scheduled tasks). The architecture, data
+  model, MCP tool reference, full CLI reference, phase plan, and
+  non-goals all moved to `docs/architecture.md`. Reduces noise on
+  every Claude Code / Cowork session boot and gives the architecture
+  doc a stable home.
+- **isError convention documented.** Empty-history cases (`blame` on
+  an unknown entity, `changeset` with no events) intentionally return
+  `{"error": "..."}` with protocol-level `isError: false`. Empty
+  history isn't a protocol failure; the in-payload `error` key is
+  the documented signal. Codified as a comment in `selvedge.server`
+  module-level docstring.
+
+### Fixed
+
+- **Test helper handles all three FastMCP response shapes.**
+  `tests/test_mcp_protocol.py::_payload` previously assumed
+  `structuredContent={"result": ...}` for every tool. With v0.3.3's
+  TypedDict returns, the structured content for `log_change` and
+  `blame` is the dict itself with no `result` wrap. Helper now
+  detects all three shapes (list-wrapped, dict-direct, content-only)
+  and unwraps correctly.
+
+---
+
 ## [0.3.2] — 2026-04-25
 
 An observability-polish release. No new feature surface — the focus is

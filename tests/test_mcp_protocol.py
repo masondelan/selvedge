@@ -54,19 +54,27 @@ def _payload(result):
     """
     Extract the typed return value from a CallToolResult.
 
-    FastMCP returns a tool's value in two shapes depending on the return
-    annotation:
-      - List returns → ``structuredContent={"result": [...]}`` AND one
-        TextContent block per element under ``content``.
-      - Dict returns → ``structuredContent`` is ``None``; the canonical
-        value lives in ``content[0].text`` as a JSON string.
+    FastMCP returns a tool's value in three shapes depending on the
+    return annotation:
+      - ``list[dict]`` returns → ``structuredContent={"result": [...]}``
+        and one TextContent block per element under ``content``.
+      - ``TypedDict`` returns (v0.3.3+ on ``log_change`` and ``blame``)
+        → ``structuredContent`` IS the dict itself, no ``result`` wrap.
+      - Plain ``dict`` returns (no annotated return type) →
+        ``structuredContent`` is ``None``; the canonical value lives in
+        ``content[0].text`` as a JSON string.
 
-    This helper handles both so callers don't have to know which tool
-    returned which shape.
+    This helper handles all three so callers don't have to know which
+    tool returned which shape.
     """
     if result.structuredContent is not None:
-        return result.structuredContent["result"]
-    # Single-dict path
+        sc = result.structuredContent
+        # List shape: {"result": [...]}
+        if isinstance(sc, dict) and set(sc.keys()) == {"result"}:
+            return sc["result"]
+        # TypedDict shape: the dict itself.
+        return sc
+    # No structuredContent — fall back to TextContent JSON.
     assert result.content, "tool returned no content"
     return json.loads(result.content[0].text)
 
@@ -114,7 +122,10 @@ async def test_log_change_round_trip(server_params):
             payload = _payload(result)
             assert payload["status"] == "logged"
             assert "id" in payload
-            assert "warnings" not in payload  # reasoning is long enough
+            # As of v0.3.3 every LogChangeResult key is always present
+            # (so the schema validator sees a complete object). Empty list
+            # means "reasoning passed the quality validator."
+            assert payload["warnings"] == []
 
 
 @pytest.mark.asyncio

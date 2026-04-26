@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Selvedge icon — concept 3 "stitched timeline".
+    A running stitch crossing the icon left-to-right: each visible
+    segment is a stitch above the fabric line, the gaps are the
+    underside of the stitch passing below. The line is the timeline,
+    each stitch is a captured change event.
+  -->
+
+  <!-- Rounded square background. Warm off-white that reads as fabric. -->
+  <rect x="0" y="0" width="512" height="512" rx="96" ry="96" fill="#F5EFE6"/>
+
+  <!-- Subtle weave texture: very light horizontal warp threads. -->
+  <g stroke="#E8DFD0" stroke-width="2" opacity="0.7">
+    <line x1="56" y1="120" x2="456" y2="120"/>
+    <line x1="56" y1="160" x2="456" y2="160"/>
+    <line x1="56" y1="200" x2="456" y2="200"/>
+    <line x1="56" y1="312" x2="456" y2="312"/>
+    <line x1="56" y1="352" x2="456" y2="352"/>
+    <line x1="56" y1="392" x2="456" y2="392"/>
+  </g>
+
+  <!--
+    The fabric centerline — what the thread sews along. Drawn behind
+    the stitches so the visible stitches sit on top of it.
+  -->
+  <line x1="56" y1="256" x2="456" y2="256"
+        stroke="#D8CDB8" stroke-width="3"/>
+
+  <!--
+    The running stitch. Six visible "above" segments alternating with
+    five gaps where the thread passes underneath. This is the heart of
+    the icon: a record being laid down across time, one stitch per
+    event.
+
+    Stitch math: usable width 56→456 = 400px. 11 equal segments of
+    ~36px each (6 above + 5 below). Anchor points every 36.4px.
+  -->
+  <g stroke="#8B2E1F" stroke-width="14"
+     stroke-linecap="round" fill="none">
+    <!-- Six visible stitches on the topside. -->
+    <line x1="56"  y1="256" x2="92"  y2="256"/>
+    <line x1="129" y1="256" x2="165" y2="256"/>
+    <line x1="201" y1="256" x2="237" y2="256"/>
+    <line x1="274" y1="256" x2="310" y2="256"/>
+    <line x1="347" y1="256" x2="383" y2="256"/>
+    <line x1="420" y1="256" x2="456" y2="256"/>
+  </g>
+
+  <!--
+    Faint trace of the underside thread — gives the eye a continuous
+    timeline even where the stitch dips under the fabric. Same hue,
+    much lighter and thinner.
+  -->
+  <g stroke="#8B2E1F" stroke-width="3" opacity="0.22"
+     stroke-linecap="round" fill="none">
+    <path d="M 92  256 Q 110.5 268, 129 256"/>
+    <path d="M 165 256 Q 183   268, 201 256"/>
+    <path d="M 237 256 Q 255.5 268, 274 256"/>
+    <path d="M 310 256 Q 328.5 268, 347 256"/>
+    <path d="M 383 256 Q 401.5 268, 420 256"/>
+  </g>
+
+  <!--
+    Needle entry/exit marks at each stitch endpoint — a small
+    perpendicular tick gives the icon its tactile, hand-stitched feel
+    instead of a clean machine line.
+  -->
+  <g stroke="#8B2E1F" stroke-width="2" opacity="0.55"
+     stroke-linecap="round">
+    <line x1="56"  y1="248" x2="56"  y2="264"/>
+    <line x1="92"  y1="248" x2="92"  y2="264"/>
+    <line x1="129" y1="248" x2="129" y2="264"/>
+    <line x1="165" y1="248" x2="165" y2="264"/>
+    <line x1="201" y1="248" x2="201" y2="264"/>
+    <line x1="237" y1="248" x2="237" y2="264"/>
+    <line x1="274" y1="248" x2="274" y2="264"/>
+    <line x1="310" y1="248" x2="310" y2="264"/>
+    <line x1="347" y1="248" x2="347" y2="264"/>
+    <line x1="383" y1="248" x2="383" y2="264"/>
+    <line x1="420" y1="248" x2="420" y2="264"/>
+    <line x1="456" y1="248" x2="456" y2="264"/>
+  </g>
+</svg>

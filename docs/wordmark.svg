@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200" role="img" aria-label="selvedge">
+  <!--
+    Selvedge wordmark — brand lockup.
+
+    Locked 2026-04-26. Source-of-truth for the typography is the
+    `.wordmark` class in docs/index.html (lines 121-127):
+      font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace
+      font-weight: 700
+      letter-spacing: -0.045em
+      color: #1F3057
+    And the `.spine` element (lines 109-114, 384) for the red rule:
+      width: 3px equivalent (scaled here to read at small README sizes)
+      color: #B23A2A
+
+    GitHub Markdown can't load Google Fonts, so JetBrains Mono falls
+    back through IBM Plex Mono → ui-monospace → the user's system mono
+    (Menlo / Consolas / DejaVu). The composition (spine + wordmark +
+    ecru card) survives the font fallback even when the letterforms
+    differ slightly from the design source.
+  -->
+
+  <!-- Ecru card. Brand background; lets the lockup read identically
+       on GitHub's light AND dark themes without juggling two SVGs. -->
+  <rect x="0" y="0" width="800" height="200" rx="20" ry="20" fill="#EDE5D3"/>
+
+  <!-- The selvedge spine. The thin red stripe at the edge of woven
+       fabric the project is named for. 8 user-units wide so it stays
+       readable at typical README header sizes; in proportion to the
+       3px CSS spine in docs/index.html once the SVG is rendered at
+       ~480px wide. -->
+  <rect x="160" y="56" width="8" height="88" fill="#B23A2A"/>
+
+  <!-- The wordmark. Lowercase, monospace, indigo. textLength +
+       lengthAdjust pins the rendered width so cross-browser font
+       fallback can't bloat the lockup beyond the canvas. -->
+  <text x="200" y="130"
+        font-family="'JetBrains Mono', 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, ui-monospace, monospace"
+        font-weight="700"
+        font-size="96"
+        letter-spacing="-4.32"
+        fill="#1F3057"
+        textLength="448"
+        lengthAdjust="spacingAndGlyphs">selvedge</text>
+
+  <!-- Sparkle accent, mirrors the small mark in the brand render.
+       Indigo at low opacity so it reads as decoration not signal. -->
+  <g transform="translate(750 162)" fill="#1F3057" opacity="0.35">
+    <path d="M 0 -7 L 1.4 -1.4 L 7 0 L 1.4 1.4 L 0 7 L -1.4 1.4 L -7 0 L -1.4 -1.4 Z"/>
+  </g>
+</svg>

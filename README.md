@@ -1,12 +1,21 @@
-# Selvedge
+<p align="center">
+  <img src="docs/wordmark.svg" alt="selvedge" width="480">
+</p>
 
-[![Tests](https://github.com/masondelan/selvedge/actions/workflows/test.yml/badge.svg)](https://github.com/masondelan/selvedge/actions/workflows/test.yml)
-[![PyPI](https://img.shields.io/pypi/v/selvedge?cacheSeconds=3600)](https://pypi.org/project/selvedge/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/masondelan/selvedge/actions/workflows/test.yml"><img src="https://github.com/masondelan/selvedge/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
+  <a href="https://pypi.org/project/selvedge/"><img src="https://img.shields.io/pypi/v/selvedge?cacheSeconds=3600" alt="PyPI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
 
 **Long-term memory for AI-coded codebases.**
 A `git blame` for AI agents — but for the *why*, not just which line which
 model touched. Captured live, by the agent, as the change happens.
+
+Selvedge is a local MCP server. AI coding agents (Claude Code, Cursor,
+Copilot) call it as they work to log structured change events with
+reasoning. Your data stays in a SQLite file under `.selvedge/` next to
+your code.
 
 ---
 

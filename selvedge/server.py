@@ -46,11 +46,32 @@ from .validation import check_reasoning_quality
 mcp = FastMCP(
     "selvedge",
     instructions=(
-        "Selvedge tracks semantic changes to codebases and databases. "
-        "Call log_change whenever you add, remove, or modify a meaningful entity "
-        "(a DB column, table, function, API endpoint, file, dependency, env var, etc.). "
-        "Include as much reasoning as you have — why the change was made, what prompted it. "
-        "Use diff, blame, history, changeset, and search to answer questions about past changes."
+        "Selvedge captures the WHY behind every change to a codebase — written "
+        "live by the agent making the change, before the session context "
+        "evaporates. The diff is git's job; the reasoning is Selvedge's.\n"
+        "\n"
+        "WHEN TO CALL log_change: immediately after you add, remove, or modify "
+        "a meaningful semantic entity — a DB column, table, function, class, "
+        "API endpoint, file, dependency, env var, config flag, or index. One "
+        "log_change per entity. Don't batch.\n"
+        "\n"
+        "WHAT GOES IN reasoning: the user's original ask, the constraint or "
+        "bug that prompted the change, and any decision that wouldn't be "
+        "obvious from the diff in six months. 'User asked to add 2FA — needs "
+        "phone for SMS verification' is good. 'user request', 'done', 'fix' "
+        "are flagged by the quality validator as low-signal placeholders.\n"
+        "\n"
+        "GROUP related changes with the same changeset_id (a short slug like "
+        "'add-stripe-billing'). Pass the same id to every log_change for that "
+        "feature so they can later be retrieved together via the changeset "
+        "tool.\n"
+        "\n"
+        "WHEN TO READ:\n"
+        "  - blame      — 'who/why for THIS entity, most recent change'\n"
+        "  - diff       — 'full history for THIS entity, newest first'\n"
+        "  - history    — 'everything in the last N days/across a project'\n"
+        "  - changeset  — 'all changes that belong to THIS feature'\n"
+        "  - search     — 'anything mentioning these words'\n"
     ),
 )
 

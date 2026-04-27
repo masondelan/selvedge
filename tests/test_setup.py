@@ -353,6 +353,42 @@ def test_wizard_is_idempotent(fake_home: Path, fake_project: Path):
     assert second.exit_code == 0
 
 
+def test_wizard_dry_run_does_not_touch_disk(
+    fake_home: Path, fake_project: Path
+):
+    """`--non-interactive` without `--yes` (confirm=False) must be a true dry-run.
+
+    Regression: an earlier version of the wizard short-circuited the confirm
+    callback when ``interactive=False``, which made the "dry-run" CLI mode
+    silently install everything. This test pins the corrected behavior.
+    """
+    (fake_home / ".claude").mkdir()
+    config_path = fake_home / ".claude" / "config.json"
+    original_config = json.dumps({"mcpServers": {"github": {"command": "x"}}}, indent=2)
+    config_path.write_text(original_config)
+
+    outcome = run_wizard(
+        project=fake_project,
+        home=fake_home,
+        interactive=False,        # CLI's --non-interactive
+        confirm=lambda *_: False,  # CLI's no-yes-flag → constant False
+        init_fn=_stub_init,
+        install_hook_fn=_stub_install_hook,
+    )
+
+    # Every step should report "skipped" — that's the contract of dry-run
+    statuses = [s.status for s in outcome.steps]
+    assert all(s == "skipped" for s in statuses), (
+        f"dry-run leaked: got {statuses}"
+    )
+
+    # And the disk is byte-identical to before the wizard ran
+    assert config_path.read_text() == original_config
+    assert not (fake_project / ".selvedge").exists()
+    assert not (fake_project / "CLAUDE.md").exists()
+    assert not (fake_project / ".git" / "hooks" / "post-commit").exists()
+
+
 def test_wizard_confirm_no_skips_step(
     fake_home: Path, fake_project: Path
 ):

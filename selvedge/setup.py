@@ -314,7 +314,6 @@ def run_wizard(
             _install_for_agent(
                 agent,
                 outcome=outcome,
-                interactive=interactive,
                 force=force,
                 confirm=confirm,
             )
@@ -329,9 +328,10 @@ def run_wizard(
                     detail=str(project / ".selvedge"),
                 )
             )
-        elif interactive and not confirm(
-            f"Run `selvedge init` in {project}?", True
-        ):
+        elif not confirm(f"Run `selvedge init` in {project}?", True):
+            # ``confirm`` returning False is the dry-run signal (set by
+            # the CLI's ``--non-interactive`` without ``--yes``). Skip
+            # the step rather than silently doing it.
             outcome.add(
                 StepResult(
                     "Initialize project",
@@ -341,11 +341,7 @@ def run_wizard(
             )
         else:
             try:
-                # Late import — ``config.init_project`` would otherwise
-                # pull in the storage layer at module import time.
-                from .config import init_project as _init_project
-
-                fn = init_fn or _init_project
+                fn = init_fn or _default_init_project
                 fn(project)
                 outcome.add(
                     StepResult(
@@ -374,9 +370,7 @@ def run_wizard(
                     detail="not a git repository",
                 )
             )
-        elif interactive and not confirm(
-            "Install Selvedge post-commit hook?", True
-        ):
+        elif not confirm("Install Selvedge post-commit hook?", True):
             outcome.add(
                 StepResult(
                     "Install git hook",
@@ -411,14 +405,21 @@ def _install_for_agent(
     agent: AgentTarget,
     *,
     outcome: WizardOutcome,
-    interactive: bool,
     force: bool,
     confirm: Callable[[str, bool], bool],
 ) -> None:
-    """Run the per-agent install (MCP config + prompt block)."""
+    """Run the per-agent install (MCP config + prompt block).
+
+    The ``confirm`` callback decides whether to proceed at every
+    user-facing decision point. Interactive vs non-interactive mode is
+    encoded entirely in what ``confirm`` returns: production
+    interactive runs use ``click.confirm``; ``--non-interactive --yes``
+    passes a constant-True lambda; ``--non-interactive`` alone passes
+    a constant-False lambda (so the wizard becomes a dry-run preview).
+    """
     # MCP entry — only if the agent has a config_path
     if agent.config_path is not None:
-        if interactive and not confirm(
+        if not confirm(
             f"Install Selvedge MCP entry into {agent.label} "
             f"({agent.config_path})?",
             True,
@@ -453,7 +454,7 @@ def _install_for_agent(
             )
 
     # Prompt block — every agent gets one
-    if interactive and not confirm(
+    if not confirm(
         f"Install Selvedge prompt block into {agent.prompt_path}?",
         True,
     ):
@@ -488,6 +489,27 @@ def _default_confirm(message: str, default: bool) -> bool:
     import click
 
     return click.confirm(message, default=default)
+
+
+def _default_init_project(project: Path) -> None:
+    """Production init step — creates ``.selvedge/`` AND bootstraps the DB.
+
+    Mirrors what ``selvedge init`` does at the CLI level: ``init_project``
+    creates the directory, then ``SelvedgeStorage`` opens (and creates if
+    missing) the SQLite file inside it. Without the second step the
+    directory exists but the DB doesn't materialize until the first
+    ``log_change`` call — which means ``selvedge status`` immediately
+    after setup would see "DB file does not exist yet" and confuse the
+    user about whether the wizard worked.
+    """
+    # Late imports keep ``selvedge.setup`` cheap to import standalone
+    # (the wizard module is imported by tests, the CLI, and any future
+    # automation; pulling storage at import time is wasteful).
+    from .config import init_project
+    from .storage import SelvedgeStorage
+
+    selvedge_dir = init_project(project)
+    SelvedgeStorage(selvedge_dir / "selvedge.db")
 
 
 def _default_install_hook(project: Path) -> None:

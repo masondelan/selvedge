@@ -1323,14 +1323,18 @@ def _diagnose_empty_state(storage: SelvedgeStorage) -> list[str]:
 @click.option(
     "--non-interactive",
     is_flag=True,
-    help="Don't prompt — only run steps that are safe without confirmation.",
+    help=(
+        "Don't prompt. Without --yes this is a dry run — every step is "
+        "marked 'skipped' and no files are touched. Pair with --yes to "
+        "actually run the wizard unattended (CI / devcontainer)."
+    ),
 )
 @click.option(
     "-y",
     "--yes",
     "assume_yes",
     is_flag=True,
-    help="Answer 'yes' to every confirmation. Pairs with --non-interactive for CI.",
+    help="Answer 'yes' to every confirmation. Pair with --non-interactive for CI.",
 )
 @click.option(
     "--force",

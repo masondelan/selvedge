@@ -37,3 +37,12 @@ Thumbs.db
 # Env
 .env
 .env.local
+
+# Internal strategy docs — not for public consumption
+docs/long-term-thesis.md
+docs/engagement-strategy.md
+docs/content-prompts/
+docs/directory-audits/
+docs/release-content/
+launch/listings/
+launch/engagement/

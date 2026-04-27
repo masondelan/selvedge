@@ -16,6 +16,9 @@
   <meta name="twitter:title" content="Selvedge — Long-term memory for AI-coded codebases" />
   <meta name="twitter:description" content="A git blame for AI agents — for the why, not just which line which model touched. Captured live, in context." />
   <link rel="canonical" href="https://masondelan.github.io/selvedge" />
+  <link rel="icon" type="image/png" href="icon.png" />
+  <meta property="og:image" content="icon.png" />
+  <meta name="twitter:image" content="icon.png" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -26,7 +29,7 @@
     "description": "Open-source MCP server that captures why an AI agent made every code change, live in context, for long-term codebase change tracking.",
     "url": "https://masondelan.github.io/selvedge",
     "downloadUrl": "https://pypi.org/project/selvedge",
-    "softwareVersion": "0.3.1",
+    "softwareVersion": "0.3.4",
     "author": {
       "@type": "Person",
       "name": "Mason Delan",
@@ -105,6 +108,13 @@
       max-width: 900px;
       margin: 0 auto;
       text-align: center;
+    }
+    .hero-icon {
+      width: 88px;
+      height: 88px;
+      border-radius: 20px;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 8px 32px rgba(200,169,110,0.15);
     }
     .hero-badge {
       display: inline-flex; align-items: center; gap: 0.5rem;
@@ -429,8 +439,9 @@
 
 <!-- HERO -->
 <div class="hero">
+  <img src="icon.png" alt="Selvedge — stitched timeline icon" class="hero-icon" />
   <div class="hero-badge">
-    <span>✦</span> Open source · MCP server · Python
+    <span>✦</span> v0.3.4 · MCP server · Python · Open source
   </div>
   <h1>The <span>why</span> behind<br/>your AI-written code</h1>
   <p>
@@ -443,7 +454,7 @@
     <a href="https://github.com/masondelan/selvedge/blob/main/docs/getting-started.md" target="_blank" class="btn-secondary">Get started →</a>
   </div>
   <div class="install-strip">
-    <code class="install-cmd" onclick="navigator.clipboard.writeText('pip install selvedge')">pip install selvedge</code>
+    <code class="install-cmd" onclick="navigator.clipboard.writeText('pip install selvedge && selvedge setup')">pip install selvedge &amp;&amp; selvedge setup</code>
     <span class="install-label">Click to copy</span>
   </div>
 </div>
@@ -506,42 +517,44 @@
 <!-- HOW IT WORKS -->
 <section id="how-it-works">
   <div class="section-label">How it works</div>
-  <h2 class="section-title">Set up in 5 minutes.<br/>Query forever.</h2>
-  <p class="section-sub">Selvedge runs as an MCP server. Your AI agent calls it as it works. You query it whenever you need answers.</p>
+  <h2 class="section-title">Two commands.<br/>Wired into every AI tool.</h2>
+  <p class="section-sub">v0.3.4 collapses the install funnel from six manual steps to one wizard. Selvedge runs as an MCP server, your agent calls it as it works, you query whenever you need answers.</p>
   <div class="steps">
     <div class="step">
       <div class="step-num">1</div>
-      <div class="step-title">Install & init</div>
-      <div class="step-desc">Install the package and initialize a local SQLite database in your project root.</div>
+      <div class="step-title">Install</div>
+      <div class="step-desc"><code style="font-size:0.8em;color:var(--accent)">pip install selvedge</code> — three deps (mcp, click, rich), local SQLite, no servers, no accounts.</div>
     </div>
     <div class="step">
       <div class="step-num">2</div>
-      <div class="step-title">Connect your agent</div>
-      <div class="step-desc">Add Selvedge to your Claude Code MCP config. Tell your agent to call <code style="font-size:0.8em;color:var(--accent)">log_change</code> as it works.</div>
+      <div class="step-title">Run the wizard</div>
+      <div class="step-desc"><code style="font-size:0.8em;color:var(--accent)">selvedge setup</code> — detects Claude Code, Cursor, Copilot configs, installs the MCP entry, drops the agent prompt into your project, sets up the git hook. Idempotent. <code style="font-size:0.8em">.bak</code> before any modification.</div>
     </div>
     <div class="step">
       <div class="step-num">3</div>
       <div class="step-title">History accumulates</div>
-      <div class="step-desc">Every schema change, function, endpoint, and dependency gets logged with full context.</div>
+      <div class="step-desc">Every schema change, function, endpoint, env var, and dependency gets logged with reasoning — captured by the agent in the same context that produced the change.</div>
     </div>
     <div class="step">
       <div class="step-num">4</div>
       <div class="step-title">Query anytime</div>
-      <div class="step-desc">Use the CLI or MCP tools to answer any question about your codebase's history.</div>
+      <div class="step-desc">CLI, MCP tools, or live tail with <code style="font-size:0.8em;color:var(--accent)">selvedge watch</code>. Six tools cover the lifecycle. Every read command supports <code style="font-size:0.8em">--json</code>.</div>
     </div>
   </div>
   <div class="code-block">
-<span class="cb-comment"># 1. Install</span>
-<span>pip install selvedge &amp;&amp; selvedge init</span>
+<span class="cb-comment"># 1. Install + wire it in</span>
+<span>pip install selvedge &amp;&amp; selvedge setup</span>
 
-<span class="cb-comment"># 2. Add to ~/.claude/config.json</span>
-<span>{ "mcpServers": { "selvedge": { "command": "selvedge-server" } } }</span>
+<span class="cb-comment"># 2. Setup detected your tools, wrote configs, made backups.</span>
+<span class="cb-comment">#    Restart your agent. From now on, every change gets logged.</span>
 
 <span class="cb-comment"># 3. Query</span>
 <span class="cb-cmd">selvedge diff users            </span><span class="cb-out"># full table history</span>
 <span class="cb-cmd">selvedge blame payments.amount </span><span class="cb-out"># who, when, why</span>
 <span class="cb-cmd">selvedge history --since 30d   </span><span class="cb-out"># last 30 days</span>
+<span class="cb-cmd">selvedge changeset add-billing </span><span class="cb-out"># every event in a feature</span>
 <span class="cb-cmd">selvedge search "stripe"       </span><span class="cb-out"># full-text search</span>
+<span class="cb-cmd">selvedge watch --since 1h      </span><span class="cb-out"># live tail</span>
   </div>
 </section>
 
@@ -551,8 +564,14 @@
 <section id="features">
   <div class="section-label">Features</div>
   <h2 class="section-title">Everything your team needs<br/>to stay in sync.</h2>
-  <p class="section-sub">Five MCP tools. A full CLI. Zero config. Works with any AI agent that supports MCP.</p>
+  <p class="section-sub">Six MCP tools, a full CLI, an interactive setup wizard. Zero config. Works with any AI agent that supports MCP.</p>
   <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">🪡</div>
+      <div class="feature-title">One-command setup</div>
+      <div class="feature-desc">v0.3.4: <code style="font-size:0.8em">selvedge setup</code> detects Claude Code, Cursor, Copilot. Writes MCP entries, prompt blocks, the post-commit hook. <code style="font-size:0.8em">.bak</code> before any change.</div>
+      <div class="feature-code">selvedge setup</div>
+    </div>
     <div class="feature-card">
       <div class="feature-icon">🔍</div>
       <div class="feature-title">Semantic blame</div>
@@ -566,27 +585,39 @@
       <div class="feature-code">selvedge diff</div>
     </div>
     <div class="feature-card">
+      <div class="feature-icon">🧷</div>
+      <div class="feature-title">Changesets</div>
+      <div class="feature-desc">Group related events under a feature slug. Pull the full scope of <code style="font-size:0.8em">add-stripe-billing</code> across DB columns, endpoints, and dependencies in one query.</div>
+      <div class="feature-code">selvedge changeset</div>
+    </div>
+    <div class="feature-card">
       <div class="feature-icon">🔎</div>
       <div class="feature-title">Full-text search</div>
       <div class="feature-desc">Search across entity paths, diffs, reasoning, and agents. Find everything related to a feature, decision, or bug.</div>
       <div class="feature-code">selvedge search</div>
     </div>
     <div class="feature-card">
+      <div class="feature-icon">📡</div>
+      <div class="feature-title">Live tail</div>
+      <div class="feature-desc">v0.3.4: <code style="font-size:0.8em">selvedge watch</code> streams new events as they're logged. Same filters as <code style="font-size:0.8em">history</code>. <code style="font-size:0.8em">--json</code> for piping.</div>
+      <div class="feature-code">selvedge watch</div>
+    </div>
+    <div class="feature-card">
       <div class="feature-icon">⚡</div>
       <div class="feature-title">MCP native</div>
-      <div class="feature-desc">Five tools AI agents call directly: log_change, diff, blame, history, search. Works with Claude Code, Cursor, and any MCP client.</div>
+      <div class="feature-desc">Six tools AI agents call directly: log_change, diff, blame, history, changeset, search. Works with Claude Code, Cursor, Copilot, and any MCP client.</div>
       <div class="feature-code">MCP server</div>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🗄️</div>
       <div class="feature-title">Zero config SQLite</div>
-      <div class="feature-desc">Local SQLite database. Commit it to share history with your team, or keep it local. No servers, no accounts required.</div>
+      <div class="feature-desc">Local SQLite database. Commit it to share history with your team, or keep it local. No servers, no accounts, no API keys.</div>
       <div class="feature-code">pip install selvedge</div>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🧩</div>
       <div class="feature-title">Structured events</div>
-      <div class="feature-desc">Every event captures entity path, change type, diff, reasoning, agent, session ID, and git commit. Queryable, filterable, exportable.</div>
+      <div class="feature-desc">Every event captures entity path, change type, diff, reasoning, agent, session ID, git commit, and changeset. Queryable, filterable, exportable.</div>
       <div class="feature-code">--json flag</div>
     </div>
   </div>
@@ -596,13 +627,13 @@
 <div class="cta-section">
   <div class="section-label">Get started</div>
   <h2 class="section-title">Start capturing history today.</h2>
-  <p class="section-sub">Open source. Free forever. One command to install.</p>
+  <p class="section-sub">Open source. Free forever. Two commands and you're wired in.</p>
   <div class="hero-actions">
     <a href="https://github.com/masondelan/selvedge" target="_blank" class="btn-primary">View on GitHub</a>
-    <a href="https://github.com/masondelan/selvedge/blob/main/docs/getting-started.md" target="_blank" class="btn-secondary">Read the docs →</a>
+    <a href="https://smithery.ai/servers/masondelan/selvedge" target="_blank" class="btn-secondary">One-click install via Smithery →</a>
   </div>
   <div class="install-strip" style="margin-top:2rem">
-    <code class="install-cmd" onclick="navigator.clipboard.writeText('pip install selvedge')">pip install selvedge</code>
+    <code class="install-cmd" onclick="navigator.clipboard.writeText('pip install selvedge && selvedge setup')">pip install selvedge &amp;&amp; selvedge setup</code>
   </div>
 </div>
 
@@ -612,7 +643,9 @@
   <div class="footer-links">
     <a href="https://github.com/masondelan/selvedge" target="_blank">GitHub</a>
     <a href="https://pypi.org/project/selvedge" target="_blank">PyPI</a>
-    <a href="https://github.com/masondelan/selvedge/blob/main/docs/getting-started.md" target="_blank">Docs</a>
+    <a href="https://smithery.ai/servers/masondelan/selvedge" target="_blank">Smithery</a>
+    <a href="https://github.com/masondelan/selvedge/blob/main/CHANGELOG.md" target="_blank">Changelog</a>
+    <a href="https://github.com/masondelan/selvedge/blob/main/docs/architecture.md" target="_blank">Architecture</a>
     <a href="https://github.com/masondelan/selvedge/issues" target="_blank">Issues</a>
   </div>
   <span class="footer-copy">MIT License</span>

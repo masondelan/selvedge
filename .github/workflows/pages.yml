@@ -29,6 +29,13 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
+        with:
+          # Auto-enable Pages on the repo if it isn't already configured.
+          # Without this the workflow needs a manual one-time toggle in
+          # Settings -> Pages -> Source: GitHub Actions, which is what
+          # made every run from Apr 22 through v0.3.4 fail with
+          # "HttpError: Not Found" on this configure-pages step.
+          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5

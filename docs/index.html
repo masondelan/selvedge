@@ -364,6 +364,38 @@
       margin: 0;
       border: 0;
     }
+
+    /* ----- Horizon timeline ------------------------------------------- */
+    /* Quiet two-column row stack. Mono timestamp on the left in brick,
+       prose on the right. No boxes — just hairline rules between rows.   */
+    .horizon {
+      margin-top: 32px;
+      border-top: 1px solid rgba(31, 48, 87, 0.18);
+    }
+    .horizon-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 28px;
+      padding: 16px 0;
+      border-bottom: 1px solid rgba(31, 48, 87, 0.12);
+      align-items: baseline;
+    }
+    .horizon-when {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #B23A2A;
+      font-weight: 500;
+    }
+    .horizon-then {
+      font-size: 15px;
+      line-height: 1.55;
+      color: #1A1A1F;
+    }
+    @media (max-width: 600px) {
+      .horizon-row { grid-template-columns: 76px 1fr; gap: 16px; }
+    }
   </style>
 </head>
 
@@ -377,8 +409,6 @@
     <!--  HERO  —  The lockup, lede, stamped install                    -->
     <!-- ============================================================== -->
     <section class="mb-28 md:mb-36">
-
-      <p class="eyebrow mb-10">selvedge · v0.3.4 · open source · mit</p>
 
       <div class="flex items-stretch gap-7 md:gap-9 mb-12">
         <div class="w-[3px] bg-brick self-stretch"></div>
@@ -576,6 +606,56 @@
     </section>
 
     <!-- ============================================================== -->
+    <!--  THE LONG VIEW  —  what compounds                              -->
+    <!-- ============================================================== -->
+    <section class="mb-28 md:mb-36">
+      <p class="eyebrow mb-4">— the long view</p>
+      <h2 class="h-section text-4xl md:text-6xl mb-10 lowercase">trivial day one.<br>structural year two.</h2>
+
+      <div class="max-w-prose space-y-6 text-inkwell text-lg leading-relaxed">
+        <p>
+          A fresh Selvedge DB is worth almost nothing. The interesting
+          version is the one that's been running on a codebase you
+          actually care about for eighteen months — when every column
+          you can't explain, every dependency you're afraid to remove,
+          every <em>"we don't know why this is here"</em> moment finally
+          has an answer written by the agent that put it there.
+        </p>
+        <p>
+          Install cost is flat. The data accrues. That asymmetry —
+          small today, load-bearing later — is the entire reason to
+          start now instead of after the codebase has already gotten
+          away from you.
+        </p>
+      </div>
+
+      <div class="horizon max-w-prose">
+        <div class="horizon-row">
+          <div class="horizon-when">day 1</div>
+          <div class="horizon-then">the db is empty. that's fine.</div>
+        </div>
+        <div class="horizon-row">
+          <div class="horizon-when">3 months</div>
+          <div class="horizon-then">the regression you can't explain — Selvedge tells you which agent added the column, on what prompt, and why.</div>
+        </div>
+        <div class="horizon-row">
+          <div class="horizon-when">1 year</div>
+          <div class="horizon-then">the migration scope is one query, not a two-week archaeology spike across grep, slack, and people who don't work here anymore.</div>
+        </div>
+        <div class="horizon-row">
+          <div class="horizon-when">2+ years</div>
+          <div class="horizon-then">the answer to questions you'd otherwise have to rewrite the codebase to ask.</div>
+        </div>
+      </div>
+
+      <p class="mt-10 max-w-prose font-sans text-fade leading-relaxed text-sm">
+        The pitch is not "ship faster." The pitch is the receipts
+        you'll wish you had — for the postmortem, the migration, the
+        auditor, the acquirer, the next maintainer.
+      </p>
+    </section>
+
+    <!-- ============================================================== -->
     <!--  SETUP                                                         -->
     <!-- ============================================================== -->
     <section class="mb-28 md:mb-36">
@@ -644,7 +724,7 @@
         <div class="w-[3px] bg-brick"></div>
         <div>
           <p class="wordmark text-2xl">selvedge</p>
-          <p class="font-mono text-fade text-xs tracking-widest mt-2 lowercase">v0.3.4 · open source · mit</p>
+          <p class="font-mono text-fade text-xs tracking-widest mt-2 lowercase">the why, woven into the change</p>
         </div>
       </div>
 

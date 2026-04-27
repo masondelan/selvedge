@@ -380,7 +380,7 @@ threshold for the **verified** badge (the only other verification
 route — TXT record on homepage host — is blocked while homepage is
 github.com).
 
-### Phase 2.10 — First-run that just works (Next · v0.3.4)
+### Phase 2.10 — First-run that just works (DONE ✓ · v0.3.4)
 > The biggest user-funnel cliff today is first-run: pip install, edit
 > `~/.claude/config.json`, restart agent, `selvedge init`, copy-paste a
 > system prompt, install the git hook — six steps and three of them are
@@ -389,27 +389,27 @@ github.com).
 > scoped as Phase 2.9 / v0.3.3; deferred when v0.3.3 became a
 > discoverability-only release.)
 
-- [ ] **`selvedge setup` interactive wizard** — detects installed AI
+- [x] **`selvedge setup` interactive wizard** — detects installed AI
       tooling (Claude Code, Cursor, Copilot) by looking for their config
       files, offers to install the MCP entry into each one in place,
       runs `selvedge init` if not already done, prompts to install the
       post-commit hook, and offers to drop the recommended agent prompt
       block into `CLAUDE.md` / `.cursorrules`. `--non-interactive` for
       scripted installs (CI bootstrap, devcontainer postCreate).
-- [ ] **`selvedge prompt` command** — prints the canonical agent
+- [x] **`selvedge prompt` command** — prints the canonical agent
       instructions paragraph; `--install <file>` writes the block to a
       target file (idempotent, preserves the rest of the file). Lets
       users keep the prompt in source control without copy-paste drift.
-- [ ] **`selvedge watch`** — live-tail of new events as they're logged.
+- [x] **`selvedge watch`** — live-tail of new events as they're logged.
       Trust-but-verify for users who want to see what their agent is
       capturing in real time, and a much better debugging surface than
       "run `selvedge status` repeatedly." Should respect `--since`,
       `--entity`, `--project`, and `--agent` filters.
-- [ ] **Better first-run errors** — replace "no tool calls recorded yet"
+- [x] **Better first-run errors** — replace "no tool calls recorded yet"
       with a one-liner that points at `selvedge setup`. Detect the
       common "MCP entry exists but agent not restarted" case from
       `tool_calls` being empty for ≥5 minutes after install.
-- [ ] **Onboarding test coverage** — `tests/test_setup.py` covering the
+- [x] **Onboarding test coverage** — `tests/test_setup.py` covering the
       detect/install paths for each agent type (uses tmp_path config
       fixtures, no real config touched).
 

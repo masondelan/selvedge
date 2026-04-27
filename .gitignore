@@ -46,3 +46,21 @@ docs/directory-audits/
 docs/release-content/
 launch/listings/
 launch/engagement/
+
+# Internal — strategy, working notes, dashboard system. Surfaced in
+# docs/dashboard.html → "internal" section so they stay visible locally.
+docs/long-term-thesis.md
+docs/engagement-strategy.md
+docs/dashboard.html
+docs/dashboard-data.json
+docs/dashboard-task-prompt.md
+docs/content-prompts/
+docs/directory-audits/
+docs/release-content/
+docs/mcp-registry-submission.md
+launch/listings/
+launch/engagement/
+launch/seo-rewrite-handoff.md
+launch/awesome-lists-general.md
+launch/twitter-thread.md
+launch/newsletters.md

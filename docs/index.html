@@ -17,6 +17,7 @@
   <meta name="twitter:title" content="Selvedge">
   <meta name="twitter:description" content="git blame for the why behind AI-written code. Captured live, by the agent.">
   <meta name="twitter:image" content="icon.png">
+  <meta name="theme-color" content="#EDE5D3">
   <link rel="canonical" href="https://masondelan.github.io/selvedge">
   <link rel="icon" type="image/png" href="icon.png">
   <script type="application/ld+json">
@@ -40,410 +41,631 @@
   }
   </script>
 
-  <style>
-    /* ------------------------------------------------------------------ */
-    /*  Tokens — linen + rust, mirroring the icon. Single accent color.   */
-    /* ------------------------------------------------------------------ */
-    :root {
-      --bg:        #F4EEE3;
-      --bg-code:   #FBF8F1;
-      --text:      #1F1B17;
-      --dim:       #5C534A;
-      --very-dim:  #9C9087;
-      --accent:    #8B2E1F;
-      --line:      #D8CDB8;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg:        #1A1815;
-        --bg-code:   #14110E;
-        --text:      #E8DFD0;
-        --dim:       #9C9087;
-        --very-dim:  #5C534A;
-        --accent:    #D2725F;
-        --line:      #3A332B;
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ecru:      '#EDE5D3',
+            ecruDeep:  '#E4DAC4',
+            indigo:    { DEFAULT: '#1F3057', deep: '#0F1B33' },
+            brick:     '#B23A2A',
+            fade:      '#5C6B82',
+            inkwell:   '#1A1A1F',
+            patina:    '#8B8478',
+          },
+          fontFamily: {
+            mono: ['"JetBrains Mono"', '"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+          },
+          maxWidth: {
+            'page': '1080px',
+            'prose': '640px',
+          },
+        }
       }
     }
+  </script>
 
-    *, *::before, *::after { box-sizing: border-box; }
-    html { -webkit-text-size-adjust: 100%; }
-
-    /* Body uses a serif stack on purpose. Most "AI-coded" landing pages
-       reach for Inter or system-ui; a real serif body is the single
-       biggest typographic signal that this was made deliberately. */
+  <style>
+    /* ------------------------------------------------------------------ */
+    /*  Selvedge — confident and quiet. No gradients. No drop shadows.   */
+    /* ------------------------------------------------------------------ */
+    html, body { background: #EDE5D3; }
     body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: "Charter", "Bitstream Charter", "Sitka Text", "Hoefler Text",
-                    Cambria, "Source Serif Pro", ui-serif, Georgia, serif;
-      font-size: 18px;
-      line-height: 1.55;
-      padding: 3.5rem 1.25rem 5rem;
+      font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #1A1A1F;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: "ss01", "cv01", "cv11";
     }
 
-    .wrap {
-      max-width: 680px;
-      margin: 0 auto;
+    /* ----- Paper grain overlay ---------------------------------------- */
+    /* SVG noise filter rendered as an inline data-uri. Very subtle —
+       just enough to keep the cream from looking like a flat hex code.   */
+    .paper-grain::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 220px 220px;
+      opacity: 0.07;
+      mix-blend-mode: multiply;
     }
 
-    a {
-      color: var(--accent);
-      text-decoration: underline;
-      text-decoration-thickness: 1px;
-      text-underline-offset: 0.15em;
+    /* ----- The Selvedge spine ----------------------------------------- */
+    /* A 3px brick-red stripe down the left margin. Fixed-position so it
+       persists across every section as the user scrolls — the page IS
+       the selvedge edge.                                                  */
+    .spine {
+      position: fixed;
+      left: 40px;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: #B23A2A;
+      z-index: 2;
     }
-    a:hover { text-decoration-thickness: 2px; }
-
-    /* Inline code: monospace, with a tiny inset background so it's
-       distinguishable from prose without being loud. */
-    code {
-      font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
-      font-size: 0.9em;
-    }
-    :not(pre) > code,
-    :not(pre) > a > code {
-      background: var(--bg-code);
-      padding: 0.1em 0.35em;
-      border-radius: 3px;
-      border: 1px solid var(--line);
+    @media (max-width: 768px) {
+      .spine { left: 16px; }
     }
 
-    pre {
-      background: var(--bg-code);
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      padding: 1rem 1.15rem;
-      overflow-x: auto;
-      font-size: 14px;
-      line-height: 1.55;
-      margin: 1.25rem 0;
-      color: var(--text);
-    }
-    pre code {
-      font-size: inherit;
-      background: transparent;
-      padding: 0;
-      border: 0;
+    /* ----- The lockup ------------------------------------------------- */
+    .wordmark {
+      font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace;
+      font-weight: 700;
+      letter-spacing: -0.045em;
+      line-height: 0.95;
+      color: #1F3057;
     }
 
-    /* Rust-colored prompt prefix in code blocks — same vibe as the
-       icon's single accent stitch. */
-    pre .p { color: var(--accent); user-select: none; }
-    pre .c { color: var(--very-dim); }
-
-    /* ----- Header ------------------------------------------------------ */
-    header.head {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 2.5rem;
-      padding-bottom: 1.25rem;
-      border-bottom: 1px solid var(--line);
-    }
-    header.head img {
-      width: 48px;
-      height: 48px;
-      border-radius: 11px;
-      flex-shrink: 0;
-    }
-    header.head h1 {
-      margin: 0;
-      font-size: 1.7rem;
-      font-weight: 600;
-      letter-spacing: -0.012em;
-      line-height: 1.1;
-      font-family: inherit;
-    }
-    header.head .byline {
-      margin: 0.15rem 0 0;
-      font-size: 0.92rem;
-      color: var(--dim);
-      font-family: inherit;
-    }
-    header.head .byline code {
-      font-size: 0.88em;
-      color: var(--text);
+    /* ----- Headings --------------------------------------------------- */
+    .h-section {
+      font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace;
+      font-weight: 500;
+      letter-spacing: -0.025em;
+      line-height: 1.05;
+      color: #1F3057;
     }
 
-    /* ----- Lede -------------------------------------------------------- */
-    .lede {
-      font-size: 1.16rem;
-      line-height: 1.62;
-      margin: 0 0 2rem;
-    }
-    .lede em {
-      font-style: italic;
-      color: var(--accent);
+    .eyebrow {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #5C6B82;
       font-weight: 500;
     }
 
-    /* ----- Sections ---------------------------------------------------- */
-    main h2 {
-      font-size: 1.18rem;
-      margin: 3rem 0 0.75rem;
+    /* ----- Stamped install label -------------------------------------- */
+    .stamp {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 22px 14px 18px;
+      border: 1px solid #1F3057;
+      background: transparent;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      color: #1F3057;
+      position: relative;
+    }
+    .stamp::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: #B23A2A;
+      flex-shrink: 0;
+    }
+    .stamp .stamp-meta {
+      color: #8B8478;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-left: 8px;
+      padding-left: 14px;
+      border-left: 1px solid rgba(31, 48, 87, 0.25);
+    }
+
+    /* ----- Bento grid ------------------------------------------------- */
+    .bento {
+      display: grid;
+      grid-template-columns: 1fr;
+      border-left: 1px solid rgba(31, 48, 87, 0.2);
+      border-top: 1px solid rgba(31, 48, 87, 0.2);
+    }
+    @media (min-width: 700px) { .bento { grid-template-columns: 1fr 1fr; } }
+    @media (min-width: 1000px) { .bento { grid-template-columns: 1fr 1fr 1fr; } }
+    .bento-cell {
+      padding: 28px 28px 32px;
+      border-right: 1px solid rgba(31, 48, 87, 0.2);
+      border-bottom: 1px solid rgba(31, 48, 87, 0.2);
+      background: transparent;
+      position: relative;
+    }
+    .bento-cell .tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #B23A2A;
+      margin-bottom: 12px;
+      display: block;
+    }
+    .bento-cell .name {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+      font-size: 22px;
+      color: #1F3057;
+      margin-bottom: 10px;
+      letter-spacing: -0.015em;
+    }
+    .bento-cell .desc {
+      font-size: 14px;
+      line-height: 1.55;
+      color: #1A1A1F;
+    }
+
+    /* ----- Terminal block --------------------------------------------- */
+    .terminal {
+      background: #0F1B33;
+      padding: 28px 32px 32px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13.5px;
+      line-height: 1.7;
+      color: #EDE5D3;
+      position: relative;
+      overflow-x: auto;
+    }
+    .terminal .prompt    { color: #5C6B82; }
+    .terminal .label     { color: #8B8478; }
+    .terminal .terminal-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #5C6B82;
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(237, 229, 211, 0.08);
+    }
+    .terminal .terminal-head .dot {
+      width: 6px; height: 6px; background: #B23A2A; flex-shrink: 0;
+    }
+    /* The "Reasoning" block is the Selvedge ID — bordered in brick red. */
+    .reasoning {
+      display: block;
+      margin-top: 14px;
+      padding: 14px 16px 14px 18px;
+      border: 1px solid #B23A2A;
+      position: relative;
+    }
+    .reasoning::before {
+      content: 'ID';
+      position: absolute;
+      top: -7px;
+      left: 14px;
+      background: #0F1B33;
+      color: #B23A2A;
+      font-size: 9px;
+      letter-spacing: 0.22em;
+      padding: 0 6px;
       font-weight: 600;
-      letter-spacing: -0.005em;
-      font-family: inherit;
     }
 
-    main p { margin: 0 0 1.05rem; }
-
-    main ul {
-      padding-left: 1.4rem;
-      margin: 0 0 1.05rem;
+    /* ----- Inline code ------------------------------------------------ */
+    code.inline {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.88em;
+      background: rgba(31, 48, 87, 0.06);
+      padding: 1px 6px;
+      border: 1px solid rgba(31, 48, 87, 0.12);
+      color: #1F3057;
     }
-    main li { margin: 0.25rem 0; }
 
-    /* ----- Table — for the tools list and comparison ----------------- */
-    table {
-      border-collapse: collapse;
+    /* ----- Comparison table ------------------------------------------- */
+    .compare {
       width: 100%;
-      margin: 1.25rem 0 1.5rem;
-      font-size: 0.95rem;
+      border-collapse: collapse;
+      font-size: 14px;
     }
-    th, td {
+    .compare th, .compare td {
       text-align: left;
-      padding: 0.55rem 0.85rem 0.55rem 0;
-      border-bottom: 1px solid var(--line);
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(31, 48, 87, 0.18);
       vertical-align: top;
     }
-    th {
-      font-weight: 600;
-      color: var(--dim);
+    .compare th {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
-      font-size: 0.72rem;
-      letter-spacing: 0.07em;
-      padding-bottom: 0.4rem;
+      color: #5C6B82;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(31, 48, 87, 0.3);
     }
-    td:first-child { white-space: nowrap; padding-right: 1.5rem; }
-    @media (max-width: 540px) {
-      td:first-child { white-space: normal; padding-right: 0.75rem; }
-    }
-
-    /* ----- Section break (essay-style asterisks) --------------------- */
-    .break {
-      text-align: center;
-      color: var(--very-dim);
-      letter-spacing: 0.4em;
-      margin: 3rem 0;
-      font-size: 0.85rem;
-      user-select: none;
+    .compare tr.us td { background: rgba(178, 58, 42, 0.04); }
+    .compare tr.us td:first-child { border-left: 2px solid #B23A2A; }
+    .compare td:first-child {
+      font-family: 'JetBrains Mono', monospace;
+      color: #1F3057;
+      font-weight: 500;
     }
 
-    /* ----- Footer ------------------------------------------------------ */
-    footer.foot {
-      margin-top: 3.5rem;
-      padding-top: 1.25rem;
-      border-top: 1px solid var(--line);
-      font-size: 0.9rem;
-      color: var(--dim);
+    /* ----- Boundaries list -------------------------------------------- */
+    .boundaries {
+      list-style: none;
+      padding: 0;
+      margin: 0;
     }
-    footer.foot p { margin: 0 0 0.35rem; }
-    footer.foot em { font-style: italic; }
+    .boundaries li {
+      padding: 12px 0 12px 28px;
+      border-bottom: 1px solid rgba(31, 48, 87, 0.12);
+      position: relative;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .boundaries li::before {
+      content: '×';
+      position: absolute;
+      left: 0;
+      top: 11px;
+      width: 16px;
+      height: 16px;
+      color: #B23A2A;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    /* ----- Links ------------------------------------------------------ */
+    a.link {
+      color: #1F3057;
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-decoration-color: rgba(31, 48, 87, 0.35);
+      text-underline-offset: 0.2em;
+      transition: text-decoration-color 0.15s;
+    }
+    a.link:hover { text-decoration-color: #B23A2A; }
+
+    /* ----- Footer marks ----------------------------------------------- */
+    .marks {
+      display: flex;
+      gap: 28px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .mark {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      color: #1F3057;
+      padding: 10px 14px;
+      border: 1px solid rgba(31, 48, 87, 0.25);
+      text-decoration: none;
+    }
+    .mark:hover { border-color: #B23A2A; color: #B23A2A; }
+
+    /* ----- Section break ---------------------------------------------- */
+    .rule {
+      width: 100%;
+      height: 1px;
+      background: rgba(31, 48, 87, 0.18);
+      margin: 0;
+      border: 0;
+    }
   </style>
 </head>
-<body>
-<div class="wrap">
 
-<header class="head">
-  <img src="icon.png" alt="" />
-  <div>
-    <h1>Selvedge</h1>
-    <p class="byline">An MCP server. <code>v0.3.4</code>. By <a href="https://github.com/masondelan">Mason Delan</a>.</p>
-  </div>
-</header>
+<body class="paper-grain">
 
-<main>
+  <div class="spine"></div>
 
-<p class="lede">
-  Selvedge is a <code>git blame</code> for AI agents — but for the
-  <em>why</em>, not just which line which model touched. The reasoning
-  is captured live, by the agent, as the change is made. Six months
-  later you can still ask <em>"when was <code>users.stripe_customer_id</code>
-  added and why?"</em> and get a real answer.
-</p>
+  <main class="relative z-10 max-w-page mx-auto px-12 md:px-16 lg:px-20 pt-16 md:pt-24 pb-24">
 
-<h2>What it looks like</h2>
+    <!-- ============================================================== -->
+    <!--  HERO  —  The lockup, lede, stamped install                    -->
+    <!-- ============================================================== -->
+    <section class="mb-28 md:mb-36">
 
-<pre><code><span class="p">$</span> selvedge blame user_tier_v2
+      <p class="eyebrow mb-10">selvedge · v0.3.4 · open source · mit</p>
+
+      <div class="flex items-stretch gap-7 md:gap-9 mb-12">
+        <div class="w-[3px] bg-brick self-stretch"></div>
+        <div>
+          <h1 class="wordmark text-6xl sm:text-7xl md:text-8xl lg:text-9xl">selvedge</h1>
+          <p class="font-mono text-fade text-xs md:text-sm tracking-widest mt-4 lowercase">git blame for the why behind ai-written code</p>
+        </div>
+      </div>
+
+      <p class="font-sans text-inkwell text-xl md:text-2xl leading-snug max-w-prose mb-10">
+        An MCP server that AI coding agents call as they work, so the
+        reasoning behind every change survives the session that produced
+        it. Captured live, by the agent — not inferred afterward.
+      </p>
+
+      <div class="flex flex-wrap gap-3 items-center">
+        <span class="stamp">
+          <span><span style="color:#5C6B82;">$</span>&nbsp;&nbsp;pip install selvedge</span>
+          <span class="stamp-meta">PyPI · MCP · MIT</span>
+        </span>
+        <span class="stamp" style="border-color: rgba(31,48,87,0.4);">
+          <span><span style="color:#5C6B82;">$</span>&nbsp;&nbsp;selvedge setup</span>
+        </span>
+      </div>
+
+    </section>
+
+    <!-- ============================================================== -->
+    <!--  RECORD OF INTENT                                              -->
+    <!-- ============================================================== -->
+    <section class="mb-28 md:mb-36">
+      <p class="eyebrow mb-4">— a record of intent</p>
+      <h2 class="h-section text-4xl md:text-6xl mb-8 lowercase">the why, woven<br>into the change</h2>
+      <div class="max-w-prose space-y-6 text-inkwell text-lg leading-relaxed">
+        <p>
+          Most "git blame for AI" tools ask a second LLM to look at a diff
+          afterward and guess at the reasoning. That's exactly the
+          problem they're trying to solve, doing it backwards.
+        </p>
+        <p>
+          Selvedge inverts it. The agent that <em>wrote</em> the change
+          calls <code class="inline">log_change</code> as it works, and
+          the reasoning lands in storage from the same context that
+          produced the code. Six months later you can still ask
+          <em>"when was <code class="inline">users.stripe_customer_id</code>
+          added and why?"</em> and get a real answer — the actual one,
+          captured at the source.
+        </p>
+        <p>
+          Storage is local SQLite. Your data lives in
+          <code class="inline">.selvedge/</code> next to your code.
+          No servers, no accounts, no API keys.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================================================== -->
+    <!--  BLAME DEMONSTRATION  —  Terminal block w/ Reasoning ID         -->
+    <!-- ============================================================== -->
+    <section class="mb-28 md:mb-36">
+      <p class="eyebrow mb-4">— what it looks like</p>
+      <h2 class="h-section text-4xl md:text-6xl mb-10 lowercase">captured live,<br>by the agent</h2>
+
+      <div class="terminal">
+        <div class="terminal-head">
+          <span class="dot"></span>
+          <span>selvedge blame · entity history</span>
+        </div>
+<pre style="margin:0; font-family: inherit; color: inherit; background: transparent;"><span class="prompt">$</span> selvedge blame user_tier_v2
 
   user_tier_v2
-  Changed     2025-10-14 09:31:02
-  Agent       claude-code
-  Commit      3e7a991
-  Reasoning   User asked to add a grandfathering flag for legacy
+  <span class="label">Changed</span>     2025-10-14 09:31:02
+  <span class="label">Agent</span>       claude-code
+  <span class="label">Commit</span>      3e7a991<span class="reasoning"><span class="label">Reasoning</span>   User asked to add a grandfathering flag for legacy
               free-tier users during the pricing migration. Stores
               the original tier so we can backfill discounts without
-              touching billing history.</code></pre>
+              touching billing history.</span></pre>
+      </div>
 
-<p>
-  That reasoning was captured by the agent at the moment the column was
-  added — written into Selvedge from the same context that produced the
-  change. Not inferred from the diff afterward by a second LLM. Not a
-  hand-typed commit message generalizing across a dozen files.
-</p>
+      <p class="mt-8 max-w-prose font-sans text-inkwell leading-relaxed">
+        That reasoning was captured by the agent at the moment the
+        column was added — written into Selvedge from the same context
+        that produced the change. Not inferred from the diff afterward
+        by a second LLM. Not a hand-typed commit message generalizing
+        across a dozen files.
+      </p>
+    </section>
 
-<h2>The mechanics</h2>
+    <!-- ============================================================== -->
+    <!--  BENTO  —  The six tools                                       -->
+    <!-- ============================================================== -->
+    <section class="mb-28 md:mb-36">
+      <p class="eyebrow mb-4">— mcp surface</p>
+      <h2 class="h-section text-4xl md:text-6xl mb-10 lowercase">six tools,<br>woven tight</h2>
 
-<p>
-  Selvedge runs as an MCP server. Your AI agent — Claude Code, Cursor,
-  Copilot, anything that speaks MCP — calls six tools as it works:
-</p>
+      <div class="bento">
+        <div class="bento-cell">
+          <span class="tag">writer</span>
+          <p class="name">log_change</p>
+          <p class="desc">Record a change with reasoning. The only writer in the system — every other tool reads.</p>
+        </div>
+        <div class="bento-cell">
+          <span class="tag">reader · entity</span>
+          <p class="name">blame</p>
+          <p class="desc">Most recent change to an entity. What, when, who, why — the full record at a glance.</p>
+        </div>
+        <div class="bento-cell">
+          <span class="tag">reader · history</span>
+          <p class="name">diff</p>
+          <p class="desc">Full history for an entity, or a prefix — <code class="inline">users</code> matches every <code class="inline">users.*</code>.</p>
+        </div>
+        <div class="bento-cell">
+          <span class="tag">reader · filtered</span>
+          <p class="name">history</p>
+          <p class="desc">Filtered by <code class="inline">since</code>, <code class="inline">project</code>, or <code class="inline">changeset</code>. Ranges, not points.</p>
+        </div>
+        <div class="bento-cell">
+          <span class="tag">reader · feature</span>
+          <p class="name">changeset</p>
+          <p class="desc">Every event sharing a feature slug — pull a feature's full scope across many entities at once.</p>
+        </div>
+        <div class="bento-cell">
+          <span class="tag">reader · text</span>
+          <p class="name">search</p>
+          <p class="desc">Full-text across paths, diffs, reasoning, and agents. Find the change you half-remember.</p>
+        </div>
+      </div>
 
-<table>
-  <thead>
-    <tr><th>Tool</th><th>Does</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>log_change</code></td>
-      <td>Record a change with reasoning. The only writer.</td>
-    </tr>
-    <tr>
-      <td><code>diff</code></td>
-      <td>History for an entity, or a prefix — <code>users</code> matches every <code>users.*</code>.</td>
-    </tr>
-    <tr>
-      <td><code>blame</code></td>
-      <td>Most recent change to an entity. What, when, who, why.</td>
-    </tr>
-    <tr>
-      <td><code>history</code></td>
-      <td>Filtered history with <code>since</code>, <code>project</code>, <code>changeset</code>.</td>
-    </tr>
-    <tr>
-      <td><code>changeset</code></td>
-      <td>Every event sharing a feature slug — pull a feature's full scope across many entities.</td>
-    </tr>
-    <tr>
-      <td><code>search</code></td>
-      <td>Full-text across paths, diffs, reasoning, agents.</td>
-    </tr>
-  </tbody>
-</table>
+      <p class="mt-10 max-w-prose font-sans text-inkwell leading-relaxed">
+        One writer, five readers. Selvedge is the storage and query
+        layer; the agent supplies the reasoning. If the agent didn't
+        pass any, the field is empty — and that's a useful signal too.
+      </p>
+    </section>
 
-<p>
-  Storage is local SQLite. Your data lives in <code>.selvedge/</code>
-  next to your code. No servers, no accounts, no API keys.
-</p>
+    <!-- ============================================================== -->
+    <!--  COMPARISON                                                    -->
+    <!-- ============================================================== -->
+    <section class="mb-28 md:mb-36">
+      <p class="eyebrow mb-4">— why captured-live matters</p>
+      <h2 class="h-section text-4xl md:text-6xl mb-10 lowercase">three ways<br>to record intent</h2>
 
-<h2>Setup</h2>
+      <table class="compare">
+        <thead>
+          <tr>
+            <th style="width: 28%;">tool</th>
+            <th style="width: 42%;">reasoning source</th>
+            <th>granularity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="us">
+            <td>Selvedge</td>
+            <td>Captured live by the agent in context</td>
+            <td>Entity (DB column, function, env var, dep, route)</td>
+          </tr>
+          <tr>
+            <td>Inference-after</td>
+            <td>Generated by a second LLM from the diff at session end</td>
+            <td>Line</td>
+          </tr>
+          <tr>
+            <td>Commit-time</td>
+            <td>Hand-typed commit message</td>
+            <td>Line / commit</td>
+          </tr>
+        </tbody>
+      </table>
 
-<pre><code><span class="p">$</span> pip install selvedge
-<span class="p">$</span> selvedge setup</code></pre>
+      <p class="mt-8 max-w-prose font-sans text-inkwell leading-relaxed">
+        The agent's intent lives in the prompt context that produced
+        the change. Inference-after-the-fact tools have to reverse-engineer
+        that intent from the diff afterward — which is the problem we're
+        trying to solve. Entity-level matters because the question after
+        <code class="inline">git blame</code> is usually <em>"what's the
+        history of this column?"</em>, not <em>"what's the history of
+        lines 40–48 of <code class="inline">users.py</code>?"</em>
+      </p>
+    </section>
 
-<p>
-  <code>selvedge setup</code> detects which AI tools you have, writes
-  the MCP entry into each tool's config, drops the canonical
-  agent-instructions block into your project's <code>CLAUDE.md</code> /
-  <code>.cursorrules</code> / <code>copilot-instructions.md</code>,
-  runs <code>selvedge init</code>, and installs the post-commit git hook
-  for commit-hash backfill. Every modified file gets a
-  <code>.bak</code> next to it before any change reaches disk.
-  Re-running on an already-set-up project is a no-op.
-</p>
+    <!-- ============================================================== -->
+    <!--  WHAT IT DOESN'T DO                                            -->
+    <!-- ============================================================== -->
+    <section class="mb-28 md:mb-36">
+      <p class="eyebrow mb-4">— boundaries</p>
+      <h2 class="h-section text-4xl md:text-6xl mb-10 lowercase">what it<br>doesn't do</h2>
 
-<p>
-  For CI bootstrap and devcontainer <code>postCreateCommand</code>, run
-  <code>selvedge setup --non-interactive --yes</code>.
-</p>
+      <ul class="boundaries max-w-prose">
+        <li>Selvedge does not call an LLM. It is the storage and query layer; the agent supplies the reasoning.</li>
+        <li>It does not generate reasoning from diffs. If the agent didn't pass any, the field is empty.</li>
+        <li>It does not require Postgres, an account, an API key, or a network connection.</li>
+        <li>It is not a hosted service. Your <code class="inline">.selvedge/</code> never leaves your machine unless you commit it.</li>
+        <li>It does not scan your codebase. Events are recorded by the agent at the moment of change, not by a periodic crawler.</li>
+      </ul>
+    </section>
 
-<h2>Why captured-live matters</h2>
+    <!-- ============================================================== -->
+    <!--  SETUP                                                         -->
+    <!-- ============================================================== -->
+    <section class="mb-28 md:mb-36">
+      <p class="eyebrow mb-4">— get started</p>
+      <h2 class="h-section text-4xl md:text-6xl mb-10 lowercase">two commands.<br>thirty seconds.</h2>
 
-<p>
-  There's a small but growing category of "git blame for AI agents"
-  projects. The thing that distinguishes Selvedge:
-</p>
+      <div class="flex flex-wrap gap-3 items-center mb-8">
+        <span class="stamp">
+          <span><span style="color:#5C6B82;">$</span>&nbsp;&nbsp;pip install selvedge</span>
+        </span>
+        <span class="stamp">
+          <span><span style="color:#5C6B82;">$</span>&nbsp;&nbsp;selvedge setup</span>
+        </span>
+      </div>
 
-<table>
-  <thead>
-    <tr>
-      <th>Tool</th>
-      <th>Reasoning source</th>
-      <th>Granularity</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>Selvedge</td>
-      <td>Captured live by the agent in context</td>
-      <td>Entity (DB column, function, env var, dep, route)</td>
-    </tr>
-    <tr>
-      <td>Inference-after-the-fact tools</td>
-      <td>Generated by a second LLM from the diff at session end</td>
-      <td>Line</td>
-    </tr>
-    <tr>
-      <td>Commit-time tools</td>
-      <td>Hand-typed commit message</td>
-      <td>Line / commit</td>
-    </tr>
-  </tbody>
-</table>
+      <p class="max-w-prose font-sans text-inkwell leading-relaxed">
+        <code class="inline">selvedge setup</code> detects which AI tools
+        you have, writes the MCP entry into each tool's config, drops
+        the canonical agent-instructions block into your project's
+        <code class="inline">CLAUDE.md</code> /
+        <code class="inline">.cursorrules</code> /
+        <code class="inline">copilot-instructions.md</code>, runs
+        <code class="inline">selvedge init</code>, and installs the
+        post-commit git hook for commit-hash backfill. Every modified
+        file gets a <code class="inline">.bak</code> next to it before
+        any change reaches disk. Re-running on an already-set-up project
+        is a no-op.
+      </p>
+      <p class="max-w-prose font-sans text-inkwell leading-relaxed mt-4">
+        For CI bootstrap and devcontainer
+        <code class="inline">postCreateCommand</code>, run
+        <code class="inline">selvedge setup --non-interactive --yes</code>.
+      </p>
+    </section>
 
-<p>
-  Captured-live matters because the agent's own intent is in the prompt
-  context that produced the change. Inference-after-the-fact tools have
-  to reverse-engineer that intent from the diff afterward — which is
-  exactly the problem we're trying to solve. Entity-level matters
-  because the question after <code>git blame</code> is usually "what's
-  the history of this column?", not "what's the history of lines 40–48
-  of <code>users.py</code>?"
-</p>
+    <!-- ============================================================== -->
+    <!--  WHERE TO FIND IT                                              -->
+    <!-- ============================================================== -->
+    <section class="mb-24">
+      <p class="eyebrow mb-4">— where it lives</p>
+      <h2 class="h-section text-4xl md:text-6xl mb-10 lowercase">the loom,<br>and the catalog</h2>
 
-<p>
-  An empty <code>reasoning</code> field is itself a useful signal: the
-  agent didn't have one. The reasoning quality validator surfaces empty,
-  too-short, and generic-placeholder values at <code>log_change</code>
-  time so you can correct your system prompt before the field gets
-  permanently filled with <code>"user request"</code> entries.
-</p>
+      <div class="marks mb-10">
+        <a class="mark" href="https://github.com/masondelan/selvedge">github / source</a>
+        <a class="mark" href="https://pypi.org/project/selvedge">pypi / package</a>
+        <a class="mark" href="https://smithery.ai/servers/masondelan/selvedge">smithery / one-click</a>
+      </div>
 
-<h2>What it doesn't do</h2>
+      <p class="max-w-prose font-sans text-inkwell leading-relaxed">
+        See also the
+        <a class="link" href="https://github.com/masondelan/selvedge/blob/main/CHANGELOG.md">changelog</a>,
+        the <a class="link" href="https://github.com/masondelan/selvedge/blob/main/docs/architecture.md">architecture
+        and roadmap</a>, the <a class="link" href="https://github.com/masondelan/selvedge/blob/main/docs/getting-started.md">getting-started
+        doc</a>, or open an
+        <a class="link" href="https://github.com/masondelan/selvedge/issues">issue</a>.
+      </p>
+    </section>
 
-<ul>
-  <li>Selvedge does not call an LLM. It is the storage and query layer; the agent supplies the reasoning.</li>
-  <li>It does not generate reasoning from diffs. If the agent didn't pass any, the field is empty.</li>
-  <li>It does not require Postgres, an account, an API key, or a network connection.</li>
-  <li>It is not a hosted service. Your <code>.selvedge/</code> never leaves your machine unless you commit it.</li>
-  <li>It does not scan your codebase. Events are recorded by the agent at the moment of change, not by a periodic crawler.</li>
-</ul>
+    <hr class="rule">
 
-<div class="break">· · ·</div>
+    <!-- ============================================================== -->
+    <!--  FOOTER                                                        -->
+    <!-- ============================================================== -->
+    <footer class="pt-10 pb-4">
+      <div class="flex items-stretch gap-5 mb-8">
+        <div class="w-[3px] bg-brick"></div>
+        <div>
+          <p class="wordmark text-2xl">selvedge</p>
+          <p class="font-mono text-fade text-xs tracking-widest mt-2 lowercase">v0.3.4 · open source · mit</p>
+        </div>
+      </div>
 
-<h2>Where to find it</h2>
+      <p class="max-w-prose font-sans text-fade text-sm leading-relaxed mb-3">
+        <em>Selvedge</em> is the self-finished edge of woven fabric — where
+        the warp threads turn back and become their own boundary. On
+        vintage shuttle-loom denim, that edge is marked with a single
+        thin line of red thread: small, structural, iconic precisely
+        because it isn't shouted. Selvedge the tool is built the same
+        way — tightly woven change tracking, with the reasoning kept
+        on the inside of the seam where it belongs.
+      </p>
+      <p class="font-sans text-fade text-sm">
+        Built by
+        <a class="link" href="https://github.com/masondelan">Mason Delan</a>.
+        Released under
+        <a class="link" href="https://opensource.org/licenses/MIT">MIT</a>.
+      </p>
+    </footer>
 
-<p>
-  Source on <a href="https://github.com/masondelan/selvedge">GitHub</a>.
-  Package on <a href="https://pypi.org/project/selvedge">PyPI</a>.
-  One-click install for Claude Desktop on
-  <a href="https://smithery.ai/servers/masondelan/selvedge">Smithery</a>.
-</p>
+  </main>
 
-<p>
-  See also: the
-  <a href="https://github.com/masondelan/selvedge/blob/main/CHANGELOG.md">changelog</a>,
-  the <a href="https://github.com/masondelan/selvedge/blob/main/docs/architecture.md">architecture
-  and roadmap</a>, the <a href="https://github.com/masondelan/selvedge/blob/main/docs/getting-started.md">getting-started
-  doc</a>, or open an <a href="https://github.com/masondelan/selvedge/issues">issue</a>.
-</p>
-
-</main>
-
-<footer class="foot">
-  <p>Open source under MIT.</p>
-  <p>
-    <em>Selvedge</em> is the self-finished edge of woven fabric — where
-    the threads turn back and become their own boundary. The icon is a
-    running stitch viewed close up: each visible stitch is a captured
-    change event, the gaps are the underside of the thread.
-  </p>
-</footer>
-
-</div>
 </body>
 </html>

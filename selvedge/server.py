@@ -33,6 +33,7 @@ import json
 from typing import Annotated, TypedDict
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from .config import get_db_path
@@ -136,26 +137,32 @@ _EMPTY_BLAME: BlameResult = {
 # ---------------------------------------------------------------------------
 # Tool annotations (MCP standard) — declared as constants so all five
 # read-only tools share the same shape and the writer's intent is explicit.
+#
+# Constructed as ``ToolAnnotations`` (the official MCP Python type)
+# rather than plain dicts. Both shapes work at runtime — Pydantic
+# accepts either — but the typed object is what FastMCP's ``@tool``
+# decorator declares in its signature, so plain dicts trip mypy in the
+# CI lint job.
 # ---------------------------------------------------------------------------
 
 
-_READ_ANNOTATIONS = {
-    "readOnlyHint": True,
-    "destructiveHint": False,
-    "idempotentHint": True,
-    "openWorldHint": False,
-}
+_READ_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
 
-_WRITE_ANNOTATIONS = {
-    "readOnlyHint": False,
+_WRITE_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
     # log_change is append-only — it never modifies or removes existing
     # rows, only adds new ones. So destructiveHint is False.
-    "destructiveHint": False,
+    destructiveHint=False,
     # Each call mints a new event with a new UUID, so calling twice is
     # NOT idempotent.
-    "idempotentHint": False,
-    "openWorldHint": False,
-}
+    idempotentHint=False,
+    openWorldHint=False,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +545,7 @@ def _tighten_descriptions() -> None:
     # If FastMCP changes that internal in a future release this no-ops
     # silently rather than blowing up the import.
     try:
-        registry = mcp._tool_manager._tools  # type: ignore[attr-defined]
+        registry = mcp._tool_manager._tools
     except AttributeError:
         return
     for tool in registry.values():

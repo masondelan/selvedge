@@ -142,7 +142,9 @@ The core insight I keep coming back to: **the diff is git's job. The why is Selv
 
 ---
 
-If you've been using Claude Code or Cursor heavily and have felt this pain, I'd genuinely love to hear how you've been handling it (or whether you've just been living with it). And if you try Selvedge, feedback on what's missing would go a long way.
+If you've been using Claude Code or Cursor heavily and have felt this pain, I'd love to hear how you've been handling it (or whether you've just been living with it). And if you try Selvedge, feedback on what's missing would go a long way.
+
+**Current version: v0.3.1** — shipped today (April 23, 2026). It's a hardening release: connection-with-retry and `PRAGMA busy_timeout = 5000` so concurrent writes are safe under contention (tested against 8 threads writing simultaneously), an explicit `schema_migrations` table replacing the old swallow-OperationalError-and-pray ALTER pattern, structured logging under the `selvedge.*` namespace (`SELVEDGE_LOG_LEVEL=DEBUG` to turn it up), and a frozen public API surface locked in by test. The preceding release (v0.3.0) was a correctness pass that caught a pile of silent-wrong-answer bugs: `--since 5m` used to mean 5 months instead of 5 minutes; SQL `LIKE` wasn't escaping `_` or `%` in search queries; `CREATE TABLE` import emitted zero events for inline columns; mixed-timezone timestamps sorted incorrectly because `-08:00` is less than `+00:00` in ASCII. Both are recommended upgrades.
 
 GitHub: [https://github.com/masondelan/selvedge](https://github.com/masondelan/selvedge)
 Install: `pip install selvedge`

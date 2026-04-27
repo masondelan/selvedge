@@ -7,18 +7,18 @@ have the full day.
 
 ---
 
-## Tagline (max 60 chars)
-Capture the *why* behind every AI code change
+## Tagline (max 60 chars — plain text, no markdown)
+Capture the why behind every AI code change
 
-*(57 chars)*
+(45 chars)
 
 ---
 
-## Description (shown on listing, ~260 chars recommended)
+## Description (plain text field, no markdown — ~260 chars recommended)
 
 AI agents make great decisions — and then the session ends and the reasoning
 is gone forever. Selvedge is an MCP server that captures intent in the moment,
-so you can run `selvedge blame` months later and actually understand why a
+so you can run selvedge blame months later and actually understand why a
 change was made.
 
 ---

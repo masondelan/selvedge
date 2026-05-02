@@ -18,8 +18,13 @@
   <meta name="twitter:description" content="git blame for the why behind AI-written code. Captured live, by the agent.">
   <meta name="twitter:image" content="icon.png">
   <meta name="theme-color" content="#EDE5D3">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Selvedge">
   <link rel="canonical" href="https://masondelan.github.io/selvedge">
   <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -77,12 +82,23 @@
     /*  Selvedge — confident and quiet. No gradients. No drop shadows.   */
     /* ------------------------------------------------------------------ */
     html, body { background: #EDE5D3; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     body {
       font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
       color: #1A1A1F;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       font-feature-settings: "ss01", "cv01", "cv11";
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: contain;
+      /* Honor the iPhone notch / home indicator on the body padding */
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
+    /* Generous tap targets on touch devices — Apple HIG: 44pt min */
+    @media (hover: none) and (pointer: coarse) {
+      a { padding-block: 2px; }
+      header nav a { padding: 6px 2px; }
     }
 
     /* ----- Paper grain overlay ---------------------------------------- */
@@ -403,13 +419,13 @@
 
   <div class="spine"></div>
 
-  <header class="relative z-10 max-w-page mx-auto px-12 md:px-16 lg:px-20 pt-8 pb-2 flex items-baseline justify-between">
-    <a href="/selvedge/" class="font-mono font-medium text-indigo lowercase tracking-tight" style="font-size:15px; letter-spacing:-0.02em;">selvedge</a>
-    <nav class="flex gap-5 md:gap-7 items-baseline">
-      <a href="comparison.html" class="font-mono text-indigo hover:text-brick transition-colors lowercase" style="font-size:13px;">vs / compare</a>
-      <a href="faq.html" class="font-mono text-indigo hover:text-brick transition-colors lowercase" style="font-size:13px;">faq</a>
-      <a href="https://github.com/masondelan/selvedge" class="font-mono text-indigo hover:text-brick transition-colors lowercase" style="font-size:13px;">github</a>
-      <a href="https://pypi.org/project/selvedge" class="font-mono text-indigo hover:text-brick transition-colors lowercase hidden sm:inline" style="font-size:13px;">pypi</a>
+  <header class="relative z-10 max-w-page mx-auto px-12 md:px-16 lg:px-20 pt-8 pb-2 flex items-baseline justify-between gap-4">
+    <a href="/selvedge/" class="font-mono font-medium text-indigo lowercase tracking-tight shrink-0" style="font-size:15px; letter-spacing:-0.02em;">selvedge</a>
+    <nav class="flex gap-4 sm:gap-5 md:gap-7 items-baseline flex-wrap justify-end">
+      <a href="comparison.html" class="font-mono text-indigo hover:text-brick transition-colors lowercase whitespace-nowrap" style="font-size:13px;">compare</a>
+      <a href="faq.html" class="font-mono text-indigo hover:text-brick transition-colors lowercase whitespace-nowrap" style="font-size:13px;">faq</a>
+      <a href="https://github.com/masondelan/selvedge" class="font-mono text-indigo hover:text-brick transition-colors lowercase whitespace-nowrap" style="font-size:13px;">github</a>
+      <a href="https://pypi.org/project/selvedge" class="font-mono text-indigo hover:text-brick transition-colors lowercase whitespace-nowrap hidden sm:inline" style="font-size:13px;">pypi</a>
     </nav>
   </header>
 

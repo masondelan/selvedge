@@ -16,8 +16,13 @@
   <meta name="twitter:title" content="Selvedge FAQ">
   <meta name="twitter:description" content="Common questions about Selvedge.">
   <meta name="theme-color" content="#EDE5D3">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Selvedge">
   <link rel="canonical" href="https://masondelan.github.io/selvedge/faq.html">
   <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
 
   <script type="application/ld+json">
   {
@@ -121,11 +126,20 @@
 
   <style>
     html, body { background: #EDE5D3; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     body {
       font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
       color: #1A1A1F;
       -webkit-font-smoothing: antialiased;
       font-feature-settings: "ss01", "cv01", "cv11";
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: contain;
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
+    @media (hover: none) and (pointer: coarse) {
+      header nav a { padding: 6px 2px; }
+      details.qa summary { padding: 8px 0; }
     }
     .paper-grain::before {
       content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;

@@ -463,13 +463,32 @@ github.com).
       markdown` for posting as a PR comment.
 - [ ] **`selvedge ci-check` exit-code gate** — runs in CI on PR
       branches; non-zero exit if reasoning quality, coverage ratio, or
-      changeset coverage falls below configurable thresholds. The
-      "selvedge says this PR is missing context" early warning.
+      changeset coverage falls below configurable thresholds (read from
+      `.selvedge/config.toml`, which lands in v0.3.5). The "selvedge
+      says this PR is missing context" early warning.
 - [ ] **`summary` MCP tool** — new server tool so agents/IDEs can ask
       "what's been happening in this codebase since X?" Returns a
-      grouped, human-prose-shaped digest (changesets touched, agents
-      involved, top entities by activity) instead of raw events. Useful
-      for standup-bot integrations and IDE side-panels.
+      grouped, **templated** digest (changesets touched, agents
+      involved, top entities by activity) — *not* LLM-generated; the
+      "no LLM calls inside Selvedge" non-goal still holds. Useful for
+      standup-bot integrations and IDE side-panels. Implementation
+      shares a digest/aggregate helper with `selvedge audit` and
+      `selvedge digest` so the three surfaces don't drift.
+- [ ] **`prior_attempts` MCP tool** — agent-side counterpart to
+      `summary`. Given a description or `entity_path`, returns prior
+      change events at the same path/shape with their `reasoning`,
+      change_type, and downstream outcome. v0.3.6 *infers* the outcome
+      from add→remove proximity (within a configurable window) because
+      explicit `reject`/`revert` change_types don't ship until v0.3.7.
+      Once 2.13 lands, this tool's outcome classifier becomes exact and
+      the proximity heuristic falls back to a tiebreaker. Lets an agent
+      ask "have we tried this before?" *before* proposing an approach,
+      closing the LLM-amnesia loop where every fresh session re-suggests
+      the same dead idea. No schema change in 2.12 — pure read tool over
+      the existing event store. Templated output only, no LLM calls.
+      Pull-model only in v0.3.6; the push-model auto-warn-on-`log_change`
+      variant is deferred until we have signal on whether agents actually
+      act on the pull-tool results.
 - [ ] **`selvedge digest` CLI command** — same shape as the MCP
       `summary` tool but renders to terminal. Default `--since 24h`,
       designed to be fed into Slack/email cron jobs.
@@ -480,14 +499,107 @@ github.com).
 - [ ] **VS Code extension scaffolding (separate repo)** — design doc
       lands in `docs/vscode-integration.md` this phase; actual
       extension built outside this repo. Hover a column name to see
-      blame inline; `:SelvedgeBlame` command palette entry.
+      blame inline; `:SelvedgeBlame` command palette entry. Spec
+      against the live `summary` MCP tool, so this bullet sequences
+      *after* the MCP tool work within the phase.
+- [ ] **Tests** — new MCP tools (`summary`, `prior_attempts`) land in
+      `tests/test_server.py`; new CLI commands (`audit`, `ci-check`,
+      `digest`, `pr-comment`) land in `tests/test_cli.py`. Shared
+      digest/aggregate helper gets its own `tests/test_digest.py`
+      covering grouping rules, time-bucket boundaries, and the
+      add→remove proximity heuristic that backs `prior_attempts`.
+
+### Phase 2.13 — Active memory (v0.3.7)
+> Selvedge to date is an append-only log: every event lives forever and
+> reads identically the day it's written and a year later. This phase
+> turns Selvedge into *active* memory — decisions can carry an expiry
+> condition, abandoned alternatives are first-class events, and the
+> server can answer "what reasoning is stale?" Pairs naturally with the
+> `prior_attempts` tool from v0.3.6: 2.12 lets agents query past
+> decisions, 2.13 lets the store know which past decisions still matter.
+>
+> Brand-defining release for the LLM-amnesia thesis. No breaking changes
+> — new fields are nullable, new event types are additive — so safe to
+> ship before the v0.4.0 breaking-changes window.
+
+- [ ] **Optional `expires_when` / `revisit_after` columns on
+      `ChangeEvent`** — schema migration v3 adds two nullable TEXT
+      columns. `revisit_after` is an ISO-8601 date or a relative offset
+      from `timestamp` (e.g. `90d`). `expires_when` is a free-form
+      symbolic condition (e.g. `"library:stripe>=v12"`) — opaque to v1
+      Selvedge, surfaced as a string for humans/agents to act on.
+      Existing events get NULL on both (current behavior preserved).
+- [ ] **`stale_decisions` MCP tool** — returns events whose
+      `revisit_after` has passed, plus events older than a configurable
+      default (`stale_days` in `.selvedge/config.toml`, opt-in) when no
+      explicit revisit is set. `stale_days` is independent from v0.3.5's
+      `retention_days` — they govern *surfacing* and *deletion*
+      respectively, and one shouldn't imply the other. Filterable by
+      `entity_path`, `project`, `agent`. Date-based v1; symbolic
+      `expires_when` evaluation deferred to a later release. Templated
+      output, no LLM calls.
+- [ ] **`selvedge stale` CLI command** — same data surface, terminal
+      formatted, `--json` for cron / Slack jobs. Composes with
+      `selvedge digest` so the morning report can include "decisions
+      that aged out yesterday."
+- [ ] **New `change_type` values: `reject` and `revert`** — added to the
+      `ChangeType` enum. `reject` records "we considered this and
+      decided against it" without ever writing the change; `revert`
+      records "we tried this and rolled it back," distinct from a
+      regular `remove` (which conflates "feature removed" with
+      "approach rejected"). Distinguishing rejected-from-removed at the
+      schema level avoids the inference-from-proximity heuristic the
+      pull-only `prior_attempts` tool has to fall back on. **No new MCP
+      tool** — these are logged via the existing `log_change` tool with
+      `change_type=reject` / `change_type=revert`. The `log_change`
+      docstring gains a worked example for the rejection use case so
+      agents discover the pattern from the tool description without
+      Selvedge growing its tool surface. Reasoning-quality validator
+      gets a `reject`-specific rule: encourage reasoning to name *what*
+      was rejected and *what was chosen instead*.
+- [ ] **Reasoning-quality validator gains an opt-in nudge** — when
+      `change_type` is in `{add, modify, create, migrate}` and the
+      `entity_type` looks architectural (table, schema, dependency,
+      config), the validator suggests setting `revisit_after`. Soft
+      warning only, doesn't block writes — same posture as the existing
+      empty/short/generic checks.
+- [ ] **`doctor` learns a stale-decisions check** — counts events past
+      their explicit `revisit_after` as a soft warning ("12 decisions
+      flagged for review are past their revisit date"). Counts
+      `reject`/`revert` events separately in the doctor summary so
+      agents can see the rejected-paths population at a glance.
+- [ ] **Tests** — `tests/test_active_memory.py` covering schema
+      migration v3 backfill, stale-decision query semantics
+      (`revisit_after` past vs. fallback `stale_days`), reject/revert
+      change_type round-trip through the existing `log_change` tool,
+      and doctor's stale-count output. **`tests/test_public_api.py`
+      update required**: the frozen-shape test will fail when
+      `revisit_after` / `expires_when` land on `ChangeEvent` — update
+      the expected dataclass shape in the same PR as the migration so
+      CI doesn't go red.
 
 ### Phase 3 — Team features (v0.4.0)
+> First release in the breaking-changes window. Bundles the backend
+> abstraction, the HTTP+auth surface, and the deferred MCP tool-name
+> rename so users only absorb one breaking-change cycle.
+
 - [ ] PostgreSQL backend option (configurable via `SELVEDGE_BACKEND=postgresql://...`)
   - Abstract `SelvedgeStorage` behind a protocol/interface so backends are swappable
   - `storage_sqlite.py` and `storage_pg.py` both implement `StorageBackend`
-- [ ] HTTP REST API layer (FastAPI) — exposes the same 6 operations over HTTP
+- [ ] HTTP REST API layer (FastAPI) — exposes every MCP server operation
+      over HTTP. The list at the time of v0.4.0 is the v0.3.7 set
+      (`log_change`, `diff`, `blame`, `history`, `changeset`, `search`,
+      `summary`, `prior_attempts`, `stale_decisions`,
+      `log_rejected_alternative`); count and shape track the live
+      `selvedge/server.py` rather than being hardcoded here.
 - [ ] Auth (API keys) for the HTTP layer
+- [ ] **MCP tool-name prefix migration** — rename `diff`, `history`,
+      `search` (and any other generic verbs) to `selvedge_*` form,
+      deferred from v0.3.3 because of the breaking-change cost. Lands
+      here alongside the other v0.4.0 breaking changes so users only
+      update their `CLAUDE.md` / `.cursorrules` once. Old names remain
+      registered as deprecated aliases for one minor cycle, with a
+      stderr warning on call.
 - [ ] **Agent Trace interop** — `selvedge export --format agent-trace` and
       `selvedge import --format agent-trace` (Cursor/Cognition open RFC, Jan 2026).
       Design doc: [`agent-trace-interop.md`](agent-trace-interop.md).
@@ -504,8 +616,15 @@ github.com).
 
 ### Phase 4 — Platform (hosted business)
 - [ ] Web dashboard (React + the REST API)
-- [ ] Cross-repo queries
-- [ ] Retention policies
+- [ ] Cross-repo queries (server-side, multi-tenant). The
+      single-user OSS variant — local overlay across multiple
+      `.selvedge/` directories the same person owns — is intentionally
+      *not* on Phase 4 scope; it lives in the OSS track and will be
+      considered for a v0.3.x point release post-v0.3.7. Hosted is for
+      teams; OSS is for individuals.
+- [ ] Team/org-level retention policies (per-tenant, configurable
+      independently from the project-local `retention_days` shipped in
+      v0.3.5)
 - [ ] Team/org management
 - [ ] Webhook events (Slack, PagerDuty, etc. on schema changes)
 

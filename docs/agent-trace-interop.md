@@ -161,6 +161,24 @@ makes that derivable. v0.4.0 will:
 
 A line-range backfill from git is possible but out of scope for v0.4.0.
 
+### Export preamble — explaining `range_unknown` to AT consumers
+
+Every Selvedge AT export emits a preamble comment / extensions block
+that names the producer (`Selvedge vX.Y.Z`) and explains the
+fidelity profile up front. AT consumers seeing many records with
+`extensions.selvedge.range_unknown: true` should not interpret that
+as Selvedge being a low-fidelity producer — it's the *truthful*
+representation of events imported from migration files (where line
+ranges genuinely don't exist) and DB-column / env-var / dependency
+events (where there is no line range to attribute). Selvedge prefers
+to emit `range_unknown` rather than fabricate a `[1, 1]` placeholder
+that looks line-perfect.
+
+The README's AT-compatibility section carries the same framing so
+buyers and downstream consumers see this before judging fidelity. The
+v0.4.0 release notes call out the expected `range_unknown` ratio for
+typical Selvedge stores.
+
 ## Test plan
 
 A new `tests/test_agent_trace_export.py`:

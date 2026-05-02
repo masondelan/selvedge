@@ -21,13 +21,16 @@ For everything else:
 ## Code conventions
 
 - **No external dependencies beyond the declared ones.** Keep the install footprint small.
+- **No LLM calls inside Selvedge core.** Templated, deterministic output only. When a feature design is tempted toward an LLM hop, the PR description must explain how the templated output covers the user need; reviewers reject "we'll add an LLM later if needed." See `docs/architecture.md` cross-cutting risk register for the full rationale.
 - **SQLite first, always.** Don't reach for Postgres until Phase 3. SQLite with WAL handles concurrent reads fine.
 - **`ChangeEvent` is a dataclass, not Pydantic.** Keep the core dependency-free. MCP serialization uses `to_dict()`.
+- **New TypedDict result types must justify themselves.** Before introducing a new MCP tool result shape, check whether an existing one (`LogChangeResult`, `BlameResult`, the auto-generated list-shapes) extends to fit. Prefer extending an existing type to introducing a new one. Every field always populated, never `null` — same convention as `LogChangeResult` / `BlameResult` (empty string / empty list / empty dict for "absent").
 - **Every public function has a docstring.** The MCP tool docstrings in `server.py` are user-facing — they appear in agent tool listings and propagate into `manifest.json`.
 - **Tests use `tmp_path` fixtures and `SELVEDGE_DB` env var.** Never write to the real DB in tests.
 - **Rich for all terminal output.** No bare `print()` in `cli.py`.
 - **`--json` flag on every read command.** Machine-readable output is a first-class concern.
 - **Type hints everywhere.** Python 3.10+ syntax (`X | Y`, `list[dict]`, etc.).
+- **Destructive actions require both interactive consent AND environment-level opt-in.** Any command that can delete events from the store (e.g. `selvedge prune --include-events` in v0.3.5) must require BOTH a confirmation prompt AND `SELVEDGE_DESTRUCTIVE=1` in the environment. Defends against the cron / non-interactive `--yes` footgun.
 
 ---
 
@@ -43,6 +46,8 @@ Tests live in `tests/`. Run with `pytest` from the repo root.
 - `test_concurrency.py` — multi-threaded writers
 - `test_public_api.py` — frozen `__init__.py` surface
 - `test_mcp_protocol.py` — boots real `selvedge-server` subprocess and round-trips every tool over stdio
+
+Each phase has a soft test-budget target (see the cross-cutting risk register in `docs/architecture.md`). When a phase exceeds its budget, the release notes call out *why* — typically a perf-regression suite or a new protocol smoke test. The HTTP layer in v0.4.0 must ship with `test_http_protocol.py` parallel to `test_mcp_protocol.py` — release-blocker, not optional.
 
 Never write to the real DB in tests — always set `SELVEDGE_DB` to a `tmp_path` fixture.
 

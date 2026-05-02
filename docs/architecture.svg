@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 640" width="880" height="640"
+     role="img" aria-label="How Selvedge fits between your AI agent and a local why-store">
+  <!--
+    Selvedge architecture diagram.
+
+    Single-file SVG; survives GitHub light AND dark themes the same
+    way docs/wordmark.svg does — by sitting on the ecru brand card so
+    the lockup is independent of the surrounding page background.
+
+    Brand tokens (locked 2026-04-26, see project_selvedge_branding):
+      indigo  #1F3057   primary ink
+      red     #B23A2A   selvedge-stripe accent
+      ecru    #EDE5D3   card background
+
+    Typography falls back JetBrains Mono → IBM Plex Mono → ui-monospace.
+    GitHub Markdown can't load Google Fonts; system mono is the floor.
+  -->
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1F3057"/>
+    </marker>
+  </defs>
+
+  <style>
+    .mono { font-family: 'JetBrains Mono', 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, ui-monospace, monospace; }
+  </style>
+
+  <!-- Card -->
+  <rect width="880" height="640" rx="20" ry="20" fill="#EDE5D3"/>
+
+  <!-- Title + red rule -->
+  <text x="40" y="46" class="mono" font-size="13" font-weight="700"
+        letter-spacing="1.5" fill="#1F3057">HOW SELVEDGE FITS</text>
+  <line x1="40" y1="58" x2="220" y2="58" stroke="#B23A2A" stroke-width="2"/>
+
+  <!-- Developer (top) -->
+  <rect x="370" y="86" width="140" height="56" rx="8" fill="#FFFFFF"
+        stroke="#1F3057" stroke-width="1.5"/>
+  <text x="440" y="112" text-anchor="middle" class="mono"
+        font-size="14" font-weight="700" fill="#1F3057">developer</text>
+  <text x="440" y="129" text-anchor="middle" class="mono"
+        font-size="10" fill="#1F3057" opacity="0.55">(you)</text>
+
+  <!-- developer → agent -->
+  <line x1="440" y1="142" x2="440" y2="194" stroke="#1F3057"
+        stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="450" y="172" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.7">prompt</text>
+
+  <!-- AI Agent -->
+  <rect x="260" y="200" width="360" height="100" rx="8" fill="#FFFFFF"
+        stroke="#1F3057" stroke-width="1.5"/>
+  <rect x="260" y="220" width="4" height="60" fill="#B23A2A"/>
+  <text x="284" y="238" class="mono" font-size="20" font-weight="700"
+        fill="#1F3057">AI agent</text>
+  <text x="284" y="262" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.7">claude code · cursor · copilot · …</text>
+  <text x="284" y="282" class="mono" font-size="10"
+        fill="#1F3057" opacity="0.5">reads · writes · reasons in-session</text>
+
+  <!-- Agent ↔ Codebase (bidirectional) -->
+  <line x1="320" y1="300" x2="220" y2="376"
+        stroke="#1F3057" stroke-width="1.5"
+        marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="232" y="338" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.7">read /</text>
+  <text x="232" y="352" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.7">write</text>
+
+  <!-- Agent ↔ Selvedge (bidirectional) -->
+  <line x1="560" y1="300" x2="660" y2="376"
+        stroke="#1F3057" stroke-width="1.5"
+        marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="660" y="318" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.75">log_change</text>
+  <text x="660" y="336" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.75">blame · diff</text>
+  <text x="660" y="354" class="mono" font-size="10"
+        fill="#1F3057" opacity="0.55">via MCP</text>
+
+  <!-- Codebase -->
+  <rect x="60" y="380" width="280" height="100" rx="8" fill="#FFFFFF"
+        stroke="#1F3057" stroke-width="1.5"/>
+  <text x="80" y="410" class="mono" font-size="16" font-weight="700"
+        fill="#1F3057">your codebase</text>
+  <text x="80" y="432" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.7">files · git history</text>
+  <text x="80" y="460" class="mono" font-size="11"
+        fill="#B23A2A">tracks the WHAT</text>
+
+  <!-- Selvedge -->
+  <rect x="540" y="380" width="280" height="100" rx="8" fill="#FFFFFF"
+        stroke="#1F3057" stroke-width="1.5"/>
+  <rect x="540" y="400" width="4" height="60" fill="#B23A2A"/>
+  <text x="564" y="412" class="mono" font-size="18" font-weight="700"
+        fill="#1F3057">selvedge</text>
+  <text x="564" y="434" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.7">local MCP server</text>
+  <text x="564" y="460" class="mono" font-size="11"
+        fill="#B23A2A">captures the WHY</text>
+
+  <!-- Selvedge → events.db -->
+  <line x1="680" y1="480" x2="680" y2="524" stroke="#1F3057"
+        stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- events.db slab -->
+  <rect x="540" y="528" width="280" height="80" rx="8" fill="#1F3057"/>
+  <text x="680" y="558" text-anchor="middle" class="mono"
+        font-size="13" font-weight="700" fill="#EDE5D3">.selvedge/events.db</text>
+  <text x="680" y="580" text-anchor="middle" class="mono"
+        font-size="10" fill="#EDE5D3" opacity="0.85">what · when · who · WHY · where</text>
+  <text x="680" y="598" text-anchor="middle" class="mono"
+        font-size="9" fill="#EDE5D3" opacity="0.6">SQLite · stays on your machine</text>
+
+  <!-- Footer pun -->
+  <text x="40" y="588" class="mono" font-size="11" font-weight="700"
+        fill="#1F3057" opacity="0.7">git is the diff.</text>
+  <text x="40" y="606" class="mono" font-size="11" font-weight="700"
+        fill="#B23A2A">selvedge is the reasoning.</text>
+
+  <!-- Sparkle accent (mirrors wordmark) -->
+  <g transform="translate(840 28)" fill="#1F3057" opacity="0.3">
+    <path d="M 0 -5 L 1 -1 L 5 0 L 1 1 L 0 5 L -1 1 L -5 0 L -1 -1 Z"/>
+  </g>
+</svg>

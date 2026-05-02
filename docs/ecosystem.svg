@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 760" width="880" height="760"
+     role="img" aria-label="Where Selvedge fits in the broader AI-coded-codebase tooling stack">
+  <!--
+    Selvedge ecosystem-positioning diagram.
+
+    Companion to docs/architecture.svg (which shows the internal flow
+    between developer, agent, codebase, and the local why-store). This
+    diagram shows where Selvedge sits in the broader system: who calls
+    it, who consumes its output, and which adjacent tools it does NOT
+    replace.
+
+    Brand tokens (locked 2026-04-26, see project_selvedge_branding):
+      indigo  #1F3057   primary ink
+      red     #B23A2A   selvedge-stripe accent
+      ecru    #EDE5D3   card background
+
+    Single-file SVG, no external fonts; falls back JetBrains Mono →
+    IBM Plex Mono → ui-monospace, same as wordmark.svg and
+    architecture.svg.
+  -->
+
+  <defs>
+    <marker id="ec-arr" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1F3057"/>
+    </marker>
+    <marker id="ec-arr-faint" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1F3057" opacity="0.45"/>
+    </marker>
+  </defs>
+
+  <style>
+    .mono { font-family: 'JetBrains Mono', 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, ui-monospace, monospace; }
+  </style>
+
+  <!-- Card -->
+  <rect width="880" height="760" rx="20" ry="20" fill="#EDE5D3"/>
+
+  <!-- Title + red rule -->
+  <text x="40" y="46" class="mono" font-size="13" font-weight="700"
+        letter-spacing="1.5" fill="#1F3057">WHERE SELVEDGE FITS</text>
+  <line x1="40" y1="58" x2="220" y2="58" stroke="#B23A2A" stroke-width="2"/>
+  <text x="40" y="78" class="mono" font-size="11" fill="#1F3057" opacity="0.65">
+    in the broader AI-coded-codebase tooling stack
+  </text>
+
+  <!-- ============================================================== -->
+  <!-- Tier 1 — PRODUCERS (AI agents that call Selvedge)              -->
+  <!-- ============================================================== -->
+
+  <text x="40" y="118" class="mono" font-size="10" font-weight="700"
+        letter-spacing="1.2" fill="#1F3057" opacity="0.55">PRODUCERS</text>
+
+  <rect x="120" y="130" width="640" height="68" rx="8" fill="#FFFFFF"
+        stroke="#1F3057" stroke-width="1.5"/>
+  <text x="140" y="156" class="mono" font-size="14" font-weight="700"
+        fill="#1F3057">AI coding agents</text>
+  <text x="140" y="178" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.7">Claude Code · Cursor · Copilot · Devin · Replit Agent · autonomous agents</text>
+
+  <!-- producer → Selvedge arrow -->
+  <line x1="440" y1="198" x2="440" y2="240" stroke="#1F3057"
+        stroke-width="1.5" marker-end="url(#ec-arr)"/>
+  <text x="450" y="223" class="mono" font-size="11"
+        fill="#1F3057" opacity="0.7">call MCP tools</text>
+
+  <!-- ============================================================== -->
+  <!-- Tier 2 — SELVEDGE (the focus)                                  -->
+  <!-- ============================================================== -->
+
+  <rect x="120" y="244" width="640" height="120" rx="10" fill="#FFFFFF"
+        stroke="#1F3057" stroke-width="2"/>
+  <rect x="120" y="264" width="4" height="80" fill="#B23A2A"/>
+  <text x="148" y="280" class="mono" font-size="22" font-weight="700"
+        fill="#1F3057">selvedge</text>
+  <text x="148" y="306" class="mono" font-size="12"
+        fill="#1F3057" opacity="0.85">entity-level WHY-store · durable + queryable</text>
+  <text x="148" y="328" class="mono" font-size="10"
+        fill="#1F3057" opacity="0.6">captures intent at change-time · MCP server · SQLite under .selvedge/</text>
+  <text x="148" y="352" class="mono" font-size="10"
+        fill="#B23A2A">log_change · blame · diff · history · changeset · search</text>
+
+  <!-- Selvedge → consumers (three arrows fanning out) -->
+  <line x1="220" y1="364" x2="180" y2="412" stroke="#1F3057"
+        stroke-width="1.5" marker-end="url(#ec-arr)"/>
+  <line x1="440" y1="364" x2="440" y2="412" stroke="#1F3057"
+        stroke-width="1.5" marker-end="url(#ec-arr)"/>
+  <line x1="660" y1="364" x2="700" y2="412" stroke="#1F3057"
+        stroke-width="1.5" marker-end="url(#ec-arr)"/>
+
+  <!-- ============================================================== -->
+  <!-- Tier 3 — CONSUMERS / INTEGRATIONS                              -->
+  <!-- ============================================================== -->
+
+  <text x="40" y="396" class="mono" font-size="10" font-weight="700"
+        letter-spacing="1.2" fill="#1F3057" opacity="0.55">CONSUMERS &amp; INTEGRATIONS</text>
+
+  <!-- Agent Trace export (left) -->
+  <rect x="60" y="416" width="220" height="84" rx="8" fill="#FFFFFF"
+        stroke="#1F3057" stroke-width="1.5"/>
+  <text x="76" y="438" class="mono" font-size="13" font-weight="700"
+        fill="#1F3057">Agent Trace export</text>
+  <text x="76" y="458" class="mono" font-size="10"
+        fill="#1F3057" opacity="0.7">cross-tool wire format</text>
+  <text x="76" y="474" class="mono" font-size="10"
+        fill="#1F3057" opacity="0.7">Cursor / Cognition RFC</text>
+  <text x="76" y="492" class="mono" font-size="10"
+        fill="#B23A2A">Selvedge is a compatible producer</text>
+
+  <!-- Observability hooks (center) -->
+  <rect x="320" y="416" width="240" height="84" rx="8" fill="#FFFFFF"
+        stroke="#1F3057" stroke-width="1.5"/>
+  <text x="336" y="438" class="mono" font-size="13" font-weight="700"
+        fill="#1F3057">observability hooks</text>
+  <text x="336" y="458" class="mono" font-size="10"
+        fill="#1F3057" opacity="0.7">Sentry · Datadog · Honeycomb</text>
+  <text x="336" y="474" class="mono" font-size="10"
+        fill="#1F3057" opacity="0.7">links events to stack traces</text>
+  <text x="336" y="492" class="mono" font-size="10"
+        fill="#B23A2A">"this column was added by claude-code"</text>
+
+  <!-- Compliance export (right) -->
+  <rect x="600" y="416" width="220" height="84" rx="8" fill="#FFFFFF"
+        stroke="#1F3057" stroke-width="1.5"/>
+  <text x="616" y="438" class="mono" font-size="13" font-weight="700"
+        fill="#1F3057">compliance export</text>
+  <text x="616" y="458" class="mono" font-size="10"
+        fill="#1F3057" opacity="0.7">SOC 2 · EU AI Act Art. 50</text>
+  <text x="616" y="474" class="mono" font-size="10"
+        fill="#1F3057" opacity="0.7">CSV / JSON / agent-trace</text>
+  <text x="616" y="492" class="mono" font-size="10"
+        fill="#B23A2A">audit-trail of record</text>
+
+  <!-- ============================================================== -->
+  <!-- Tier 4 — NEIGHBORS (different phases, NOT replaced by Selvedge)-->
+  <!-- ============================================================== -->
+
+  <text x="40" y="544" class="mono" font-size="10" font-weight="700"
+        letter-spacing="1.2" fill="#1F3057" opacity="0.55">NEIGHBORS</text>
+  <text x="40" y="558" class="mono" font-size="9"
+        fill="#1F3057" opacity="0.5">different phases of the same code · Selvedge does not replace these</text>
+
+  <!-- Four neighbor boxes in a row -->
+
+  <!-- git -->
+  <rect x="40" y="572" width="190" height="70" rx="8" fill="#EDE5D3"
+        stroke="#1F3057" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="56" y="592" class="mono" font-size="12" font-weight="700"
+        fill="#1F3057">git</text>
+  <text x="56" y="610" class="mono" font-size="9"
+        fill="#1F3057" opacity="0.7">line-level what / when</text>
+  <text x="56" y="624" class="mono" font-size="9"
+        fill="#1F3057" opacity="0.7">Selvedge sits above</text>
+  <text x="56" y="636" class="mono" font-size="9"
+        fill="#B23A2A">it · references commits</text>
+
+  <!-- PR review tools -->
+  <rect x="240" y="572" width="190" height="70" rx="8" fill="#EDE5D3"
+        stroke="#1F3057" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="256" y="592" class="mono" font-size="12" font-weight="700"
+        fill="#1F3057">PR review tools</text>
+  <text x="256" y="610" class="mono" font-size="9"
+        fill="#1F3057" opacity="0.7">CodeRabbit · Greptile</text>
+  <text x="256" y="624" class="mono" font-size="9"
+        fill="#1F3057" opacity="0.7">review-time quality</text>
+  <text x="256" y="636" class="mono" font-size="9"
+        fill="#B23A2A">different phase</text>
+
+  <!-- Agent observability -->
+  <rect x="440" y="572" width="190" height="70" rx="8" fill="#EDE5D3"
+        stroke="#1F3057" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="456" y="592" class="mono" font-size="12" font-weight="700"
+        fill="#1F3057">agent observability</text>
+  <text x="456" y="610" class="mono" font-size="9"
+        fill="#1F3057" opacity="0.7">LangSmith · Helicone</text>
+  <text x="456" y="624" class="mono" font-size="9"
+        fill="#1F3057" opacity="0.7">LLM call traces</text>
+  <text x="456" y="636" class="mono" font-size="9"
+        fill="#B23A2A">different stack layer</text>
+
+  <!-- Code-host AI -->
+  <rect x="640" y="572" width="190" height="70" rx="8" fill="#EDE5D3"
+        stroke="#1F3057" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="656" y="592" class="mono" font-size="12" font-weight="700"
+        fill="#1F3057">code-host AI</text>
+  <text x="656" y="610" class="mono" font-size="9"
+        fill="#1F3057" opacity="0.7">GitHub · GitLab features</text>
+  <text x="656" y="624" class="mono" font-size="9"
+        fill="#1F3057" opacity="0.7">general-purpose, shallower</text>
+  <text x="656" y="636" class="mono" font-size="9"
+        fill="#B23A2A">Selvedge wins on depth</text>
+
+  <!-- Faint dotted lines from Selvedge to neighbors (relationship hint) -->
+  <line x1="440" y1="364" x2="135" y2="572" stroke="#1F3057"
+        stroke-width="1" stroke-dasharray="2,4" opacity="0.25"/>
+  <line x1="440" y1="364" x2="335" y2="572" stroke="#1F3057"
+        stroke-width="1" stroke-dasharray="2,4" opacity="0.25"/>
+  <line x1="440" y1="364" x2="535" y2="572" stroke="#1F3057"
+        stroke-width="1" stroke-dasharray="2,4" opacity="0.25"/>
+  <line x1="440" y1="364" x2="735" y2="572" stroke="#1F3057"
+        stroke-width="1" stroke-dasharray="2,4" opacity="0.25"/>
+
+  <!-- ============================================================== -->
+  <!-- Footer pun (mirrors architecture.svg)                          -->
+  <!-- ============================================================== -->
+
+  <text x="40" y="694" class="mono" font-size="11" font-weight="700"
+        fill="#1F3057" opacity="0.7">git is the diff. observability is the alarm. agents are the author.</text>
+  <text x="40" y="712" class="mono" font-size="11" font-weight="700"
+        fill="#B23A2A">selvedge is the institutional memory.</text>
+
+  <!-- Sparkle accent (mirrors wordmark.svg / architecture.svg) -->
+  <g transform="translate(840 28)" fill="#1F3057" opacity="0.3">
+    <path d="M 0 -5 L 1 -1 L 5 0 L 1 1 L 0 5 L -1 1 L -5 0 L -1 -1 Z"/>
+  </g>
+</svg>

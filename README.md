@@ -196,6 +196,27 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full list and reasoning.
 
 ---
 
+## Where Selvedge fits
+
+<p align="center">
+  <img src="docs/ecosystem.svg" alt="Where Selvedge fits in the broader AI-coded-codebase tooling stack" width="720">
+</p>
+
+AI agents call Selvedge as they work. Selvedge captures the *why*
+into a durable, queryable store and emits it back out — as
+[Agent Trace](https://github.com/cursor/agent-trace) records for
+cross-tool readers, as observability metadata that links into
+Sentry/Datadog stack traces, and as compliance artifacts for SOC 2
+and EU AI Act audits.
+
+Selvedge does **not** replace `git` (line-level what/when), PR review
+tools (review-time quality), agent observability (LLM call traces),
+or general-purpose code-host AI features. It sits between them — the
+provenance-as-first-class-citizen layer that everything else
+references.
+
+---
+
 ## How Selvedge compares
 
 There's a fast-growing "git blame for AI agents" category. Here's where
@@ -239,13 +260,59 @@ emits it.
 
 ---
 
-## Install
+## Quickstart
 
 ```bash
 pip install selvedge
+cd your-project
+selvedge setup
 ```
 
-## Quickstart
+That's it. `selvedge setup` is an interactive wizard: it detects which AI
+tools you have (Claude Code, Cursor, Copilot), writes the MCP entry into
+each one's config, drops the canonical agent-instructions block into your
+project's prompt file (`CLAUDE.md` / `.cursorrules` /
+`copilot-instructions.md`), runs `selvedge init`, and installs the
+post-commit hook. Every modified file gets a `.bak` written next to it
+before any change reaches disk. Re-running is a no-op.
+
+For CI bootstrap or `devcontainer.json` `postCreateCommand`:
+```bash
+selvedge setup --non-interactive --yes
+```
+
+**Verify the wiring** — open a second terminal in the same project:
+
+```bash
+selvedge watch
+```
+
+Make any change in your AI tool — add a column, rename a function, add an
+env var. `selvedge watch` should print the new event within a second of
+the agent calling `log_change`. If nothing arrives, run `selvedge doctor`
+for a single-command health check that tells you which step is silently
+broken.
+
+**Query your history:**
+
+```bash
+selvedge status                        # recent activity + missing-commit count
+selvedge diff users                    # all changes to the users table
+selvedge diff users.email              # changes to a specific column
+selvedge blame payments.amount         # what changed last and why
+selvedge history --since 30d           # last 30 days of changes
+selvedge history --since 15m           # last 15 minutes ('m' = minutes)
+selvedge changeset add-stripe-billing  # all events for a feature/task
+selvedge search "stripe"               # full-text search
+selvedge stats                         # log_change coverage report (per-agent)
+selvedge import migrations/            # backfill from migration files
+selvedge export --format csv           # dump history to CSV
+```
+
+<details>
+<summary><b>Manual install</b> — if you'd rather wire it up yourself</summary>
+
+If you don't want to run the wizard, the four manual steps it automates:
 
 **1. Initialize in your project**
 
@@ -267,34 +334,34 @@ selvedge init
 }
 ```
 
+For Cursor: `~/.cursor/mcp.json`. For Copilot:
+`.github/copilot-instructions.md` (different format — see
+`selvedge prompt --help`).
+
 **3. Tell your agent to use it**
 
-Add to your project's `CLAUDE.md`:
-```
-You have access to Selvedge for change tracking.
-Call selvedge.log_change immediately after adding, modifying, or removing
-any DB column, table, function, API endpoint, dependency, or env variable.
-Set `reasoning` to the user's original request or the problem being solved.
-Set `agent` to "claude-code".
-Before modifying an entity, call selvedge.blame to understand its history.
+```bash
+selvedge prompt --install CLAUDE.md
 ```
 
-**4. Query your history**
+This installs the canonical agent-instructions block, sentinel-bracketed
+(`<!-- selvedge:start -->` / `<!-- selvedge:end -->`) so future
+`--install` calls update the bracketed region without disturbing
+anything else in the file. Or pipe it:
 
 ```bash
-selvedge status                        # recent activity + missing-commit count
-selvedge diff users                    # all changes to the users table
-selvedge diff users.email              # changes to a specific column
-selvedge blame payments.amount         # what changed last and why
-selvedge history --since 30d           # last 30 days of changes
-selvedge history --since 15m           # last 15 minutes ('m' = minutes)
-selvedge changeset add-stripe-billing  # all events for a feature/task
-selvedge search "stripe"               # full-text search
-selvedge stats                         # log_change coverage report
-selvedge install-hook                  # auto-link commits to events
-selvedge import migrations/            # backfill from migration files
-selvedge export --format csv           # dump history to CSV
+selvedge prompt | tee -a CLAUDE.md
 ```
+
+**4. Install the post-commit hook**
+
+```bash
+selvedge install-hook
+```
+
+That's the same four steps the wizard runs.
+
+</details>
 
 ---
 

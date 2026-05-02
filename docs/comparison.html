@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Selvedge vs AgentDiff, Origin, Git AI, BlamePrompt — git blame for AI compared</title>
+  <meta name="description" content="How Selvedge compares to AgentDiff, Origin, Git AI, and BlamePrompt. Reasoning source, granularity, mechanism, and storage compared side-by-side. Plus how Selvedge interoperates with Agent Trace.">
+  <meta name="author" content="Mason Delan">
+  <meta name="keywords" content="selvedge vs agentdiff, selvedge vs origin, selvedge vs git ai, selvedge vs blameprompt, git blame for AI compared, AI code provenance comparison, AI agent reasoning capture, agent trace selvedge, MCP server change tracking">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Selvedge vs AgentDiff / Origin / Git AI / BlamePrompt">
+  <meta property="og:description" content="Side-by-side comparison of MCP-era code attribution tools — reasoning source, granularity, mechanism, and storage.">
+  <meta property="og:url" content="https://masondelan.github.io/selvedge/comparison.html">
+  <meta property="og:image" content="icon.png">
+  <meta property="og:site_name" content="Selvedge">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Selvedge vs the AI-blame category">
+  <meta name="twitter:description" content="Side-by-side: reasoning source, granularity, mechanism, storage.">
+  <meta name="twitter:image" content="icon.png">
+  <meta name="theme-color" content="#EDE5D3">
+  <link rel="canonical" href="https://masondelan.github.io/selvedge/comparison.html">
+  <link rel="icon" type="image/png" href="icon.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "Selvedge vs AgentDiff, Origin, Git AI, and BlamePrompt",
+    "description": "Side-by-side comparison of how Selvedge differs from other tools in the git-blame-for-AI category — captured live vs inferred post-hoc, entity-level vs line-level, MCP server vs git hook.",
+    "author": { "@type": "Person", "name": "Mason Delan", "url": "https://github.com/masondelan" },
+    "publisher": { "@type": "Person", "name": "Mason Delan" },
+    "datePublished": "2026-04-30",
+    "dateModified": "2026-04-30",
+    "mainEntityOfPage": { "@type": "WebPage", "@id": "https://masondelan.github.io/selvedge/comparison.html" },
+    "image": "https://masondelan.github.io/selvedge/icon.png",
+    "about": [
+      { "@type": "Thing", "name": "AI code attribution" },
+      { "@type": "Thing", "name": "MCP server" },
+      { "@type": "Thing", "name": "git blame for AI" }
+    ]
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: {
+          ecru: '#EDE5D3', ecruDeep: '#E4DAC4',
+          indigo: { DEFAULT: '#1F3057', deep: '#0F1B33' },
+          brick: '#B23A2A', fade: '#5C6B82', inkwell: '#1A1A1F', patina: '#8B8478'
+        },
+        fontFamily: {
+          mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        },
+        maxWidth: { 'page': '1080px', 'prose': '720px' }
+      }}
+    }
+  </script>
+
+  <style>
+    html, body { background: #EDE5D3; }
+    body {
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      color: #1A1A1F;
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "ss01", "cv01", "cv11";
+    }
+    .paper-grain::before {
+      content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 220px 220px; opacity: 0.07; mix-blend-mode: multiply;
+    }
+    .spine { position: fixed; left: 40px; top: 0; bottom: 0; width: 3px; background: #B23A2A; z-index: 2; }
+    @media (max-width: 768px) { .spine { left: 16px; } }
+    .wordmark { font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: -0.045em; line-height: 0.95; color: #1F3057; }
+    .h-section { font-family: 'JetBrains Mono', monospace; font-weight: 500; letter-spacing: -0.025em; color: #1F3057; }
+    .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #5C6B82; font-weight: 500; }
+    .nav-link { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #1F3057; padding-bottom: 2px; border-bottom: 1px solid transparent; }
+    .nav-link:hover { border-bottom-color: #B23A2A; }
+    .compare-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    .compare-table th, .compare-table td { border: 1px solid #1F3057; padding: 12px 14px; text-align: left; vertical-align: top; }
+    .compare-table th { background: #1F3057; color: #EDE5D3; font-family: 'JetBrains Mono', monospace; font-weight: 500; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+    .compare-table tr.featured td { background: #E4DAC4; font-weight: 500; }
+    .compare-table tr.featured td:first-child { color: #B23A2A; }
+    .compare-table td:first-child { font-family: 'JetBrains Mono', monospace; font-weight: 500; color: #1F3057; }
+    @media (max-width: 768px) { .compare-table { font-size: 13px; } .compare-table th, .compare-table td { padding: 8px 10px; } }
+    .callout { border-left: 3px solid #B23A2A; padding: 14px 18px; background: rgba(178, 58, 42, 0.05); }
+    .stamp { display: inline-flex; align-items: center; gap: 14px; padding: 14px 22px 14px 18px; border: 1px solid #1F3057; font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #1F3057; }
+    .stamp::before { content: ''; width: 8px; height: 8px; background: #B23A2A; flex-shrink: 0; }
+    a.linky { color: #1F3057; border-bottom: 1px solid #1F3057; }
+    a.linky:hover { color: #B23A2A; border-bottom-color: #B23A2A; }
+  </style>
+</head>
+<body class="paper-grain">
+  <div class="spine"></div>
+
+  <header class="relative z-10 max-w-page mx-auto px-12 md:px-16 pt-10 pb-4 flex items-baseline justify-between">
+    <a href="index.html" class="wordmark text-2xl">selvedge</a>
+    <nav class="flex gap-6">
+      <a href="index.html" class="nav-link">overview</a>
+      <a href="comparison.html" class="nav-link" style="border-bottom-color:#B23A2A;">compare</a>
+      <a href="faq.html" class="nav-link">faq</a>
+      <a href="https://github.com/masondelan/selvedge" class="nav-link">github</a>
+    </nav>
+  </header>
+
+  <main class="relative z-10 max-w-page mx-auto px-12 md:px-16 pt-8 pb-24">
+    <p class="eyebrow mb-3">Comparison · 2026-04</p>
+    <h1 class="h-section text-4xl md:text-5xl mb-6 leading-tight">How Selvedge compares to AgentDiff, Origin, Git AI, and BlamePrompt.</h1>
+    <p class="text-fade max-w-prose mb-10" style="font-size:17px;line-height:1.55;">
+      The "git blame for AI" category is fast-growing — five tools, all promising
+      to surface the why behind agent-written code. They differ on four axes
+      that matter: where reasoning comes from, what unit it's attached to,
+      when it's collected, and how it's stored.
+    </p>
+
+    <div class="overflow-x-auto -mx-4 px-4 mb-10">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Reasoning source</th>
+            <th>Granularity</th>
+            <th>Mechanism</th>
+            <th>Grouping</th>
+            <th>Storage</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="featured">
+            <td>Selvedge</td>
+            <td>Captured live, by the agent in the same context that produced the change</td>
+            <td>Entity — DB column, table, env var, dep, API route, function</td>
+            <td>MCP server — agent calls it as work happens</td>
+            <td>Changesets — named feature/task slugs across many entities</td>
+            <td>SQLite, zero deps</td>
+          </tr>
+          <tr>
+            <td>AgentDiff</td>
+            <td>Inferred post-hoc by Claude Haiku from the diff at session end</td>
+            <td>Line</td>
+            <td>Git pre/post-commit hook</td>
+            <td>None</td>
+            <td>JSONL on disk</td>
+          </tr>
+          <tr>
+            <td>Origin</td>
+            <td>Captured at commit time</td>
+            <td>Line</td>
+            <td>Git hook</td>
+            <td>None</td>
+            <td>Local</td>
+          </tr>
+          <tr>
+            <td>Git AI</td>
+            <td>Attribution metadata</td>
+            <td>Line</td>
+            <td>Git hook + Agent Trace alliance</td>
+            <td>None</td>
+            <td>Git notes</td>
+          </tr>
+          <tr>
+            <td>BlamePrompt</td>
+            <td>Prompt-only</td>
+            <td>Line</td>
+            <td>Git hook</td>
+            <td>None</td>
+            <td>Local</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 class="h-section text-2xl mt-14 mb-4">Why "captured live" matters</h2>
+    <p class="text-inkwell max-w-prose mb-4" style="font-size:16px;line-height:1.6;">
+      AgentDiff and Origin generate reasoning <em>after</em> the change is made,
+      by feeding the diff back to a second LLM call. Selvedge's reasoning is the
+      agent's own intent, written from the same context window that produced
+      the change — no inference, no hallucinated explanations, and an empty
+      <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">reasoning</code> field is itself a useful
+      signal (the agent didn't have one).
+    </p>
+    <div class="callout max-w-prose mb-10">
+      <p class="text-inkwell" style="font-size:15px;line-height:1.55;">
+        Post-hoc inference produces plausible-sounding reasoning that may be
+        wrong, because the second LLM never saw the original prompt. Capture
+        from the producing context is information; capture from a second LLM
+        is paraphrase.
+      </p>
+    </div>
+
+    <h2 class="h-section text-2xl mt-14 mb-4">Why "entity-level" matters</h2>
+    <p class="text-inkwell max-w-prose mb-10" style="font-size:16px;line-height:1.6;">
+      Most tools attribute <em>lines</em>. Selvedge attributes <em>things you
+      actually search for</em>: <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">users.email</code>,
+      <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">env/STRIPE_SECRET_KEY</code>,
+      <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">api/v1/checkout</code>,
+      <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">deps/stripe</code>. The first
+      question after <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">git blame</code> is usually
+      <em>"what's the history of this column"</em>, not <em>"what's the
+      history of lines 40–48 of users.py"</em>.
+    </p>
+
+    <h2 class="h-section text-2xl mt-14 mb-4">Why "changesets" matter</h2>
+    <p class="text-inkwell max-w-prose mb-10" style="font-size:16px;line-height:1.6;">
+      A Stripe billing rollout touches the <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">users</code> table,
+      two new env vars, three new API routes, one dependency, and four
+      functions across the codebase. Tag every event with
+      <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">changeset:add-stripe-billing</code> and you
+      can pull the entire scope back later — even if the original PR was
+      broken into eight smaller ones over a month. None of the line-attribution
+      tools have an analogue.
+    </p>
+
+    <h2 class="h-section text-2xl mt-14 mb-4">Selvedge ↔ Agent Trace</h2>
+    <p class="text-inkwell max-w-prose mb-4" style="font-size:16px;line-height:1.6;">
+      <a class="linky" href="https://github.com/cursor/agent-trace">Agent Trace</a>
+      (Cursor + Cognition AI, RFC Jan 2026, backed by Cloudflare, Vercel,
+      Google Jules, Amp, OpenCode, and git-ai) is an emerging <em>open
+      standard</em> for AI code attribution traces. Selvedge isn't a
+      competitor to it — it's a compatible producer. Agent Trace is the wire
+      format. Selvedge is the live capture + query layer that emits it.
+    </p>
+    <p class="text-inkwell max-w-prose mb-10" style="font-size:16px;line-height:1.6;">
+      The design for <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">selvedge export --format agent-trace</code>
+      is published at
+      <a class="linky" href="https://github.com/masondelan/selvedge/blob/main/docs/agent-trace-interop.md">docs/agent-trace-interop.md</a>
+      and lands in v0.4.0.
+    </p>
+
+    <h2 class="h-section text-2xl mt-14 mb-4">When you'd pick Selvedge</h2>
+    <ul class="max-w-prose space-y-3 mb-12" style="font-size:16px;line-height:1.55;">
+      <li class="pl-4 border-l-2 border-indigo">Your agent makes a lot of <em>schema</em> or <em>config</em> changes you'll need to audit later.</li>
+      <li class="pl-4 border-l-2 border-indigo">You roll out features that touch many entities (billing, auth migrations, deprecations) and want to query them as a unit.</li>
+      <li class="pl-4 border-l-2 border-indigo">You want the reasoning at the moment the change happens, not a paraphrase of the diff.</li>
+      <li class="pl-4 border-l-2 border-indigo">You'd rather use <a class="linky" href="https://modelcontextprotocol.io">MCP</a> than a git hook because your agent already speaks MCP.</li>
+    </ul>
+
+    <h2 class="h-section text-2xl mt-14 mb-4">When something else is better</h2>
+    <ul class="max-w-prose space-y-3 mb-12" style="font-size:16px;line-height:1.55;">
+      <li class="pl-4 border-l-2 border-fade">You don't use an MCP-capable agent. (Selvedge can fall back to a git post-commit hook for inference, but capture quality drops.)</li>
+      <li class="pl-4 border-l-2 border-fade">You only need <em>line</em> attribution and your tooling already handles it. Pick AgentDiff or Origin.</li>
+      <li class="pl-4 border-l-2 border-fade">You want a hosted service for cross-repo aggregation today. Selvedge is local-first; the hosted layer is Phase 3.</li>
+    </ul>
+
+    <div class="mt-16 mb-8">
+      <p class="eyebrow mb-3">Try it in 90 seconds</p>
+      <div class="stamp">pip install selvedge &amp;&amp; selvedge setup</div>
+    </div>
+  </main>
+
+  <footer class="relative z-10 max-w-page mx-auto px-12 md:px-16 py-10 border-t border-indigo/30">
+    <div class="flex justify-between items-baseline text-fade text-sm">
+      <span class="font-mono">selvedge · MIT · masondelan</span>
+      <span class="font-mono">
+        <a href="index.html" class="linky">home</a>
+        &nbsp;·&nbsp;
+        <a href="faq.html" class="linky">faq</a>
+        &nbsp;·&nbsp;
+        <a href="https://github.com/masondelan/selvedge" class="linky">github</a>
+      </span>
+    </div>
+  </footer>
+</body>
+</html>

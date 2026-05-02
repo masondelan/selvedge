@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+
+# Block the live dashboard from indexing — it's a working tool, not content.
+Disallow: /dashboard.html
+Disallow: /dashboard-data.json
+Disallow: /content-prompts/
+Disallow: /directory-audits/
+Disallow: /release-content/
+
+# Site map
+Sitemap: https://masondelan.github.io/selvedge/sitemap.xml

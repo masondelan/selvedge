@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Selvedge FAQ — answers to common questions about MCP-era change tracking</title>
+  <meta name="description" content="Frequently asked questions about Selvedge: how it differs from git blame, what it costs, where data lives, how it works with Claude Code / Cursor / Copilot, what 'changeset' means, and whether it's production-ready.">
+  <meta name="author" content="Mason Delan">
+  <meta name="keywords" content="selvedge faq, MCP server change tracking, git blame for AI, AI code provenance, selvedge claude code, selvedge cursor, selvedge copilot, AI agent reasoning capture">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Selvedge FAQ">
+  <meta property="og:description" content="Common questions about Selvedge — pricing, privacy, supported agents, comparisons, and production-readiness.">
+  <meta property="og:url" content="https://masondelan.github.io/selvedge/faq.html">
+  <meta property="og:image" content="icon.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Selvedge FAQ">
+  <meta name="twitter:description" content="Common questions about Selvedge.">
+  <meta name="theme-color" content="#EDE5D3">
+  <link rel="canonical" href="https://masondelan.github.io/selvedge/faq.html">
+  <link rel="icon" type="image/png" href="icon.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Isn't this just git blame?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. git blame tells you what changed and when. It can't tell you why — especially when the committer is an AI agent and the commit message is auto-generated. Selvedge captures the agent's own reasoning live, in the moment, and attaches it to entities (a column, an env var, an endpoint) rather than line numbers." }
+      },
+      {
+        "@type": "Question",
+        "name": "Why not just rely on commit messages?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Commit messages are written about a whole diff, after the fact. Selvedge captures per-entity reasoning while the agent still has the prompt context. One commit can have ten Selvedge events, each with different reasoning. AI-generated commit messages are also notoriously generic — most of the original intent never makes it into the commit." }
+      },
+      {
+        "@type": "Question",
+        "name": "How is Selvedge different from AgentDiff, Origin, Git AI, or BlamePrompt?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Two ways. (1) AgentDiff, Origin, Git AI, and BlamePrompt infer reasoning post-hoc, by feeding the diff to a second LLM at commit time. Selvedge captures the agent's own intent live, from the same context window. (2) Those tools attribute lines. Selvedge attributes entities — the column, the env var, the route — which is what people actually search for. See the comparison page for details." }
+      },
+      {
+        "@type": "Question",
+        "name": "What does Selvedge cost?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Free. MIT licensed. No SaaS, no telemetry, no account. Install with pip install selvedge." }
+      },
+      {
+        "@type": "Question",
+        "name": "Where does the data live? Does anything leave my machine?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Nowhere. The data is in a SQLite file under .selvedge/ in your project. Zero network calls, zero telemetry. The MCP server runs locally as a subprocess of your AI tool. You can cat the SQLite file and see every row." }
+      },
+      {
+        "@type": "Question",
+        "name": "What if my AI agent doesn't actually call Selvedge?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Coverage is the real problem, not capture quality. Two answers. (1) selvedge prompt prints a system-prompt block that strongly nudges the agent to log changes. (2) selvedge stats and scripts/coverage_check.py tell you exactly what your call ratio is per commit, so you know when the prompt needs strengthening. An empty reasoning field is itself a useful signal — it means the agent didn't have explicit intent for that change." }
+      },
+      {
+        "@type": "Question",
+        "name": "Does Selvedge work with Claude Code, Cursor, and Copilot?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes — all three. selvedge setup detects which AI tools you have and configures all of them in one pass: writes the MCP entry into each tool's config, drops the canonical agent-instructions block into the right prompt file, and installs the post-commit hook." }
+      },
+      {
+        "@type": "Question",
+        "name": "What is a changeset?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Imagine you're rolling out Stripe billing. It touches the users table, two new env vars, three API routes, one dependency, and four functions across the codebase. Tag every event with changeset:add-stripe-billing and selvedge changeset add-stripe-billing pulls the entire scope back later — even if the work was broken into eight smaller PRs over a month. It's the rollup view for cross-cutting features." }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I use Selvedge on an existing codebase?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. From the moment you install it, every new agent change is captured. For retroactive coverage, selvedge import migrations/ backfills history from existing SQL DDL or Alembic migration files." }
+      },
+      {
+        "@type": "Question",
+        "name": "Is Selvedge production-ready?",
+        "acceptedAnswer": { "@type": "Answer", "text": "The core (capture, query, blame, changesets) is solid — v0.3.x has been hardened with adversarial tests, concurrency tests, and a frozen public API. 282 tests pass across Python 3.10–3.13 and SQLite 3.37–3.45. Phase 3 work (team sync, Postgres backend) isn't shipped yet. For single-developer use today: yes. For team rollout: yes if your team is fine sharing the SQLite file or each developer keeps their own." }
+      },
+      {
+        "@type": "Question",
+        "name": "How long does Selvedge take to set up?",
+        "acceptedAnswer": { "@type": "Answer", "text": "About 90 seconds. pip install selvedge, cd into your project, then selvedge setup. The wizard detects your AI tools and configures everything in one pass: drops the system-prompt block into your CLAUDE.md, writes the MCP entry into your agent config, runs selvedge init, and installs the post-commit hook. Every modified file gets a .bak backup before any change reaches disk." }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I uninstall Selvedge?",
+        "acceptedAnswer": { "@type": "Answer", "text": "rm -rf .selvedge/, remove the MCP entry from your AI tool config, then pip uninstall selvedge. Done. Nothing leaks anywhere." }
+      },
+      {
+        "@type": "Question",
+        "name": "What's Selvedge's relationship to Agent Trace?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Agent Trace is an emerging open standard for AI code attribution traces (Cursor + Cognition AI's RFC, backed by Cloudflare, Vercel, Google Jules, and others). Selvedge isn't competing with it — Selvedge is a compatible producer. Agent Trace is the wire format; Selvedge is the live capture and query layer that emits it. The design for selvedge export --format agent-trace ships in v0.4.0." }
+      },
+      {
+        "@type": "Question",
+        "name": "Is there a hosted version?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Not yet. The local tool is and will always be free, MIT, and local-only. A hosted team-sync layer is on the long-term roadmap (Phase 3) but isn't shipped. The data stays in SQLite on your disk; you own it." }
+      }
+    ]
+  }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: {
+          ecru: '#EDE5D3', ecruDeep: '#E4DAC4',
+          indigo: { DEFAULT: '#1F3057', deep: '#0F1B33' },
+          brick: '#B23A2A', fade: '#5C6B82', inkwell: '#1A1A1F', patina: '#8B8478'
+        },
+        fontFamily: {
+          mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        },
+        maxWidth: { 'page': '1080px', 'prose': '720px' }
+      }}
+    }
+  </script>
+
+  <style>
+    html, body { background: #EDE5D3; }
+    body {
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      color: #1A1A1F;
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "ss01", "cv01", "cv11";
+    }
+    .paper-grain::before {
+      content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 220px 220px; opacity: 0.07; mix-blend-mode: multiply;
+    }
+    .spine { position: fixed; left: 40px; top: 0; bottom: 0; width: 3px; background: #B23A2A; z-index: 2; }
+    @media (max-width: 768px) { .spine { left: 16px; } }
+    .wordmark { font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: -0.045em; line-height: 0.95; color: #1F3057; }
+    .h-section { font-family: 'JetBrains Mono', monospace; font-weight: 500; letter-spacing: -0.025em; color: #1F3057; }
+    .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #5C6B82; font-weight: 500; }
+    .nav-link { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #1F3057; padding-bottom: 2px; border-bottom: 1px solid transparent; }
+    .nav-link:hover { border-bottom-color: #B23A2A; }
+    a.linky { color: #1F3057; border-bottom: 1px solid #1F3057; }
+    a.linky:hover { color: #B23A2A; border-bottom-color: #B23A2A; }
+    details.qa { border-top: 1px solid rgba(31, 48, 87, 0.18); padding: 18px 0; }
+    details.qa:last-of-type { border-bottom: 1px solid rgba(31, 48, 87, 0.18); }
+    details.qa summary {
+      list-style: none;
+      cursor: pointer;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+      font-size: 16px;
+      color: #1F3057;
+      display: flex; gap: 12px; align-items: baseline;
+    }
+    details.qa summary::-webkit-details-marker { display: none; }
+    details.qa summary::before { content: '+'; color: #B23A2A; font-weight: 700; flex-shrink: 0; }
+    details.qa[open] summary::before { content: '−'; }
+    details.qa .answer { padding: 12px 0 4px 24px; max-width: 640px; line-height: 1.6; color: #1A1A1F; }
+    details.qa .answer code { font-family: 'JetBrains Mono', monospace; font-size: 13.5px; background: #E4DAC4; padding: 1px 6px; }
+    .stamp { display: inline-flex; align-items: center; gap: 14px; padding: 14px 22px 14px 18px; border: 1px solid #1F3057; font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #1F3057; }
+    .stamp::before { content: ''; width: 8px; height: 8px; background: #B23A2A; flex-shrink: 0; }
+  </style>
+</head>
+<body class="paper-grain">
+  <div class="spine"></div>
+
+  <header class="relative z-10 max-w-page mx-auto px-12 md:px-16 pt-10 pb-4 flex items-baseline justify-between">
+    <a href="index.html" class="wordmark text-2xl">selvedge</a>
+    <nav class="flex gap-6">
+      <a href="index.html" class="nav-link">overview</a>
+      <a href="comparison.html" class="nav-link">compare</a>
+      <a href="faq.html" class="nav-link" style="border-bottom-color:#B23A2A;">faq</a>
+      <a href="https://github.com/masondelan/selvedge" class="nav-link">github</a>
+    </nav>
+  </header>
+
+  <main class="relative z-10 max-w-page mx-auto px-12 md:px-16 pt-8 pb-24">
+    <p class="eyebrow mb-3">Frequently asked</p>
+    <h1 class="h-section text-4xl md:text-5xl mb-6 leading-tight">Questions, answered.</h1>
+    <p class="text-fade max-w-prose mb-12" style="font-size:17px;line-height:1.55;">
+      The questions people actually ask after reading the README. If yours
+      isn't here,
+      <a class="linky" href="https://github.com/masondelan/selvedge/issues/new">open an issue</a>.
+    </p>
+
+    <section class="max-w-prose">
+      <details class="qa">
+        <summary>Isn't this just git blame?</summary>
+        <div class="answer">No. <code>git blame</code> tells you <em>what</em> changed and <em>when</em>. It can't tell you <em>why</em> — especially when the committer is an AI agent and the commit message is auto-generated. Selvedge captures the agent's own reasoning live, in the moment, and attaches it to <em>entities</em> (a column, an env var, an endpoint) rather than line numbers.</div>
+      </details>
+      <details class="qa">
+        <summary>Why not just rely on commit messages?</summary>
+        <div class="answer">Commit messages are written about a whole diff, after the fact. Selvedge captures <em>per-entity</em> reasoning while the agent still has the prompt context. One commit can have ten Selvedge events, each with different reasoning. AI-generated commit messages are also notoriously generic — most of the original intent never makes it into the commit.</div>
+      </details>
+      <details class="qa">
+        <summary>How is Selvedge different from AgentDiff, Origin, Git AI, or BlamePrompt?</summary>
+        <div class="answer">Two ways. <strong>(1)</strong> AgentDiff, Origin, Git AI, and BlamePrompt infer reasoning <em>post-hoc</em>, by feeding the diff to a second LLM at commit time. Selvedge captures the agent's own intent live, from the same context window. <strong>(2)</strong> Those tools attribute lines. Selvedge attributes entities — the column, the env var, the route — which is what people actually search for. See the <a class="linky" href="comparison.html">comparison page</a> for details.</div>
+      </details>
+      <details class="qa">
+        <summary>What does Selvedge cost?</summary>
+        <div class="answer">Free. MIT licensed. No SaaS, no telemetry, no account. Install with <code>pip install selvedge</code>.</div>
+      </details>
+      <details class="qa">
+        <summary>Where does my data live? Does anything leave my machine?</summary>
+        <div class="answer">Nowhere. The data is in a SQLite file under <code>.selvedge/</code> in your project. Zero network calls, zero telemetry. The MCP server runs locally as a subprocess of your AI tool. You can <code>cat</code> the SQLite file and see every row.</div>
+      </details>
+      <details class="qa">
+        <summary>What if my AI agent doesn't actually call Selvedge?</summary>
+        <div class="answer">Coverage is the real problem, not capture quality. Two answers. <strong>(1)</strong> <code>selvedge prompt</code> prints a system-prompt block that strongly nudges the agent to log changes. <strong>(2)</strong> <code>selvedge stats</code> and <code>scripts/coverage_check.py</code> tell you exactly what your call ratio is per commit, so you know when the prompt needs strengthening. An empty <code>reasoning</code> field is itself a useful signal — it means the agent didn't have explicit intent for that change.</div>
+      </details>
+      <details class="qa">
+        <summary>Does Selvedge work with Claude Code, Cursor, and Copilot?</summary>
+        <div class="answer">Yes — all three. <code>selvedge setup</code> detects which AI tools you have and configures all of them in one pass: writes the MCP entry into each tool's config, drops the canonical agent-instructions block into the right prompt file (<code>CLAUDE.md</code> / <code>.cursorrules</code> / <code>copilot-instructions.md</code>), and installs the post-commit hook.</div>
+      </details>
+      <details class="qa">
+        <summary>What is a changeset?</summary>
+        <div class="answer">Imagine you're rolling out Stripe billing. It touches the <code>users</code> table, two new env vars, three API routes, one dependency, and four functions across the codebase. Tag every event with <code>changeset:add-stripe-billing</code> and <code>selvedge changeset add-stripe-billing</code> pulls the entire scope back later — even if the work was broken into eight smaller PRs over a month. It's the rollup view for cross-cutting features.</div>
+      </details>
+      <details class="qa">
+        <summary>Can I use Selvedge on an existing codebase?</summary>
+        <div class="answer">Yes. From the moment you install it, every new agent change is captured. For retroactive coverage, <code>selvedge import migrations/</code> backfills history from existing SQL DDL or Alembic migration files.</div>
+      </details>
+      <details class="qa">
+        <summary>Is Selvedge production-ready?</summary>
+        <div class="answer">The core (capture, query, blame, changesets) is solid — v0.3.x has been hardened with adversarial tests, concurrency tests, and a frozen public API. 282 tests pass across Python 3.10–3.13 and SQLite 3.37–3.45. Phase 3 work (team sync, Postgres backend) isn't shipped yet. For single-developer use today: yes. For team rollout: yes if your team is fine sharing the SQLite file or each developer keeps their own.</div>
+      </details>
+      <details class="qa">
+        <summary>How long does Selvedge take to set up?</summary>
+        <div class="answer">About 90 seconds. <code>pip install selvedge</code>, <code>cd</code> into your project, then <code>selvedge setup</code>. The wizard detects your AI tools and configures everything in one pass. Every modified file gets a <code>.bak</code> backup before any change reaches disk.</div>
+      </details>
+      <details class="qa">
+        <summary>How do I uninstall Selvedge?</summary>
+        <div class="answer"><code>rm -rf .selvedge/</code>, remove the MCP entry from your AI tool config, then <code>pip uninstall selvedge</code>. Done. Nothing leaks anywhere.</div>
+      </details>
+      <details class="qa">
+        <summary>What's Selvedge's relationship to Agent Trace?</summary>
+        <div class="answer"><a class="linky" href="https://github.com/cursor/agent-trace">Agent Trace</a> is an emerging open standard for AI code attribution traces (Cursor + Cognition AI's RFC, backed by Cloudflare, Vercel, Google Jules, and others). Selvedge isn't competing with it — Selvedge is a compatible producer. Agent Trace is the wire format; Selvedge is the live capture and query layer that emits it. The design for <code>selvedge export --format agent-trace</code> ships in v0.4.0.</div>
+      </details>
+      <details class="qa">
+        <summary>Is there a hosted version?</summary>
+        <div class="answer">Not yet. The local tool is and will always be free, MIT, and local-only. A hosted team-sync layer is on the long-term roadmap (Phase 3) but isn't shipped. The data stays in SQLite on your disk; you own it.</div>
+      </details>
+    </section>
+
+    <div class="mt-16 mb-8">
+      <p class="eyebrow mb-3">Try it in 90 seconds</p>
+      <div class="stamp">pip install selvedge &amp;&amp; selvedge setup</div>
+    </div>
+  </main>
+
+  <footer class="relative z-10 max-w-page mx-auto px-12 md:px-16 py-10 border-t border-indigo/30">
+    <div class="flex justify-between items-baseline text-fade text-sm">
+      <span class="font-mono">selvedge · MIT · masondelan</span>
+      <span class="font-mono">
+        <a href="index.html" class="linky">home</a>
+        &nbsp;·&nbsp;
+        <a href="comparison.html" class="linky">compare</a>
+        &nbsp;·&nbsp;
+        <a href="https://github.com/masondelan/selvedge" class="linky">github</a>
+      </span>
+    </div>
+  </footer>
+</body>
+</html>

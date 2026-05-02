@@ -578,6 +578,63 @@ github.com).
       the expected dataclass shape in the same PR as the migration so
       CI doesn't go red.
 
+### Phase 2.14 — Personal cross-repo memory (v0.3.8)
+> v0.3.7 makes Selvedge active *within* a project; v0.3.8 extends that
+> across the project portfolio a single user owns. Read-only union over
+> N local `.selvedge/` directories — writes still scope to the current
+> project's DB. No auth, no remote, no team features (those live in
+> Phase 4 hosted). This is the OSS half of the cross-repo split decided
+> alongside v0.3.7.
+>
+> The compelling case: `prior_attempts` finding "you considered this
+> approach 6 months ago in your other project and rejected it because
+> X." Per-repo `prior_attempts` already kills LLM amnesia within a
+> codebase; cross-repo extends that to your career.
+
+- [ ] **Link registry** — `links.toml` listing other `.selvedge/`
+      directories the user owns. Resolution order mirrors the existing
+      DB-path convention: `SELVEDGE_LINKS` env var → project-local
+      `.selvedge/links.toml` → `~/.selvedge/links.toml` (default).
+      Project-local override matters for users who want different
+      portfolios at work vs. home.
+- [ ] **`selvedge link` / `unlink` / `linked` CLI commands** — manage
+      the registry without hand-editing TOML. `selvedge link
+      ~/projects/other-repo` validates the path, walks up looking for
+      `.selvedge/`, refuses to add broken or schema-mismatched DBs,
+      writes to the active links file. `selvedge linked` lists with
+      health status (reachable / missing / version-skew).
+- [ ] **`--all-projects` flag on read commands** — `selvedge history`,
+      `search`, `diff`, `blame`, `stale` accept `--all-projects` to
+      union across linked DBs. Default behavior (no flag) is unchanged:
+      query the current project only. Output gains a `project` column /
+      field when unioning so users can tell which repo a result came
+      from.
+- [ ] **`all_projects: bool = False` parameter on read MCP tools** —
+      same opt-in shape on `diff`, `history`, `search`, `prior_attempts`,
+      `stale_decisions`. `log_change` and `changeset` are unchanged
+      (writes always scope to the current project; changesets are
+      per-project by definition).
+- [ ] **Read-only invariant enforced at the storage layer** —
+      `LinkedReadStorage` wraps N read-only `SelvedgeStorage` handles
+      and refuses any write call. Implementation detail, but worth
+      surfacing in the architecture so future contributors don't bolt
+      cross-repo writes on by accident.
+- [ ] **Doctor extensions** — `selvedge doctor` learns a "linked
+      projects" check: each entry in `links.toml` is reachable, has a
+      compatible schema version, and isn't a stale path. Surfaces
+      version-skew (one linked project on schema v2, another on v3)
+      as a WARN, not a FAIL, since the union still works.
+- [ ] **Privacy / scope guardrail** — make it explicit in the CLAUDE.md
+      block (via `selvedge prompt`) that `--all-projects` opt-in
+      crosses project boundaries. Some users will have a work repo and
+      a personal repo on the same machine and shouldn't have agents
+      bleed context across without intent.
+- [ ] **Tests** — `tests/test_linked_projects.py` covering link-file
+      resolution order, broken-link skip behavior, schema-skew
+      detection, union ordering across N DBs (newest-first by
+      timestamp), and the read-only invariant (LinkedReadStorage
+      refuses writes).
+
 ### Phase 3 — Team features (v0.4.0)
 > First release in the breaking-changes window. Bundles the backend
 > abstraction, the HTTP+auth surface, and the deferred MCP tool-name
@@ -616,12 +673,12 @@ github.com).
 
 ### Phase 4 — Platform (hosted business)
 - [ ] Web dashboard (React + the REST API)
-- [ ] Cross-repo queries (server-side, multi-tenant). The
-      single-user OSS variant — local overlay across multiple
-      `.selvedge/` directories the same person owns — is intentionally
-      *not* on Phase 4 scope; it lives in the OSS track and will be
-      considered for a v0.3.x point release post-v0.3.7. Hosted is for
-      teams; OSS is for individuals.
+- [ ] Cross-repo queries (server-side, multi-tenant, with auth and
+      cross-user permissioning). The single-user OSS variant —
+      read-only local overlay across `.selvedge/` directories the same
+      user owns — ships separately as Phase 2.14 / v0.3.8. Hosted is
+      for teams sharing context across users; OSS is for individuals
+      across their own portfolio.
 - [ ] Team/org-level retention policies (per-tenant, configurable
       independently from the project-local `retention_days` shipped in
       v0.3.5)

@@ -4,7 +4,7 @@
   "description": "Change tracking for AI-era codebases \u2014 captures the why behind every change as the agent makes it. git blame for semantic entities (DB columns, functions, env vars, deps), with reasoning written by the agent in the same context that produced the change.",
   "version": "0.3.4",
   "repository": "https://github.com/masondelan/selvedge",
-  "homepage": "https://github.com/masondelan/selvedge",
+  "homepage": "https://selvedge.sh",
   "license": "MIT",
   "packages": [
     {

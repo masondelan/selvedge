@@ -14,8 +14,8 @@
     "type": "git",
     "url": "https://github.com/masondelan/selvedge.git"
   },
-  "homepage": "https://github.com/masondelan/selvedge",
-  "documentation": "https://github.com/masondelan/selvedge/blob/main/README.md",
+  "homepage": "https://selvedge.sh",
+  "documentation": "https://selvedge.sh",
   "support": "https://github.com/masondelan/selvedge/issues",
   "license": "MIT",
   "keywords": [

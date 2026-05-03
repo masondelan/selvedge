@@ -3,6 +3,14 @@
 </p>
 
 <p align="center">
+  <a href="https://selvedge.sh"><strong>selvedge.sh</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://pypi.org/project/selvedge/"><strong>PyPI</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/masondelan/selvedge"><strong>GitHub</strong></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/masondelan/selvedge/actions/workflows/test.yml"><img src="https://github.com/masondelan/selvedge/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
   <a href="https://pypi.org/project/selvedge/"><img src="https://img.shields.io/pypi/v/selvedge?cacheSeconds=3600" alt="PyPI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>

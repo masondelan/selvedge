@@ -17,7 +17,7 @@ REPO="masondelan/selvedge"
 
 DESCRIPTION="Long-term memory for AI-coded codebases. A git blame for AI agents — but for the why. MCP server that captures the agent's reasoning live, in context, as each change is made. Local SQLite, zero deps."
 
-HOMEPAGE="https://masondelan.github.io/selvedge"
+HOMEPAGE="https://selvedge.sh"
 
 # GitHub topics: max 20, lowercase, hyphens only, ≤50 chars each.
 # Curated for the keyword strategy in launch/engagement/digests/2026-04-24-friday.md:

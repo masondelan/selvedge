@@ -8,5 +8,5 @@ Disallow: /content-prompts/
 Disallow: /directory-audits/
 Disallow: /release-content/
 
-# Site map
-Sitemap: https://masondelan.github.io/selvedge/sitemap.xml
+# Site map — canonical site is selvedge.sh; Starlight auto-generates the sitemap there.
+Sitemap: https://selvedge.sh/sitemap-index.xml

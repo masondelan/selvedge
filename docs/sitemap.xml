@@ -1,45 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Transition sitemap. The canonical site is now https://selvedge.sh
+  (Astro + Starlight, separate repo). This file lists the new locations
+  for pages that previously lived under masondelan.github.io/selvedge/,
+  so crawlers re-discovering this old sitemap follow the move.
+
+  The actual sitemap-index for the live site is at
+  https://selvedge.sh/sitemap-index.xml — robots.txt points there.
+-->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://masondelan.github.io/selvedge/</loc>
-    <lastmod>2026-04-30</lastmod>
+    <loc>https://selvedge.sh/</loc>
+    <lastmod>2026-05-03</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://masondelan.github.io/selvedge/comparison.html</loc>
-    <lastmod>2026-04-30</lastmod>
+    <loc>https://selvedge.sh/compare/agent-tools/</loc>
+    <lastmod>2026-05-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://masondelan.github.io/selvedge/faq.html</loc>
-    <lastmod>2026-04-30</lastmod>
+    <loc>https://selvedge.sh/project/faq/</loc>
+    <lastmod>2026-05-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
-  </url>
-  <url>
-    <loc>https://masondelan.github.io/selvedge/getting-started.html</loc>
-    <lastmod>2026-04-22</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
-  </url>
-  <url>
-    <loc>https://masondelan.github.io/selvedge/architecture.html</loc>
-    <lastmod>2026-04-27</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://masondelan.github.io/selvedge/agent-trace-interop.html</loc>
-    <lastmod>2026-04-25</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://masondelan.github.io/selvedge/long-term-thesis.html</loc>
-    <lastmod>2026-04-27</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
   </url>
 </urlset>

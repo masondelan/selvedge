@@ -547,15 +547,73 @@ github.com).
   the previous month's agents are still in the data. Surfaced
   explicitly in `selvedge prune --help`.
 
-### Phase 2.13 — `prior_attempts` wedge (v0.3.7)
+### Phase 2.13 — `prior_attempts` wedge + entity foundation (v0.3.7)
 > Brand-defining release. `prior_attempts` is the MCP tool that makes
 > Selvedge's MCP-first / decision-archaeology positioning legible —
 > an agent about to attempt X gets told "this was tried before and
-> rejected, here's why." Ships *with* the positioning artifacts
-> (demo, comparison page, README) because shipping the tool without
-> making the wedge visible wastes the cycle. Supporting CLI surface
-> (`audit` / `digest` / `pr-comment`) ships separately in v0.3.9.
-> Theme: *make the wedge legible.*
+> rejected, here's why." `prior_attempts` queries by entity, so this
+> release first ships the entity-canonicalization foundation it sits
+> on top of: fixing the silent history-split problem (where
+> `src/auth.py::login` and `./src/auth.py::login` resolve to
+> different entities) before a feature whose quality depends on
+> accurate entity matching makes the bug user-visible. Ships *with*
+> the positioning artifacts (demo, comparison page, README) because
+> shipping the tool without making the wedge visible wastes the
+> cycle. Supporting CLI surface (`audit` / `digest` / `pr-comment`)
+> ships separately in v0.3.9. Theme: *make the wedge legible — and
+> the entity matching it relies on canonical.*
+
+#### Entity foundation (lands first within the release)
+
+- [ ] **Entity-path canonicalization on write** — the storage write
+      path normalizes `entity_path` deterministically: strip leading
+      `./`, collapse `//`, normalize separators to `/`, trim
+      whitespace. **Case preservation is intentional** — filesystems
+      vary (case-insensitive on macOS/Windows by default,
+      case-sensitive on most Linux), and silent case-folding would
+      collapse entities that are genuinely distinct on case-sensitive
+      hosts. The cross-platform stance is documented; lint suggests
+      case-collision watch in `selvedge doctor` as a should-warn row
+      when sibling paths differ only by case. Canonicalization lives
+      in `selvedge.storage.canonicalize_entity_path` and is the
+      single chokepoint exercised by both the MCP write and the CLI.
+- [ ] **`selvedge migrate-paths` one-shot backfill** — re-canonicalizes
+      existing rows. **`--dry-run` is default-on** (must pass
+      `--apply` to write) and prints a collisions report:
+      pre-canonicalization paths that would converge to the same
+      value, letting the user inspect before the merge collapses
+      history. Idempotent — re-running after `--apply` is a no-op.
+      One audit row per run goes to a new `path_migrations` table
+      so the operation is visible to `doctor` and to future
+      releases.
+- [ ] **Rename support via `log_change` extension** (no new MCP
+      tool). Add a `rename_from` parameter to `log_change`; when
+      set together with `change_type="rename"`, the storage layer
+      emits the same dual-event pattern the SQL DDL importer already
+      uses internally — rename event on the old path, create event
+      on the new path with `metadata.renamed_from` set. **Tool-
+      surface discipline call**: rename is the same write primitive
+      as `log_change` with one extra parameter, not a genuinely new
+      shape. Folding here keeps the v0.3.7 MCP surface at +1 tool
+      (`prior_attempts` only) instead of +3, and agents discover
+      the rename pattern through the existing `log_change`
+      docstring (worked rename example added in the same PR).
+- [ ] **Soft validation warnings in `log_change`** — pattern-shape
+      checks per `entity_type` that warn but never reject:
+      `function`/`method` paths without `::`, `column` paths without
+      `.`, `file` paths without a separator or extension. Consistent
+      with the v0.3.4 reasoning-quality validator pattern (nudge,
+      not gate). Patterns live in `selvedge.validate.ENTITY_PATTERNS`
+      so they can be extended without touching the write path.
+- [ ] **Explicit non-goal — no code parser, no AST.** Selvedge does
+      not extract entities from source code; it stores what the
+      agent tells it, canonicalized and queryable. AST work is
+      language-specific, drags in dependencies, and fights the
+      dependency-free-core rule. Documented in the release notes
+      and added to the cross-cutting non-goals section so the
+      boundary survives roadmap pressure.
+
+#### Wedge
 
 - [ ] **`prior_attempts` MCP tool** — given a description or
       `entity_path`, returns prior change events at the same path or
@@ -570,12 +628,20 @@ github.com).
       Empty result preferred over false positives — one shot at the
       agent's trust budget. Pull-model only. Templated output, no
       LLM calls.
-- [ ] **`summary` MCP tool** — second templated-digest shape,
-      pairs naturally with `prior_attempts`. Grouped digest
-      (changesets touched, agents involved, top entities by
-      activity). Schema versioned via `summary_version` field.
-      Implementation lives in a shared digest/aggregate helper that
-      v0.3.9's `selvedge audit` and `selvedge digest` will reuse.
+- [ ] **Aggregate helper ships as a library, not an MCP tool.**
+      The grouped-digest logic (changesets touched, agents
+      involved, top entities by activity) lands in
+      `selvedge.aggregates.summary()` as a pure Python function
+      that v0.3.9's `selvedge audit` and `selvedge digest`
+      consume directly. **Tool-surface discipline call**: an
+      MCP `summary` tool would be a genuinely new shape (aggregate
+      vs. event-list), but the agent-facing use case is thin —
+      agents calling `prior_attempts` already get the relevant
+      events and can roll up client-side if they want. Promote
+      to MCP later only if usage telemetry shows agents actually
+      reach for an aggregate primitive. Schema-versioned via
+      `summary_version` in the dataclass so the shape can be
+      lifted to MCP without breaking the v0.3.9 CLI consumers.
 - [ ] **Positioning artifacts (release-blocker, not optional polish):**
     * `docs/comparison.html` update naming `prior_attempts` as the
       "alternatives tried, rejected paths" capability the
@@ -587,10 +653,18 @@ github.com).
       checked-in transcript at `docs/demos/prior-attempts.md`.
     * Worked-example section in `README.md` (counts toward the
       "What's new" stack cap for this release).
-- [ ] **Tests** — `test_server.py` extensions for both new tools
-      (~12), `test_digest.py` for the shared aggregate helper (~8),
-      `test_prior_attempts.py` for confidence-tier + proximity-window
-      behavior (~8). Soft budget: ≤30 new tests.
+- [ ] **Tests** — `test_entity_canonicalize.py` for the
+      canonicalization function and its invariants (~6),
+      `test_migrate_paths.py` for the backfill including the
+      dry-run collisions report (~6), `test_server.py` /
+      `test_mcp_protocol.py` extensions covering `prior_attempts`
+      and the rename extension to `log_change` (~10),
+      `test_aggregates.py` for the library-level digest helper
+      (~6), `test_prior_attempts.py` for confidence-tier +
+      proximity-window behavior (~8). Soft budget: ≤40 new tests
+      (overrun vs. the standard ≤30 because the entity foundation
+      lands in the same release as the wedge; release notes call
+      this out explicitly per the budget-overrun discipline).
 
 #### Risks acknowledged & mitigations
 
@@ -607,6 +681,47 @@ github.com).
   version-tagged recordings (`prior-attempts-v1.mp4`, etc.), and a
   doctor INFO line if the `prior_attempts` response shape changes
   so we know to re-record.
+- **`migrate-paths` collapsing genuinely-distinct entities**:
+  defended by `--dry-run` default-on plus the collisions report
+  that surfaces converging paths *before* the write. The
+  `path_migrations` audit table makes the operation reversible by
+  inspection (which row was rewritten from what) even if the v3.x
+  line doesn't ship a programmatic undo.
+- **Case-folding pressure from contributors on macOS**: documented
+  cross-platform stance — we preserve case so Linux installs don't
+  get silent collisions. `doctor` should-warn row surfaces
+  sibling paths that differ only by case so case-collisions stay
+  visible without being silently merged.
+- **Tool-count growth in the active-memory arc**: v0.3.7 adds
+  one new tool (`prior_attempts`) → 7 total; v0.3.8 adds one
+  more (`stale_decisions`) → 8 total. Two earlier candidates
+  (`log_rename`, `summary`) were dropped from the MCP surface in
+  favor of folds — rename as a `log_change` extension, summary
+  as a `selvedge.aggregates` library helper — after a
+  consolidation review on 2026-05-10. The v0.4.0 consolidation
+  review still happens but with a lighter list; its main target
+  becomes the `diff` / `blame` / `history` overlap that's been
+  the real decision-fatigue surface since Phase 1.
+- **`summary` library-only ships under-served if agents *do*
+  want an aggregate MCP primitive**: defended by the
+  `summary_version` field on the dataclass — schema-versioned
+  from day one so lifting it to MCP later doesn't break the
+  v0.3.9 CLI consumers. Promotion criterion is telemetry signal,
+  not a roadmap commitment.
+- **Keep-separate decision for `prior_attempts` (and v0.3.8's
+  `stale_decisions`) deserves to be documented, not just
+  defaulted**: both are *wedge primitives* whose discoverability
+  in the agent's tool listing is the point. Folding either into
+  `history(prior_attempts=True)` / `history(stale=True)` would
+  preserve the capability but lose the legibility, which is the
+  asset. Reviewed and reaffirmed 2026-05-10 alongside the
+  `log_rename` / `summary` folds. Any future "why not just fold
+  these too?" pressure bounces against this paragraph.
+- **Entity foundation scope leaking into a code-extraction roadmap**:
+  the explicit-non-goal bullet plus the cross-cutting non-goals
+  section update is the durable defense. Any future "wouldn't it
+  be cool if Selvedge parsed Python" PR is bounced against this
+  line.
 
 ### Phase 2.14 — Active memory v1 / date-based (v0.3.8)
 > Selvedge's append-only log learns to know when its own data is
@@ -1277,7 +1392,7 @@ release-scope restructure (2026-05-10) replaced 4 broad phases with
 |---|---|---|
 | 2.11 | v0.3.5  | ≤ 25 new tests |
 | 2.12 | v0.3.6  | ≤ 15 new tests |
-| 2.13 | v0.3.7  | ≤ 30 new tests |
+| 2.13 | v0.3.7  | ≤ 40 new tests (entity foundation + wedge share the release) |
 | 2.14 | v0.3.8  | ≤ 25 new tests |
 | 2.15 | v0.3.9  | ≤ 30 new tests |
 | 2.16 | v0.3.10 | ≤ 25 new tests |
@@ -1302,12 +1417,19 @@ narrower scope but the same coverage discipline).
 
 ### MCP tool count discipline
 
-Tool count grows: 6 today → 6 at v0.3.5 (no new tools) → 8 at v0.3.7
-(`prior_attempts` + `summary`) → 9 at v0.3.8 (`stale_decisions`) →
-tool consolidation review at v0.4.0 (Phase 3). Past ~10 tools, agents
-hit decision-fatigue picking the right one, and overlap between tools
-(e.g. `history`+`changeset_id` vs. `changeset`) makes wrong-tool calls
-likely.
+Tool count grows: 6 today → 6 at v0.3.5 (no new tools) → 7 at v0.3.7
+(`prior_attempts` only — `log_rename` folded into `log_change` as a
+`rename_from` parameter, `summary` shipped as a
+`selvedge.aggregates` library helper rather than an MCP tool) → 8
+at v0.3.8 (`stale_decisions`) → tool consolidation review at v0.4.0
+(Phase 3). Past ~10 tools, agents hit decision-fatigue picking the
+right one, and overlap between tools (e.g. `history`+`changeset_id`
+vs. `changeset`) makes wrong-tool calls likely. The 2026-05-10
+consolidation pass cut two candidate tools out of the v0.3.7 surface
+ahead of the v0.4.0 review, leaving Selvedge well under the ~10-tool
+threshold through the entire active-memory arc and letting the
+v0.4.0 review focus on the real overlap target (`diff` / `blame` /
+`history`).
 
 **Discipline**: every new MCP tool proposal answers "is this an
 existing tool with a different default, or genuinely a new shape?"
@@ -1469,6 +1591,7 @@ selvedge --version
 - No real-time streaming
 - No multi-user/team features (Phase 3)
 - No LLM calls inside Selvedge itself — reasoning is captured FROM agents, not generated by Selvedge
+- No AST / code parser — Selvedge stores entity events the agent supplies, canonicalized and queryable, but does not extract entities from source code. Entity *extraction* is language-specific (Python, TS, Go, Rust, Java, …), drags in per-language dependencies, and fights the dependency-free-core rule. The v0.3.7 entity foundation (canonicalization, `log_rename`, soft validation) is the durable answer; "wouldn't it be cool if Selvedge parsed Python" is the wrong fork and PRs proposing it bounce against this line.
 
 ---
 

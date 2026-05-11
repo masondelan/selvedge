@@ -19,6 +19,43 @@ The core insight: with human-written code, intent leaked into commit messages an
 
 ---
 
+## Product values
+
+Three values gate every phase addition. New bullets in the phase plan
+must defensibly serve at least one of these; bullets that serve none
+of them are deferred to the "Future work" appendix.
+
+**Easy to use** — minimal install friction (one-command setup,
+doctor-driven self-diagnosis), conventions over configuration
+(sensible defaults, no required flags for happy-path use),
+discoverable inside the developer's existing tooling (MCP-first,
+IDE-discoverable). The user shouldn't have to learn Selvedge before
+Selvedge becomes useful.
+
+**Robust** — data integrity over feature breadth (the events table
+never silently loses or corrupts data), failure modes are observable
+(`selvedge doctor`, namespaced logs, structured errors with stable
+keys), runtime safe under concurrency. Robustness is what makes the
+captured intent worth trusting six months later — without it the
+product is decoration.
+
+**Dev focused** — built for developers in their existing toolchain,
+not enterprise procurement. CLI + MCP + git hooks. No SSO,
+no dashboards-as-the-product, no cloud tier as a paywall, no
+phone-home telemetry. MIT-licensed end to end. The buyer-of-record
+is a developer; if the feature would only be discovered through a
+procurement deck, it doesn't belong in v0.x.
+
+**Discipline:** every new phase bullet's prose must make plain which
+value(s) it serves. Reviewers (= the maintainer) reject vague
+additions; "nice to have" is not a value. When a feature serves
+*multiple* values, that's a signal it's a strong addition. When the
+only justification is competitive parity, name the competitive risk
+explicitly in the bullet and cross-link to the "Competitive narrative
+drift" cross-cutting entry.
+
+---
+
 ## Architecture
 
 ```
@@ -413,12 +450,23 @@ github.com).
       detect/install paths for each agent type (uses tmp_path config
       fixtures, no real config touched).
 
-### Phase 2.11 — Recovery and retention (v0.3.5)
-> v0.3.1 made the runtime safe; v0.3.2 made problems visible. This phase
-> handles what happens AFTER something has already gone wrong (corruption,
-> orphaned data, runaway growth). All of these have a "Selvedge took down
-> the agent's working DB" failure mode if we don't ship them — the bigger
-> the install base gets, the more these matter.
+> **Release-scope rule (codified 2026-05-10):** Every v0.3.x and
+> v0.4.x phase below is sized as one focused unit of work — one
+> coherent theme, ~3-5 features, ≤30 new tests, ~400-800 LoC, one
+> focused week. When a theme grew larger than that during planning,
+> it was split across multiple phases. The cost is more releases;
+> the win is smaller blast radius per ship and tighter feedback
+> loops. See "Release scope discipline" in the cross-cutting risk
+> register.
+
+### Phase 2.11 — Recovery basics (v0.3.5)
+> v0.3.1 made the runtime safe; v0.3.2 made problems visible; v0.3.5
+> ships the *minimum viable* "what happens when something has gone
+> wrong" surface. Verify so users can detect corruption. Backup so
+> they have a known-good snapshot to fall back to. The retention
+> half ships separately in v0.3.6; salvage (`selvedge repair`)
+> ships in v0.3.15 only if telemetry shows corruption incidents
+> warrant it. Theme: *find out what's wrong, take a safe snapshot.*
 
 - [ ] **`selvedge verify` command** — runs SQLite's
       `PRAGMA integrity_check`, validates the `schema_migrations` set
@@ -428,184 +476,224 @@ github.com).
       must-fail conditions (corruption, schema violation, unknown
       change_type values found in the store) exit non-zero.
       Should-warn conditions (orphan `changeset_id` references,
-      oversized tables, missing `git_commit` past the backfill window)
-      print warnings but exit 0 by default; pass `--strict` to escalate
-      warnings to failures. This way `selvedge verify` can be wired
-      into CI without first false-positive leading to `|| true`
-      suppression of the whole gate. Tiering is part of the v0.3.5
-      design — the categorization lives in
-      `selvedge.verify.CHECK_TIERS` and is locked in by
-      `tests/test_verify.py`.
+      missing `git_commit` past the backfill window) print warnings
+      but exit 0 by default; pass `--strict` to escalate warnings to
+      failures. Categorization lives in `selvedge.verify.CHECK_TIERS`
+      and is locked in by `tests/test_verify.py`.
 - [ ] **`selvedge backup` command** — produces a known-good copy of
       `.selvedge/selvedge.db` via SQLite's online backup
       (`VACUUM INTO`), default destination
-      `.selvedge/backups/selvedge-YYYYMMDD-HHMMSS.db`. Configurable
-      retention (`backup_keep_last`, default 7). Prerequisite for
-      `selvedge repair --apply` — see below. Doctor learns a
-      `last_backup` check that surfaces the most recent backup
-      timestamp.
-- [ ] **`selvedge repair` command** — wraps SQLite's `.recover` to dump
-      events from a corrupted DB into a salvage file, plus a
-      `--from-recover` mode that re-imports the dump into a fresh DB.
-      Default behavior is dry-run; `--apply` actually writes.
-      **Repair is salvage, not restoration** — `.recover` is
-      probabilistic and may drop rows. With `--apply`, the command
-      refuses to run if no `selvedge backup` has been taken in the
-      last 7 days unless `--no-backup-required` is also passed. Help
-      text and the v0.3.5 release notes frame this as "best-effort
-      salvage; back up first." Doctor's `last_backup` check is WARN
-      if older than 7 days and FAIL if no backups exist when the
-      events table has more than 10k rows.
-- [ ] **Retention policy** — `selvedge prune` command and a config
-      setting (`retention_days` in `.selvedge/config.toml`). Prunes
-      `tool_calls` (low value over time) by default; events table
-      only with `--include-events`, a confirmation prompt, AND
-      `SELVEDGE_DESTRUCTIVE=1` in the environment. The env-var
-      requirement defends against the `--include-events --yes` cron
-      footgun — interactive sessions can set the var transiently, but
-      a script that hardcodes `--yes` without the var errors out.
-      Every events-table prune appends to `.selvedge/prune.log`:
-      timestamp, dry-run vs. apply, count pruned, and the SQL
-      `WHERE` clause used. Doctor learns to warn when DB size exceeds
-      a configurable threshold (default 500 MB) and surfaces the
-      most recent `prune.log` entry the same way `hook.log` is
-      surfaced today.
-- [ ] **Bounds on event size at log time** — configurable max
-      `diff_bytes` and `reasoning_bytes`. Over-the-limit values are
-      truncated with a marker (`…[truncated 12KB]`) and logged as a
-      validator warning. Prevents an agent dumping a huge generated SQL
-      file from blowing up the DB. **Design rationale (locked in):**
-      truncation rather than spill-to-blob-table because the spill
-      design adds a second storage location, complicates the
-      flat-file-the-user-owns invariant, and grows the schema. The
-      cost is that *reasoning* for an oversize event may be partially
-      lost — mitigated by surfacing truncation as a validator warning
-      at write time (so agents can re-call with concise content) and
-      by `selvedge stats` learning to count `truncated` events so the
-      pattern is visible.
-- [ ] **Doctor expansion** — detect orphan rows (events with
-      `changeset_id` referencing nothing else), oversized tables,
-      `schema_migrations` rows for versions that aren't in the current
-      `MIGRATIONS` tuple (indicates a downgrade), the `last_backup`
-      check from the backup work above, and the most recent
-      `prune.log` line if any.
-- [ ] **`.selvedge/config.toml`** — first-class project config file
-      read on every entry point. Houses retention, size bounds, default
-      project name. Backwards compatible: missing file = current
-      defaults. **Precedence rule (canonical):** `SELVEDGE_DB` env
-      var always wins for DB-path resolution and config files cannot
-      override the environment. For all other settings: CLI flags >
-      env vars > project-local `.selvedge/config.toml` > global
-      `~/.selvedge/config.toml` > hardcoded defaults. `selvedge
-      doctor` prints which precedence step produced each effective
-      setting (the same shape as the existing DB-path precedence
-      output) so resolution behavior is debuggable. New settings
-      added in later phases (e.g. `stale_days` in v0.3.7,
-      `backup_keep_last` here) must respect this chart or the chart
-      updates first in the same PR.
+      `.selvedge/backups/selvedge-YYYYMMDD-HHMMSS.db`. Hardcoded
+      `keep_last=7` for this release; the setting becomes
+      `backup_keep_last` in `.selvedge/config.toml` when that file
+      lands in v0.3.10. `.selvedge/backups/` added to the `.gitignore`
+      template applied by `selvedge init`; existing repos get the
+      same line on first `selvedge backup` run.
+- [ ] **Doctor — minimal expansion**: `last_backup` row (INFO when
+      fresh, WARN >7 days, FAIL when no backups exist and the events
+      table has ≥10k rows) plus `schema_migrations`-downgrade
+      detection (FAIL when `schema_migrations` contains a version
+      not in the current `MIGRATIONS` tuple). Bigger doctor curation
+      pass deferred to v0.3.8 when more checks are stacking up.
+- [ ] **Release-cycle checklist** — already landed in this doc and
+      in `CLAUDE.md` via the prior planning pass. No code work; the
+      v0.3.5 ship just exercises it for the first time: pyproject +
+      `__init__.py` + manifest.json + server.json bumped together,
+      `actions/checkout` / `setup-python` / `action-gh-release` to
+      Node-20-supported majors (deadline 2026-06-02), README
+      "What's new" stack-cap at 2, Smithery hand-zip + publish,
+      paired PR against `masondelan/selvedge-site`.
+- [ ] **Tests** — `test_verify.py` (~12), `test_backup.py` (~6),
+      `test_doctor.py` extension (~4). Soft budget: ≤25 new tests.
 
 #### Risks acknowledged & mitigations
 
-- **Destructive actions on the events table**: `prune
-  --include-events` can amputate the very data Selvedge exists to
-  preserve. Defended with confirmation prompt +
-  `SELVEDGE_DESTRUCTIVE=1` env var + `prune.log` audit trail. The
-  env-var defense specifically targets the cron / non-interactive
-  script footgun.
 - **`selvedge verify` as a CI gate becoming `|| true`**: defended
   with the must-fail vs. should-warn tiering and `--strict` to opt
   into hard-failure mode. Users can wire verify into CI on day one
-  without turning it off the first time an orphan-row warning fires.
-- **`selvedge repair` overconfidence**: defended with `selvedge
-  backup` shipping in the same release, the 7-day backup check
-  before `--apply`, and explicit "salvage not restoration" framing
-  in help text and docs.
-- **`.selvedge/config.toml` precedence ambiguity**: defended with a
-  canonical precedence chart documented above and surfaced through
-  `selvedge doctor`. New settings must respect the chart or update
-  it first.
-- **Truncation silently losing high-stakes reasoning**: defended by
-  surfacing truncation as a validator warning at write time and by
-  `selvedge stats` counting truncated events so the pattern is
-  visible. Spill-to-blob alternative explicitly considered and
-  rejected.
+  without turning it off the first time a warning fires.
+- **`integrity_check` slow on large DBs**: documented in `--help`;
+  a `--quick` mode lands in a later release if telemetry shows it's
+  needed.
+- **Backups accidentally committed to git**: defended by adding
+  `.selvedge/backups/` to `.gitignore` on first init and on first
+  backup run in existing repos.
 
-### Phase 2.12 — Developer integrations (v0.3.6)
-> Selvedge today is a CLI you query when you remember to. This phase
-> moves it into the developer's existing surface area — PR review,
-> standups, IDE — so the captured intent gets used, not just stored.
-> Robustness without integration doesn't compound.
+### Phase 2.12 — Retention basics (v0.3.6)
+> The orthogonal half of the recovery-and-retention theme: keep the
+> noise table from growing forever. Standalone, single-theme. No
+> destructive operations on the events table in this release — the
+> events-prune path requires `.selvedge/config.toml` (v0.3.10) and
+> ships then. Theme: *bound the noise.*
 
-- [ ] **`selvedge audit` command** — produces a PR-review-ready quality
-      report for a given branch or commit range:
-      `selvedge audit --branch feature/x` lists every entity touched in
-      the range, flags missing/short reasoning, surfaces unstamped
-      commits, and renders a table grouped by changeset. `--format
-      markdown` for posting as a PR comment.
-- [ ] **`selvedge ci-check` — reporter first, gate later.** Runs in CI
-      on PR branches and computes the same metrics `selvedge audit`
-      surfaces (reasoning quality, coverage ratio, changeset
-      coverage) against thresholds in `.selvedge/config.toml`.
-      **v0.3.6 ships in reporter mode only**: the command always
-      exits 0, prints the metrics, and posts a PR comment if
-      configured. A `--enforce` flag opts in to gating (non-zero
-      exit on threshold violation); enforcement becomes the default
-      no earlier than v0.3.8 once we have telemetry on the natural
-      distribution of reasoning quality. Defends against the
-      Goodhart trap where teams optimize "passes ci-check" over
-      "captures useful intent" — gating only ships once we know what
-      the threshold should actually be.
-- [ ] **`summary` MCP tool** — new server tool so agents/IDEs can ask
-      "what's been happening in this codebase since X?" Returns a
-      grouped, **templated** digest (changesets touched, agents
-      involved, top entities by activity) — *not* LLM-generated; the
-      "no LLM calls inside Selvedge" non-goal still holds. Useful for
-      standup-bot integrations and IDE side-panels. Implementation
-      shares a digest/aggregate helper with `selvedge audit` and
-      `selvedge digest` so the three surfaces don't drift. Schema
-      versioned via a `summary_version` field in the response so
-      future shape changes don't break downstream consumers.
-- [ ] **`prior_attempts` MCP tool** — agent-side counterpart to
-      `summary`. Given a description or `entity_path`, returns prior
-      change events at the same path/shape with their `reasoning`,
-      change_type, and downstream outcome. v0.3.6 *infers* the outcome
-      from add→remove proximity (within a configurable window) because
-      explicit `reject`/`revert` change_types don't ship until v0.3.7.
-      Once 2.13 lands, this tool's outcome classifier becomes exact and
-      the proximity heuristic falls back to a tiebreaker.
+- [ ] **`selvedge prune` command** — prunes `tool_calls` only in this
+      release. Hardcoded default of 90 days; CLI flag `--days N`
+      overrides. **No `--include-events` flag in v0.3.6** — the
+      destructive path waits for `config.toml` in v0.3.10. Every
+      prune writes a one-liner to `.selvedge/prune.log` (timestamp,
+      count pruned, days threshold) so the pattern is visible later.
+- [ ] **Doctor — `prune.log` tail row + oversized-`tool_calls`
+      warning** (WARN at row-count >100k for `tool_calls`; threshold
+      revisitable once v0.3.5 telemetry has bedded in).
+- [ ] **Tests** — `test_prune.py` (~8), `test_doctor.py` extension
+      (~2). Soft budget: ≤15 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **Cron prune racing with `selvedge log`**: defended by WAL +
+  `busy_timeout` already in place since v0.3.1. Prune's DELETE
+  transaction won't deadlock with a concurrent insert.
+- **Default retention too aggressive**: 90 days is long enough that
+  the previous month's agents are still in the data. Surfaced
+  explicitly in `selvedge prune --help`.
+
+### Phase 2.13 — `prior_attempts` wedge (v0.3.7)
+> Brand-defining release. `prior_attempts` is the MCP tool that makes
+> Selvedge's MCP-first / decision-archaeology positioning legible —
+> an agent about to attempt X gets told "this was tried before and
+> rejected, here's why." Ships *with* the positioning artifacts
+> (demo, comparison page, README) because shipping the tool without
+> making the wedge visible wastes the cycle. Supporting CLI surface
+> (`audit` / `digest` / `pr-comment`) ships separately in v0.3.9.
+> Theme: *make the wedge legible.*
+
+- [ ] **`prior_attempts` MCP tool** — given a description or
+      `entity_path`, returns prior change events at the same path or
+      shape with their `reasoning`, `change_type`, and inferred
+      outcome. v0.3.7 infers outcome from add→remove proximity
+      (within a configurable window) because explicit
+      `reject`/`revert` change_types don't ship until v0.3.11.
       **Conservative-recall posture**: each result carries a
-      `confidence` field (`exact` | `proximity_high` |
-      `proximity_low`) and the v0.3.6 default returns only
-      `proximity_high` matches; callers must pass
+      `confidence` field (`proximity_high` | `proximity_low`),
+      default returns only `proximity_high`; callers must pass
       `min_confidence="proximity_low"` to see the noisy long tail.
-      Empty result is preferred over false positives — the tool only
-      gets one shot at the agent's trust budget. Pull-model only in
-      v0.3.6; the push-model auto-warn-on-`log_change` variant is
-      deferred until we have signal on whether agents actually act on
-      pull-tool results. No schema change in 2.12 — pure read tool
-      over the existing event store. Templated output only, no LLM
-      calls.
-- [ ] **`selvedge digest` CLI command** — same shape as the MCP
-      `summary` tool but renders to terminal. Default `--since 24h`,
-      designed to be fed into Slack/email cron jobs.
-- [ ] **PR comment helper** — `selvedge pr-comment --pr 123` that
-      formats `audit` output for posting via `gh pr comment`. No
-      GitHub API calls in core (keeps the dep footprint small); just
-      emits the markdown. **Format versioned from day one**: every
-      generated comment is wrapped in
+      Empty result preferred over false positives — one shot at the
+      agent's trust budget. Pull-model only. Templated output, no
+      LLM calls.
+- [ ] **`summary` MCP tool** — second templated-digest shape,
+      pairs naturally with `prior_attempts`. Grouped digest
+      (changesets touched, agents involved, top entities by
+      activity). Schema versioned via `summary_version` field.
+      Implementation lives in a shared digest/aggregate helper that
+      v0.3.9's `selvedge audit` and `selvedge digest` will reuse.
+- [ ] **Positioning artifacts (release-blocker, not optional polish):**
+    * `docs/comparison.html` update naming `prior_attempts` as the
+      "alternatives tried, rejected paths" capability the
+      line-attribution competitors don't have. Site PR in
+      `masondelan/selvedge-site` mirrors this.
+    * 60–120-second demo recording — Claude Code session that calls
+      `prior_attempts` mid-task, sees a past rejection, changes its
+      plan — saved to `docs/demos/prior-attempts.mp4` with a
+      checked-in transcript at `docs/demos/prior-attempts.md`.
+    * Worked-example section in `README.md` (counts toward the
+      "What's new" stack cap for this release).
+- [ ] **Tests** — `test_server.py` extensions for both new tools
+      (~12), `test_digest.py` for the shared aggregate helper (~8),
+      `test_prior_attempts.py` for confidence-tier + proximity-window
+      behavior (~8). Soft budget: ≤30 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **`prior_attempts` false-positive trust erosion**: defended with
+  the conservative-recall default (`proximity_high` only). One shot
+  at the agent's trust budget; empty result preferred over wrong
+  result. The exact classifier in v0.3.11 (`reject`/`revert`)
+  upgrades the high-confidence tier without changing the API.
+- **`summary` LLM-pressure**: templated is intentionally generic so
+  consumers do their own downstream rendering. Schema versioned to
+  defend against future shape changes pretextually justifying an
+  LLM hop.
+- **Wedge demo bit-rot**: transcript checked in (not just the .mp4),
+  version-tagged recordings (`prior-attempts-v1.mp4`, etc.), and a
+  doctor INFO line if the `prior_attempts` response shape changes
+  so we know to re-record.
+
+### Phase 2.14 — Active memory v1 / date-based (v0.3.8)
+> Selvedge's append-only log learns to know when its own data is
+> stale. v0.3.8 ships the *date-based* half — a `revisit_after`
+> column and a stale-decisions surface that consumes it. The
+> pattern-based half (`expires_when` grammar, `reject`/`revert`
+> change_types) ships in v0.3.11. **The v3 schema migration in this
+> release adds *both* nullable columns** (`revisit_after` and
+> `expires_when`) even though the `expires_when` evaluator doesn't
+> land until v0.3.11 — adding both nullable columns in one
+> migration avoids a second migration two releases later. Theme:
+> *decisions can carry an expiry date.*
+
+- [ ] **Schema migration v3** — adds two nullable TEXT columns to
+      `events`: `revisit_after` (ISO-8601 date or relative offset
+      from `timestamp`, e.g. `90d`) and `expires_when` (closed
+      grammar, evaluator deferred to v0.3.11). Existing events get
+      NULL on both. **Perf-regression test** runs the v3 migration
+      against synthetic DBs at 10k, 100k, and 1M events with bounded
+      time gates. Release notes call out the one-time migration
+      cost on multi-million-event installs.
+- [ ] **`stale_decisions` MCP tool** — returns events whose
+      `revisit_after` has passed. **Active-use weighting**: pure age
+      does not surface as stale; an additional signal is required
+      (recent `blame`/`diff` query of the entity OR sibling
+      `changeset_id` activity OR `prior_attempts` lookup). Filterable
+      by `entity_path`, `project`, `agent`. Date-based only in
+      v0.3.8; `expires_when` evaluation lands in v0.3.11. Templated
+      output, no LLM calls.
+- [ ] **`selvedge stale` CLI command** — same data surface,
+      terminal-formatted, `--json` for cron / Slack jobs. Composes
+      with `selvedge digest` (v0.3.9) so the morning report can
+      include "decisions that aged out yesterday."
+- [ ] **Reasoning-quality validator nudge** — when `change_type` is
+      in `{add, modify, create, migrate}` and `entity_type` looks
+      architectural (table, schema, dependency, config), the
+      validator suggests setting `revisit_after`. Soft warning only,
+      doesn't block writes.
+- [ ] **Doctor — signal-to-noise pass + stale-decisions check**.
+      Curation pass deferred from earlier phases lands here: review
+      every existing doctor row, demote ones that no longer fire
+      usefully to INFO, retire any that have become wallpaper. Net
+      warning count should not monotonically grow.
+- [ ] **Tests** — `test_active_memory.py` for schema migration v3
+      backfill and stale-decision query semantics (~12),
+      `test_migrations_perf.py` for the v3 perf gates (~4),
+      `test_public_api.py` update for the new `ChangeEvent` fields
+      (~2). Soft budget: ≤25 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **`stale_decisions` noise from old-but-correct decisions**:
+  defended with active-use weighting. Pure age does not surface as
+  stale.
+- **Schema migration v3 on large DBs**: `test_migrations_perf.py`
+  asserts bounded time at 10k / 100k / 1M events.
+- **Doctor warning fatigue**: signal-to-noise curation pass paired
+  with the new stale-decisions row. Each new check requires a
+  review of existing checks.
+- **`expires_when` column unused until v0.3.11**: deliberate. The
+  column add is in v0.3.8 so v0.3.11's evaluator landing doesn't
+  require a second migration. Documented in v0.3.8's release notes.
+
+### Phase 2.15 — Developer ergonomics (v0.3.9)
+> The CLI surface that moves Selvedge into the developer's existing
+> review and reporting workflow. None of these are wedges — they're
+> the supporting cast that turns `prior_attempts` + `summary` into
+> a usable everyday surface. Theme: *make captured intent visible
+> in the developer's existing review loop.*
+
+- [ ] **`selvedge audit` command** — PR-review-ready quality report
+      for a given branch or commit range. Lists every entity touched
+      in the range, flags missing/short reasoning, surfaces unstamped
+      commits, renders a table grouped by changeset. `--format
+      markdown` for PR-comment use.
+- [ ] **`selvedge digest` CLI command** — terminal rendering of the
+      `summary` MCP tool's templated output. Default `--since 24h`,
+      designed for cron / Slack / email jobs. Shares the
+      digest/aggregate helper from v0.3.7's `summary` work.
+- [ ] **`selvedge pr-comment --pr 123`** — formats `audit` output for
+      `gh pr comment`. No GitHub API calls in core (keeps the dep
+      footprint small). **Format versioned from day one**: every
+      generated comment wrapped in
       `<!-- selvedge:pr-comment v1 -->` /
       `<!-- selvedge:pr-comment-end -->` sentinels so future format
-      changes can ship without breaking downstream tooling that
-      parses the markdown. Schema for v1 is documented in the new
-      `docs/pr-comment-format.md`.
-- [ ] **VS Code extension scaffolding (separate repo) — gated.**
-      Design doc lands in `docs/vscode-integration.md` this phase
-      *only if* a tracking issue exists, a named owner is assigned,
-      and the owner commits to a 90-day shipping review. Otherwise
-      defer the design doc — a vapor design doc surfacing in search
-      is worse than no doc. Spec against the live `summary` MCP
-      tool, so this sequences *after* the MCP tool work in the
-      phase. The actual extension is built outside this repo.
+      changes can ship without breaking downstream parsers. v1 schema
+      documented in new `docs/pr-comment-format.md`.
 - [ ] **Setup detection version contract** — `selvedge setup` and
       `selvedge doctor` learn a "supported agent versions" table
       that surfaces the agent-config locations the wizard knows
@@ -613,439 +701,523 @@ github.com).
       detected on the user's machine. When upstream changes a config
       path (already happened with Cursor between minor versions),
       doctor flags the mismatch as WARN with a remediation hint.
-      Treats detection paths as a versioned contract instead of
-      stable-forever assumptions.
-- [ ] **Tests** — new MCP tools (`summary`, `prior_attempts`) land in
-      `tests/test_server.py`; new CLI commands (`audit`, `ci-check`,
-      `digest`, `pr-comment`) land in `tests/test_cli.py`. Shared
-      digest/aggregate helper gets its own `tests/test_digest.py`
-      covering grouping rules, time-bucket boundaries, and the
-      add→remove proximity heuristic that backs `prior_attempts`.
-      `test_ci_check.py` specifically asserts that v0.3.6 exits 0
-      under threshold violations without `--enforce`, and non-zero
-      with it.
+      Treats detection paths as a versioned contract.
+- [ ] **Tests** — `test_cli.py` extensions for `audit`, `digest`,
+      `pr-comment` (~18), `test_setup_version_contract.py` (~6).
+      Soft budget: ≤30 new tests.
 
 #### Risks acknowledged & mitigations
 
-- **`ci-check` Goodhart trap**: ships in reporter mode for v0.3.6;
-  gating is opt-in via `--enforce` and becomes default no earlier
-  than v0.3.8. Lets us observe the natural reasoning-quality
-  distribution before turning ci-check into a forcing function.
-- **`prior_attempts` false-positive trust erosion**: defended with
-  the `confidence` field and the conservative-recall default
-  (`proximity_high` only). Callers explicitly opt into noisier
-  matches. The exact classifier in v0.3.7 (`reject`/`revert`)
-  upgrades the high-confidence tier without changing the API.
-- **`summary` LLM-pressure**: stress-tested against the no-LLM
-  non-goal in this design — the templated digest is intentionally
-  generic so consumers do their own templating downstream rather
-  than asking Selvedge to "make it pretty." Schema versioned via
-  `summary_version` so future shape changes don't break
-  downstream and don't pretextually justify an LLM hop.
-- **PR comment markdown calcification**: format versioned from
-  v1 with sentinel markers and a documented schema, so format
+- **PR comment markdown calcification**: format versioned from v1
+  with sentinel markers and a documented schema, so format
   evolution doesn't break parsers downstream.
-- **VS Code extension vapor risk**: design doc gated on a tracking
-  issue + named owner + 90-day review window. No tracking issue,
-  no design doc.
-- **Setup detection brittleness**: surfaced through a
-  doctor-visible "supported agent versions" check, treating
-  third-party config paths as a versioned contract.
+- **Setup detection brittleness**: surfaced through the new
+  doctor row, treating third-party config paths as a versioned
+  contract.
 
-### Phase 2.13 — Active memory (v0.3.7)
-> Selvedge to date is an append-only log: every event lives forever and
-> reads identically the day it's written and a year later. This phase
-> turns Selvedge into *active* memory — decisions can carry an expiry
-> condition, abandoned alternatives are first-class events, and the
-> server can answer "what reasoning is stale?" Pairs naturally with the
-> `prior_attempts` tool from v0.3.6: 2.12 lets agents query past
-> decisions, 2.13 lets the store know which past decisions still matter.
->
-> Brand-defining release for the LLM-amnesia thesis. No breaking changes
-> — new fields are nullable, new event types are additive — so safe to
-> ship before the v0.4.0 breaking-changes window.
+### Phase 2.16 — Config + advanced retention (v0.3.10)
+> First-class `.selvedge/config.toml` lands here, paired with the
+> destructive prune path (which has needed somewhere to read events
+> retention from) and event-size bounds (which has needed somewhere
+> to read truncation limits from). All three features chain on
+> config.toml; deferring config.toml from v0.3.5 lets the grammar
+> settle in one release rather than expanding it across five.
+> Theme: *configuration as a foundation, with the dependent features
+> riding alongside.*
 
-- [ ] **Optional `expires_when` / `revisit_after` columns on
-      `ChangeEvent`** — schema migration v3 adds two nullable TEXT
-      columns. `revisit_after` is an ISO-8601 date or a relative offset
-      from `timestamp` (e.g. `90d`). `expires_when` accepts a
-      **closed grammar of recognized patterns** in v1 (NOT free-form):
-      `library:NAME>=VERSION` (revisit when a named dependency hits a
-      version), `entity:PATH:changes` (revisit when a named entity
-      next changes), `date:ISO` (revisit on a specific date),
-      `manual:LABEL` (opaque label for human review). Values that
-      don't match the grammar are rejected at write time with a
-      validator error — preventing the syntax-fragmentation failure
-      mode where five agents adopt five incompatible syntaxes that we
-      then can't evaluate. Grammar lives in
-      `selvedge.expires_when.PATTERNS` and grows deliberately,
-      versioned in this doc. Existing events get NULL on both columns
-      (current behavior preserved).
-- [ ] **`stale_decisions` MCP tool** — returns events whose
-      `revisit_after` has passed, plus events older than a
-      configurable default (`stale_days` in `.selvedge/config.toml`,
-      opt-in) when no explicit revisit is set. **Active-use weighting:
-      pure age is too crude** — many old decisions are correct and
-      stable. The fallback-by-age path requires an additional signal
-      that the decision is still load-bearing: the entity has been
-      queried via `blame`/`diff` in the last 30 days, OR a sibling
-      entity in the same `changeset_id` has been modified recently,
-      OR the entity appears in a `prior_attempts` lookup. Pure age
-      without any active-use signal does NOT surface as stale — that
-      keeps the tool useful and prevents the "everything older than
-      90 days is stale" wallpaper. `stale_days` is independent from
-      v0.3.5's `retention_days` — they govern *surfacing* and
-      *deletion* respectively, and one shouldn't imply the other.
-      Filterable by `entity_path`, `project`, `agent`. Date-based v1
-      for explicit `revisit_after`; `expires_when` evaluation also
-      v1 for the closed grammar above (the patterns are exactly the
-      ones we can evaluate from local state). Templated output, no
-      LLM calls.
-- [ ] **`selvedge stale` CLI command** — same data surface, terminal
-      formatted, `--json` for cron / Slack jobs. Composes with
-      `selvedge digest` so the morning report can include "decisions
-      that aged out yesterday."
-- [ ] **New `change_type` values: `reject` and `revert`** — added to
-      the `ChangeType` enum. `reject` records "we considered this and
-      decided against it" without ever writing the change; `revert`
-      records "we tried this and rolled it back," distinct from a
-      regular `remove` (which conflates "feature removed" with
-      "approach rejected"). Distinguishing rejected-from-removed at
-      the schema level avoids the inference-from-proximity heuristic
-      the pull-only `prior_attempts` tool has to fall back on.
-      **No new MCP tool** — these are logged via the existing
-      `log_change` tool with `change_type=reject` /
-      `change_type=revert`. Adoption defended on three surfaces, not
-      just one: (1) the `log_change` docstring gains a worked example
-      for the rejection use case so agents discover the pattern at
-      tool-call time; (2) the canonical agent-instructions block in
-      `selvedge.prompt.PROMPT_BLOCK` gains a sentence explicitly
-      telling agents to call `log_change` with `change_type=reject`
-      after deciding *not* to do something significant — the prompt
-      block is the actual leverage point because docstrings are read
-      once but the system prompt is loaded every session; (3)
-      reasoning-quality validator gets a `reject`-specific rule that
-      encourages reasoning to name *what* was rejected and *what was
-      chosen instead*.
-- [ ] **Reasoning-quality validator gains an opt-in nudge** — when
-      `change_type` is in `{add, modify, create, migrate}` and the
-      `entity_type` looks architectural (table, schema, dependency,
-      config), the validator suggests setting `revisit_after`. Soft
-      warning only, doesn't block writes — same posture as the
-      existing empty/short/generic checks.
-- [ ] **Doctor signal-to-noise pass + stale-decisions check** — adds
-      the new check (counts events past their explicit
-      `revisit_after`, counts `reject`/`revert` events separately so
-      the rejected-paths population is visible at a glance) but
-      pairs the addition with a curation pass: review every existing
-      doctor warning, downgrade ones that no longer fire usefully to
-      INFO, retire any that have become wallpaper. Goal: doctor's
-      WARN section stays signal-dense as the surface grows. Treat
-      doctor's warning channel as a managed budget.
-- [ ] **Schema migration v3 perf-regression test** — adding
-      nullable columns to a large `events` table on older SQLite
-      versions can rewrite the table during the migration, blocking
-      writes. New `tests/test_migrations_perf.py` runs the v3
-      migration against synthetic DBs at 10k, 100k, and 1M events
-      and asserts the migration completes within bounded time
-      (≤500ms / ≤2s / ≤15s respectively, on the CI runner). Doctor
-      grows a "schema version" line so users with large stores see
-      that v3 is current; the v0.3.7 release notes call out the
-      one-time migration cost on multi-million-event installs.
-- [ ] **Tests** — `tests/test_active_memory.py` covering schema
-      migration v3 backfill, `expires_when` grammar validation
-      (every recognized pattern + a rejection case for each
-      malformed shape), stale-decision query semantics
-      (`revisit_after` past vs. fallback `stale_days` AND
-      active-use weighting), reject/revert change_type round-trip
-      through the existing `log_change` tool, and doctor's
-      stale-count output. **`tests/test_public_api.py` update
-      required**: the frozen-shape test will fail when
-      `revisit_after` / `expires_when` land on `ChangeEvent` —
-      update the expected dataclass shape in the same PR as the
-      migration so CI doesn't go red. **`tests/test_prompt.py`
-      update required**: the `PROMPT_BLOCK` change for
-      `reject`/`revert` adoption is part of this PR; the
-      sentinel-bracketed install path must continue to work
-      idempotently across the new content.
+- [ ] **`.selvedge/config.toml`** — first-class project config,
+      read on every entry point. Houses `retention_days_events`
+      (default ∞), `retention_days_tool_calls` (default 90),
+      `backup_keep_last` (default 7), `diff_bytes` (default 65536),
+      `reasoning_bytes` (default 32768), `db_size_warn_mb` (default
+      500), `stale_days` (default off, used by v0.3.8's
+      `stale_decisions` fallback). Backwards compatible: missing
+      file = current defaults. **Precedence rule (canonical):**
+      `SELVEDGE_DB` env var always wins for DB-path resolution.
+      All other settings: CLI flags > env vars > project-local
+      `.selvedge/config.toml` > global `~/.selvedge/config.toml` >
+      hardcoded defaults. Doctor prints which precedence step
+      produced each effective setting. **Declared dependency:**
+      `tomli` (Python 3.10) / stdlib `tomllib` (3.11+).
+- [ ] **`selvedge prune --include-events` path** — now possible
+      because config.toml hosts `retention_days_events`. Requires
+      confirmation prompt AND `SELVEDGE_DESTRUCTIVE=1` in environment
+      AND audit-log append to `.selvedge/prune.log`. Default
+      `retention_days_events` is *infinity* — users must opt in to
+      ever deleting events.
+- [ ] **Event-size bounds at log time** — `diff_bytes` and
+      `reasoning_bytes` from config. Over-the-limit values truncated
+      with `…[truncated 12KB]` marker; truncation surfaced as a
+      validator warning at write time so agents can re-call with
+      concise content. `selvedge stats` learns to count truncated
+      events. Spill-to-blob alternative considered and rejected
+      (would complicate the flat-file-the-user-owns invariant).
+- [ ] **Doctor — `oversized-tables` warning + per-setting precedence
+      surfacing.** Warns when DB exceeds `db_size_warn_mb`; doctor's
+      config-precedence output shows the source of each effective
+      setting (the same shape as the existing DB-path precedence).
+- [ ] **Tests** — `test_config_precedence.py` (~8),
+      `test_prune.py::test_cron_footgun_yes_without_destructive_env_errors`
+      and the events-prune suite (~10),
+      `test_event_size_bounds.py` (~6). Soft budget: ≤25 new tests.
 
 #### Risks acknowledged & mitigations
 
-- **`expires_when` syntax fragmentation**: defended with a closed
-  grammar in v1 (`selvedge.expires_when.PATTERNS`) — non-matching
-  values are rejected at write time. Grammar grows deliberately and
-  is versioned in this doc; we keep the option to relax later, but
-  the corpus stays clean.
-- **`stale_decisions` noise from old-but-correct decisions**:
-  defended with active-use weighting — pure age does not surface as
-  stale; an additional signal (recent query, sibling-changeset
-  activity, or `prior_attempts` lookup) is required.
-- **`reject`/`revert` under-call**: defended on three surfaces —
-  docstring example, prompt-block sentence, and validator rule.
-  The prompt-block surface is the load-bearing one because it
-  reaches the agent every session.
-- **Schema migration v3 on large DBs**: defended with the
-  `test_migrations_perf.py` regression test and explicit release-
-  notes guidance on the one-time migration cost.
-- **Doctor warning fatigue**: defended with the signal-to-noise
-  curation pass paired with each new check. New checks must come
-  with a review of existing checks; net warning count should not
-  monotonically grow.
+- **Destructive actions on the events table**: defended with
+  confirmation prompt + `SELVEDGE_DESTRUCTIVE=1` env var +
+  `prune.log` audit trail. Cron-footgun test
+  (`test_cron_footgun_yes_without_destructive_env_errors`) named
+  explicitly so a future test-suite cleanup can't quietly retire it.
+- **Config precedence drift**: `test_config_precedence.py` asserts
+  each step of the chart wins where it should, plus the special-
+  case `SELVEDGE_DB` exception (config cannot override the
+  environment for DB-path resolution). Every later phase that adds
+  a config.toml setting extends this test, not adds a one-off check.
+- **3.10 compatibility**: `tomli` declared explicitly in
+  `pyproject.toml` (3.10-only conditional dependency). Preserves
+  the "no external dependencies beyond declared ones" rule —
+  declared, therefore fine.
+- **Truncation silently losing high-stakes reasoning**: surfaced as
+  validator warning at write time; `selvedge stats` counts
+  truncated events so the pattern is visible.
 
-### Phase 2.14 — Personal cross-repo memory (v0.3.8)
-> v0.3.7 makes Selvedge active *within* a project; v0.3.8 extends that
-> across the project portfolio a single user owns. Read-only union over
-> N local `.selvedge/` directories — writes still scope to the current
-> project's DB. No auth, no remote, no team features (those live in
-> Phase 4 hosted). This is the OSS half of the cross-repo split decided
-> alongside v0.3.7.
->
-> The compelling case: `prior_attempts` finding "you considered this
-> approach 6 months ago in your other project and rejected it because
-> X." Per-repo `prior_attempts` already kills LLM amnesia within a
-> codebase; cross-repo extends that to your career.
+### Phase 2.17 — Active memory v2 / semantic (v0.3.11)
+> The pattern-based half of active memory. The `expires_when` column
+> was added in v0.3.8's schema migration v3 but went unused; this
+> release lights up the evaluator. Plus new `reject`/`revert`
+> change_types and the `prior_attempts` outcome-classifier upgrade
+> that consumes them. No new migration. Theme: *abandoned
+> alternatives are first-class events.*
 
-- [ ] **Link registry** — `links.toml` listing other `.selvedge/`
-      directories the user owns. Resolution order mirrors the existing
-      DB-path convention: `SELVEDGE_LINKS` env var → project-local
-      `.selvedge/links.toml` → `~/.selvedge/links.toml` (default).
-      Project-local override matters for users who want different
-      portfolios at work vs. home. **Per-project allowlist**:
-      `links.toml` includes a `[allowlist]` section listing project
-      names that are permitted to read this project via
-      `--all-projects`. Default for a fresh project is empty, meaning
-      `--all-projects` queries from other projects skip this DB
-      entirely. Users explicitly opt projects into being read by
-      adding them to the allowlist. This is the enforcement layer the
-      privacy guardrail needs — a doc reminder is not enough when
-      agents learn flags and use them more often than users intend.
-- [ ] **`selvedge link` / `unlink` / `linked` CLI commands** — manage
-      the registry without hand-editing TOML. `selvedge link
-      ~/projects/other-repo` validates the path, walks up looking for
-      `.selvedge/`, refuses to add broken or schema-mismatched DBs,
-      writes to the active links file. `selvedge linked` lists with
-      health status (reachable / missing / version-skew /
-      allowlist-status). Every `link` and `unlink` writes an audit
-      entry to `.selvedge/links.audit.log`: timestamp, action, path,
-      and the calling user (from `os.getlogin()`). Doctor surfaces
-      the most recent N entries so unexpected linkage shifts are
-      visible. The audit log addresses the implicit-privilege-
-      escalation gap where adding a project silently grants read
-      access from every other linked project.
-- [ ] **`--all-projects` flag on read commands** — `selvedge history`,
-      `search`, `diff`, `blame`, `stale` accept `--all-projects` to
-      union across linked DBs (filtered by allowlist).
-      Default behavior (no flag) is unchanged: query the current
-      project only. Output gains a `project` column / field when
-      unioning so users can tell which repo a result came from.
-      **Per-DB scan summary in output**: every `--all-projects`
-      response includes a `_scan_summary` field listing each linked
-      project, schema version, allowlist status, row count
-      contribution, and whether NULL fields in older entries caused
-      filter coverage gaps for query fields like `revisit_after` or
-      `changeset_id`. Closes the silent-miss failure mode where a
-      filter on a field that didn't exist in older schemas drops
-      entries without indication.
+- [ ] **`expires_when` evaluation in `stale_decisions`** — column
+      exists since v0.3.8; v0.3.11 ships the evaluator. **Closed
+      grammar in v1** (NOT free-form): `library:NAME>=VERSION`
+      (revisit when a named dependency hits a version),
+      `entity:PATH:changes` (revisit when a named entity next
+      changes), `date:ISO` (revisit on a specific date),
+      `manual:LABEL` (opaque label for human review). Values that
+      don't match the grammar are rejected at write time. Grammar
+      lives in `selvedge.expires_when.PATTERNS` and grows
+      deliberately, versioned in this doc. Patterns chosen because
+      they can be evaluated from local state only — no network, no
+      LLM.
+- [ ] **New `change_type` values: `reject` and `revert`** — added
+      to the `ChangeType` enum. `reject` records "we considered this
+      and decided against it" without writing the change; `revert`
+      records "we tried this and rolled it back," distinct from a
+      regular `remove`. No new MCP tool — logged via existing
+      `log_change`. **Adoption defended on three surfaces:**
+      `log_change` docstring gains a worked example for the
+      rejection use case; `selvedge.prompt.PROMPT_BLOCK` gains a
+      sentence telling agents to log rejections (the load-bearing
+      surface — prompt block reaches the agent every session);
+      reasoning-quality validator gets a `reject`-specific rule
+      that encourages reasoning to name *what was rejected* and
+      *what was chosen instead*.
+- [ ] **`prior_attempts` outcome-classifier upgrade** — proximity
+      heuristic from v0.3.7 becomes a tiebreaker; explicit
+      `reject`/`revert` events become the high-confidence tier
+      directly. No API change for callers; existing
+      `confidence: proximity_high` results now sometimes come back
+      as `confidence: exact` instead.
+- [ ] **`tests/test_prompt.py` update** — `PROMPT_BLOCK` change for
+      `reject`/`revert` adoption ships in this PR. The sentinel-
+      bracketed `--install` path must continue to work idempotently
+      across the new content.
+- [ ] **Tests** — `test_expires_when_grammar.py` covering each
+      recognized pattern + a rejection case per malformed shape
+      (~8), `test_active_memory.py` extension for `reject`/`revert`
+      round-trip + classifier upgrade (~10), `test_prompt.py`
+      update (~3), `test_public_api.py` extension for new enum
+      values (~2). Soft budget: ≤25 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **`expires_when` syntax fragmentation**: defended with the closed
+  grammar in `PATTERNS`. Non-matching values rejected at write time.
+  Grammar grows deliberately.
+- **`reject`/`revert` under-call**: defended on three surfaces
+  (docstring, PROMPT_BLOCK, validator). Prompt block is the
+  load-bearing one because it reaches the agent every session.
+- **Classifier upgrade silently changes existing query results**:
+  v0.3.11 release notes call this out explicitly. Callers that
+  filtered on `confidence: proximity_high` should also accept
+  `confidence: exact`.
+
+### Phase 2.18 — Competitive interop + verifiable claims (v0.3.12)
+> Three items sharing a theme: making Selvedge's positioning claims
+> observable, verifiable, and interoperable. Git Notes reader makes
+> Selvedge a complement to Git AI's "open standard" framing rather
+> than a substitute. Verifiable-no-network test backs the
+> "your data stays on your machine" claim with CI. `ci-check` reporter
+> ships the metrics surface that a later release's enforcement mode
+> will gate on. Theme: *the positioning we already claim, now
+> machine-checkable.*
+
+- [ ] **Git Notes one-way reader — `selvedge import --format
+      git-notes`.** Competition response: Git AI pitches Git Notes
+      as "the open standard for tracking AI authorship in Git"; if
+      that framing gets endorsed by Cursor / Anthropic / GitHub,
+      Selvedge needs to be a *complement* to it, not a substitute.
+      Reads `refs/notes/git-ai` (or whatever ref the format settles
+      on) and maps line-range authorship into per-file `ChangeEvent`
+      rows with `agent` populated from the note. Line ranges stored
+      in `metadata` under `source_format: "git-notes"`. **Read-only
+      on purpose** — export deferred to avoid entangling release
+      pacing with Git AI's format evolution. Implementation in
+      `selvedge/importers.py::parse_git_notes`.
+- [ ] **Verifiable-no-network test** — `tests/test_no_network.py`
+      imports every Selvedge entry-point module and asserts
+      `socket.socket` / `urllib.request` are never called during
+      normal operation, with a fixture that monkeypatches the
+      socket factory to raise. **Scoped to Selvedge code paths
+      only** — the `mcp` dependency's import-time socket
+      initialization is mocked out so the test doesn't false-fail
+      on dependencies. Pairs with a doctor line: "Network calls:
+      none expected (verified by `test_no_network.py`)."
+- [ ] **`selvedge ci-check` — reporter mode only.** Runs in CI on
+      PR branches, computes reasoning quality / coverage ratio /
+      changeset coverage against thresholds in `config.toml`.
+      v0.3.12 **always exits 0**, prints metrics, posts PR comment
+      if configured. A `--enforce` flag opts in to gating. Default
+      enforcement remains deferred (no version commitment) until
+      telemetry shows what natural reasoning-quality distributions
+      look like — Goodhart-trap defense.
+- [ ] **Tests** — `test_importers.py` Git Notes parser extensions
+      (~10), `test_no_network.py` (~3), `test_ci_check.py`
+      specifically asserting exit 0 under threshold violation
+      without `--enforce` and non-zero with it (~6). Soft budget:
+      ≤20 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **Git Notes format drift**: parser emits `_unparseable` warnings
+  rather than crashes. Doctor surfaces the count. Selvedge does
+  NOT pin upstream version-for-version.
+- **No-network test false positives**: scoped to Selvedge code
+  paths; `mcp` dependency's import-time networking mocked.
+- **`ci-check` Goodhart trap**: reporter-only by default; gating
+  opt-in via `--enforce`. Default enforcement deferred until we
+  have telemetry on natural distributions.
+
+### Phase 2.19 — Cross-repo CLI (v0.3.13)
+> First half of cross-repo personal-OSS memory. CLI surface ships
+> first; MCP-parameter half waits for v0.3.14 once CLI usage tells
+> us if agents would even use it. Read-only union over N local
+> `.selvedge/` directories; writes still scope to the current
+> project. Theme: *your portfolio is one queryable surface, opted
+> in deliberately.*
+
+- [ ] **Link registry — `links.toml`** — listing other `.selvedge/`
+      directories the user owns. Resolution order mirrors DB-path
+      precedence: `SELVEDGE_LINKS` env var > project-local
+      `.selvedge/links.toml` > `~/.selvedge/links.toml`.
+      **Per-project allowlist**: `links.toml` includes an
+      `[allowlist]` section listing projects permitted to read this
+      project via `--all-projects`. Default for a fresh project is
+      empty — `--all-projects` from other projects skips this DB
+      entirely. Users explicitly opt projects into being read.
+      Enforcement layer, not documentation.
+- [ ] **`selvedge link` / `unlink` / `linked` CLI commands** —
+      manage the registry without hand-editing TOML. `selvedge link
+      ~/projects/other-repo` validates the path, walks up looking
+      for `.selvedge/`, refuses to add broken or schema-mismatched
+      DBs. `selvedge linked` lists with health status (reachable /
+      missing / version-skew / allowlist-status). Every `link` and
+      `unlink` writes an audit entry to `.selvedge/links.audit.log`.
+- [ ] **`--all-projects` flag on read CLI commands** — `selvedge
+      history`, `search`, `diff`, `blame`, `stale` accept
+      `--all-projects` to union across linked DBs (filtered by
+      allowlist). Default behavior unchanged. Output gains a
+      `project` column so users can tell which repo a result came
+      from. **First-time consent prompt** the first time
+      `--all-projects` runs in a given project — requires `--yes`
+      or interactive confirmation before unioning.
+- [ ] **`LinkedReadStorage` (read-only invariant)** — wraps N
+      read-only `SelvedgeStorage` handles and refuses any write
+      call. Architectural detail worth surfacing so future
+      contributors don't bolt cross-repo writes on by accident.
+- [ ] **Doctor — `linked projects` row** — each entry in
+      `links.toml` reachable, schema version compatible, allowlist
+      relationship consistent in both directions. Schema skew
+      surfaces as WARN, not FAIL (the union still works).
+- [ ] **Tests** — `test_linked_projects.py` covering link-file
+      resolution order, broken-link skip behavior, schema-skew
+      detection, union ordering, read-only invariant, allowlist
+      enforcement (~22), `test_doctor.py` extension for the
+      linked-projects row (~4). Soft budget: ≤30 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **`--all-projects` privacy bleed**: defended at the *enforcement*
+  layer with the per-project allowlist in `links.toml`. Docs alone
+  aren't enough when agents learn flags. First-time consent prompt
+  in the CLI is an additional speed-bump.
+- **Implicit privilege escalation on linking**:
+  `links.audit.log` audit trail + doctor surfacing recent links.
+- **Schema skew across linked DBs**: surfaced as WARN by doctor;
+  union still works. Per-DB scan summary on every query (the
+  `_scan_summary` field) lands in v0.3.14 alongside the MCP
+  parameter work.
+
+### Phase 2.20 — Cross-repo MCP + write disambiguation (v0.3.14)
+> Second half of cross-repo personal-OSS memory. Lights up the
+> `all_projects: bool = False` parameter across MCP read tools, adds
+> the `project` field to `LogChangeResult` so cross-repo writes are
+> never ambiguous, and ships the `_scan_summary` response field that
+> makes filter-coverage gaps visible. Ships only if v0.3.13's CLI
+> cross-repo gets adopted — otherwise the MCP parameter is overhead
+> for no demonstrated demand. Theme: *agents get the same cross-repo
+> view as the CLI, with write resolution made visible.*
+
 - [ ] **`all_projects: bool = False` parameter on read MCP tools** —
       same opt-in shape on `diff`, `history`, `search`,
       `prior_attempts`, `stale_decisions`. `log_change` and
       `changeset` are unchanged (writes always scope to the current
       project; changesets are per-project by definition). Allowlist
-      is enforced in the MCP path the same as in the CLI path —
-      LinkedReadStorage skips DBs that haven't allowlisted the
-      current project.
-- [ ] **`LogChangeResult` gains a `project` field** — when an agent
-      runs `log_change` while ambient context is cross-repo (e.g. it
-      just ran a `--all-projects` query), the response surfaces the
-      project name that absorbed the write so it's never ambiguous
-      which DB the event landed in. The current project always wins
-      for writes; this just makes the resolution visible.
-- [ ] **Read-only invariant enforced at the storage layer** —
-      `LinkedReadStorage` wraps N read-only `SelvedgeStorage` handles
-      and refuses any write call. Implementation detail, but worth
-      surfacing in the architecture so future contributors don't
-      bolt cross-repo writes on by accident.
-- [ ] **Storage-abstraction sequencing decision** — Phase 3 / v0.4.0
-      introduces the `StorageBackend` protocol so SQLite and
-      PostgreSQL backends are swappable. **Decision (locked in for
-      v0.3.8): `LinkedReadStorage` ships SQLite-only.** v0.3.8 does
-      not block on the abstraction; the abstraction lands in v0.4.0
-      and `LinkedReadStorage` gets rewritten as part of that
-      release's storage work. Rationale: cross-repo personal-OSS
-      memory is a v0.3.x value proposition that doesn't need
-      Postgres, and bundling the abstraction into v0.3.8 expands
-      that release significantly. The v0.4.0 plan tracks the
-      `LinkedReadStorage` rewrite as a discrete item under the
-      backend-abstraction work.
-- [ ] **Read-union performance test plan** — union across N
-      SQLite handles is O(N) per query; performance is implementation-
-      dependent. New `tests/test_linked_projects_perf.py` runs the
-      common queries (`history --since 7d`, `search`, `blame`)
-      against N=2, 5, 10, and 20 linked DBs and asserts a
-      response-time bound (≤30ms, ≤80ms, ≤200ms, ≤500ms on the CI
-      runner). If N=20 is consistently slow, document the
-      recommended max in `selvedge link` help text and surface it
-      in doctor's output.
-- [ ] **Doctor extensions** — `selvedge doctor` learns a "linked
-      projects" check: each entry in `links.toml` is reachable, has
-      a compatible schema version, isn't a stale path, and the
-      allowlist relationship is consistent in both directions.
-      Surfaces version-skew (one linked project on schema v2,
-      another on v3) as WARN, not FAIL, since the union still
-      works. Surfaces the most recent `links.audit.log` lines.
-- [ ] **Privacy / scope guardrail** — the load-bearing defense is
-      the per-project allowlist above (enforcement, not
-      documentation). Additionally: `selvedge prompt` updates the
-      canonical CLAUDE.md block to make `--all-projects` opt-in
-      explicit, and the first time `--all-projects` runs in a given
-      project, the CLI emits a one-time consent prompt requiring
-      `--yes` or interactive confirmation before unioning.
-- [ ] **Tests** — `tests/test_linked_projects.py` covering
-      link-file resolution order, broken-link skip behavior,
-      schema-skew detection, union ordering across N DBs
-      (newest-first by timestamp), the read-only invariant
-      (LinkedReadStorage refuses writes), the per-project allowlist
-      enforcement (queries from non-allowlisted projects skip the
-      DB), the `_scan_summary` shape, the `links.audit.log` write
-      path, and the one-time `--all-projects` consent prompt.
+      enforced the same as in the CLI path.
+- [ ] **`LogChangeResult.project` field** — when an agent runs
+      `log_change` while ambient context is cross-repo, the response
+      surfaces the project name that absorbed the write. Current
+      project always wins for writes; this just makes the
+      resolution visible.
+- [ ] **`_scan_summary` field on `--all-projects` responses** —
+      lists each linked project, schema version, allowlist status,
+      row-count contribution, and whether NULL fields in older
+      entries caused filter coverage gaps for `revisit_after` /
+      `expires_when` / `changeset_id`. Closes the silent-miss
+      failure mode where a filter on a field that didn't exist in
+      older schemas drops entries with no indication.
+- [ ] **Doctor — schema-skew + allowlist-symmetry check** for linked
+      DBs (lands here rather than v0.3.13 because the MCP-side
+      complications mean this needs to be tested at both surfaces).
+- [ ] **Read-union performance test** —
+      `tests/test_linked_projects_perf.py` runs common queries
+      (`history --since 7d`, `search`, `blame`) against N=2, 5, 10,
+      20 linked DBs and asserts response-time bounds. If N=20 is
+      consistently slow, surface a doctor INFO line recommending a
+      lower max.
+- [ ] **Tests** — `test_server.py` extensions for the MCP
+      parameter (~10), `test_log_change_result.py` extension for
+      the new field (~3), `test_linked_projects_perf.py` (~8),
+      `test_public_api.py` update (~2). Soft budget: ≤25 new tests.
 
 #### Risks acknowledged & mitigations
 
-- **`--all-projects` privacy bleed across project boundaries**:
-  defended at the *enforcement* layer with the per-project
-  allowlist in `links.toml`. Documentation reminders alone aren't
-  enough when agents learn flags. First-time consent prompt in
-  the CLI provides an additional speed-bump.
-- **Schema skew silently missing old entries**: defended by the
-  `_scan_summary` field on every `--all-projects` response, which
-  surfaces filter-coverage gaps explicitly per linked DB.
-- **Read-union performance with N**: defended by the
-  `test_linked_projects_perf.py` regression test and
-  doctor-surfaced N-recommendation if perf degrades.
-- **Implicit privilege escalation when linking**: defended with
-  the `links.audit.log` audit trail and doctor's recent-link
-  history, plus the per-project allowlist requiring affirmative
-  opt-in by both sides.
-- **Storage-abstraction sequencing**: locked in —
-  `LinkedReadStorage` is SQLite-only in v0.3.8 and gets rewritten
-  as part of v0.4.0's `StorageBackend` work, NOT delaying v0.3.8
-  on Phase-3 prep.
-- **Write disambiguation under cross-repo context**: defended by
-  the new `project` field on `LogChangeResult` so writes are
-  never ambiguous about their destination.
+- **MCP parameter overhead for unproven demand**: deferred from
+  v0.3.13 specifically so we observe whether CLI cross-repo gets
+  adopted. If v0.3.13 ships and no one uses `--all-projects` after
+  a release cycle, v0.3.14 ships only the `LogChangeResult.project`
+  field and the rest deprecates back to research.
+- **Filter coverage silently missing old entries**:
+  `_scan_summary` makes the gap explicit per linked DB.
+- **Read-union performance scaling**: `test_linked_projects_perf.py`
+  regression test; doctor-surfaced N-recommendation if perf
+  degrades.
 
-### Phase 3 — Team features (v0.4.0)
-> First release in the breaking-changes window. Bundles the backend
-> abstraction, the HTTP+auth surface, and the deferred MCP tool-name
-> rename so users only absorb one breaking-change cycle.
+### Phase 2.21 — Salvage when needed (v0.3.15, conditional)
+> Originally scoped as part of v0.3.5; deferred here because corruption
+> is the rarest failure mode in the install base and `selvedge backup`
+> (v0.3.5) plus `selvedge verify` (v0.3.5) cover 95% of the recovery
+> need. v0.3.15 **ships only if** telemetry from the install base
+> shows real corruption incidents that backup-restoration alone
+> doesn't address. Otherwise the bullet stays open. Theme:
+> *salvage, when telemetry shows we need it.*
 
-- [ ] **MCP tool-surface consolidation review (gate before any other
-      v0.4.0 breaking changes ship).** By v0.3.7 the tool count is
+- [ ] **`selvedge repair` command** — wraps SQLite's `.recover` to
+      dump events from a corrupted DB into a salvage file; a
+      `--from-recover` mode re-imports the dump into a fresh DB.
+      Default dry-run; `--apply` actually writes. **Repair is
+      salvage, not restoration** — `.recover` is probabilistic and
+      may drop rows. With `--apply`, refuses to run if no
+      `selvedge backup` has been taken in the last 7 days unless
+      `--no-backup-required` is also passed. **Shell-out
+      dependency on the `sqlite3` CLI binary** declared in
+      `pyproject.toml` and surfaced by `selvedge doctor` if missing.
+- [ ] **Doctor — `last_backup` escalation** — WARN >7 days, FAIL
+      when no backups exist and events table >10k rows (the v0.3.5
+      check stays informational; the failure escalation only
+      matters when repair is shippable).
+- [ ] **Tests** — `test_repair.py` covering dry-run vs. apply,
+      backup-required gate, missing-sqlite3 binary handling (~12),
+      `test_doctor.py` extension for the escalation (~3). Soft
+      budget: ≤15 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **Probabilistic salvage as restoration**: defended with the
+  7-day backup gate, `--apply` requirement, and explicit "salvage
+  not restoration" framing in help text.
+- **`sqlite3` CLI not on PATH**: declared dependency + doctor
+  surfacing missing-binary case + clear error message.
+- **Shipping repair without demand**: explicitly conditional on
+  telemetry. If install-base corruption incidents stay near zero,
+  this phase stays open and the engineering effort goes elsewhere.
+
+
+
+### Phase 3 — Backend rewrite + tool rename (v0.4.0)
+> First release in the breaking-changes window. Bundles the storage
+> backend abstraction and the deferred MCP tool-name rename so users
+> absorb both API breaks in one cycle. HTTP+auth ships separately in
+> v0.4.1 to keep each release's surface tightly scoped and isolate
+> which subsystem is responsible if something regresses.
+> The MCP tool-consolidation review gates everything else in v0.4.0
+> — naming and consolidation in one cycle is cheaper than two.
+> Theme: *one breaking-change cycle, one focused scope.*
+
+- [ ] **MCP tool-surface consolidation review (gate before any
+      other v0.4.0 changes ship).** By v0.3.11 the tool count is
       ~9 (`log_change`, `diff`, `blame`, `history`, `changeset`,
       `search`, `summary`, `prior_attempts`, `stale_decisions`).
       `history` plus `changeset_id` filter overlaps `changeset`;
-      `summary` plus `selvedge digest` plus `selvedge audit` overlap
-      in shape. Past ~10 tools agents hit decision-fatigue picking
-      the right one. v0.4.0 is the right (and only nearby)
-      breaking-change venue to thin the surface. Required output:
-      a written decision in this section on whether `changeset` is
-      subsumed by `history`, whether `summary` is the canonical
-      digest tool with `digest`/`audit` becoming pure CLI views, and
-      what the final v0.4.0 tool list is. Decision lands BEFORE the
-      tool-prefix migration below — renaming and consolidating in
-      one cycle is cheaper than two.
-- [ ] **PostgreSQL backend option** (configurable via
-      `SELVEDGE_BACKEND=postgresql://...`)
-  - Abstract `SelvedgeStorage` behind a `StorageBackend` protocol so
-    backends are swappable
-  - `storage_sqlite.py` and `storage_pg.py` both implement
-    `StorageBackend`
-  - **`LinkedReadStorage` rewrite** — Phase 2.14 ships
-    SQLite-only; this phase reimplements it against the new
-    `StorageBackend` protocol so cross-repo union queries work
-    against any backend mix.
-- [ ] **HTTP REST API layer (FastAPI)** — exposes every MCP server
-      operation over HTTP. The exact list reflects whatever the
-      tool-consolidation review above produced; count and shape
-      track the live `selvedge/server.py` rather than being
-      hardcoded here. **`tests/test_http_protocol.py` is a
-      release-blocker for v0.4.0** — boots a real
-      `selvedge-server-http` subprocess (parallel to the existing
-      `test_mcp_protocol.py`) and round-trips every endpoint over
-      HTTP. The MCP smoke-test pattern caught contract drift the
-      in-process tests missed; the HTTP surface needs the same
-      coverage from day one.
-- [ ] **Auth (API keys) for the HTTP layer.** Bearer-token
-      authentication with rotation. Out of scope: SSO, OAuth, RBAC
-      (those live in Phase 4 hosted).
-- [ ] **MCP tool-name prefix migration** — rename `diff`, `history`,
-      `search` (and any tool kept after the consolidation review
-      that has a too-generic name) to `selvedge_*` form, deferred
-      from v0.3.3 because of the breaking-change cost. Lands
-      alongside the other v0.4.0 breaking changes so users only
-      update their `CLAUDE.md` / `.cursorrules` once. **Enforcement
-      of the "one minor cycle" deprecation promise**: each
-      registered alias declares a `DEPRECATED_UNTIL_VERSION`
-      constant in code. Doctor warns loudly whenever an aliased
-      name is called (with the count from `tool_calls`
-      telemetry over the last 30 days). The CI lint job fails the
-      build if `DEPRECATED_UNTIL_VERSION` is reached without the
-      alias being removed. Aliases ship with a stderr warning on
-      every call.
-- [ ] **Agent Trace interop** — `selvedge export --format
-      agent-trace` and `selvedge import --format agent-trace`
-      (Cursor/Cognition open RFC, Jan 2026). Design doc:
-      [`agent-trace-interop.md`](agent-trace-interop.md). Selvedge
-      stays entity-centric internally; AT is purely a wire format
-      for cross-tool readers and compliance audits. Export
-      preamble explicitly explains why some emitted records carry
-      `extensions.selvedge.range_unknown: true` (events imported
-      from migration files don't have line ranges; Selvedge is
-      truthful about this rather than fabricating them) so AT
-      consumers don't misjudge fidelity.
-- [ ] **Hosted-MCP directory listings — launch checklist item.**
-      Once HTTP + auth ship, Selvedge becomes eligible for the
-      connector marketplaces that require a remote endpoint
-      (Anthropic Claude connectors registry, hosted MCP catalogs,
-      etc.). Today we're Local-only on Smithery, which caps reach.
-      Park the connector-listing question until that endpoint
-      exists — paired with the HTTP layer + auth above so the
-      launch goes out as one coordinated push, not a feature-by-
-      feature drip. No action required while we're pre-v0.4.0.
+      `summary` plus `selvedge digest` / `selvedge audit` overlap
+      in shape. Past ~10 tools agents hit decision-fatigue.
+      Required output: a written decision in this section on
+      whether `changeset` is subsumed by `history`, whether
+      `summary` is the canonical digest with `digest` / `audit`
+      becoming pure CLI views, and what the final v0.4.0 tool list
+      is. Decision lands BEFORE the tool-prefix migration below.
+- [ ] **`StorageBackend` protocol + PostgreSQL backend** —
+      `storage_sqlite.py` and `storage_pg.py` both implement
+      `StorageBackend`. Configurable via `SELVEDGE_BACKEND` env var
+      (e.g. `postgresql://...`). **`LinkedReadStorage` rewrite**
+      lands as part of this work — v0.3.13 shipped SQLite-only;
+      this release reimplements it against the new protocol so
+      cross-repo union queries work against any backend mix.
+- [ ] **MCP tool-name prefix migration** — rename `diff`,
+      `history`, `search` (and any tool kept after consolidation
+      with a too-generic name) to `selvedge_*` form. Deprecation
+      aliases ship simultaneously; each carries a
+      `DEPRECATED_UNTIL_VERSION` constant in code. Doctor warns
+      loudly when an aliased name is called (counted from
+      `tool_calls` telemetry). CI lint job fails the build if
+      `DEPRECATED_UNTIL_VERSION` is reached without the alias
+      being removed. The "one minor cycle" deprecation promise is
+      enforceable, not aspirational.
+- [ ] **Tests** — `test_storage_protocol.py` for the contract
+      (~12), `test_storage_pg.py` against a PostgreSQL test fixture
+      (~15), `test_linked_projects.py` extension for the rewritten
+      `LinkedReadStorage` (~6), `test_tool_rename.py` for alias
+      surfacing + deprecation mechanics (~10). Soft budget: ≤50
+      new tests (the backend-abstraction work is the largest single
+      piece of test surface in any v0.3.x or v0.4.x release).
 
 #### Risks acknowledged & mitigations
 
-- **MCP tool decision-fatigue at 10+ tools**: defended with the
-  consolidation review gating the rest of v0.4.0. The breaking-
-  change window is the right venue to thin the surface; not
-  deciding is itself a decision.
-- **HTTP layer untested at the protocol level**:
-  `test_http_protocol.py` is a v0.4.0 release-blocker, parallel
-  to `test_mcp_protocol.py`. No HTTP shipping without round-trip
-  smoke coverage.
-- **Deprecation aliases lingering forever**: defended with the
-  `DEPRECATED_UNTIL_VERSION` constant + CI lint enforcement +
-  doctor surfacing recent alias usage. The "one cycle" promise
-  is enforceable, not aspirational.
+- **Tool decision-fatigue at 10+ tools**: defended with the
+  consolidation review gating the rest of v0.4.0. Not deciding is
+  itself a decision.
+- **Deprecation aliases lingering forever**:
+  `DEPRECATED_UNTIL_VERSION` + CI lint + doctor surfaces recent
+  alias usage. Enforceable, not aspirational.
+- **External `CLAUDE.md` / `.cursorrules` references breaking**:
+  deprecation aliases ship in v0.4.0; aliases removed in v0.5.0.
+  One full minor cycle to migrate.
+- **`StorageBackend` abstraction leaking SQLite assumptions**:
+  full test suite runs against both backends in CI from day one.
+
+### Phase 3.1 — HTTP REST + auth (v0.4.1)
+> The wire-protocol layer. Exposes every MCP server operation over
+> HTTP for clients that can't speak MCP directly (CI gates,
+> compliance scanners, dashboards). API-key authentication for the
+> HTTP path; the MCP stdio path stays unauthenticated (local-only
+> by design — agent and server are the same machine). Released
+> after v0.4.0's backend rewrite has bedded in so HTTP regressions
+> aren't tangled with storage regressions. Theme: *Selvedge over
+> the wire, gated.*
+
+- [ ] **HTTP REST API layer (FastAPI)** — exposes every MCP server
+      operation over HTTP. Endpoint list reflects whatever the
+      v0.4.0 tool-consolidation review produced.
+      **`test_http_protocol.py` is a release-blocker for v0.4.1** —
+      boots a real `selvedge-server-http` subprocess (parallel to
+      the existing `test_mcp_protocol.py`) and round-trips every
+      endpoint over HTTP. The MCP smoke-test pattern caught contract
+      drift the in-process tests missed; the HTTP surface needs
+      the same coverage from day one.
+- [ ] **Auth (API keys) for the HTTP layer** — bearer-token
+      authentication with rotation. MCP stdio path stays
+      unauthenticated. Out of scope: SSO, OAuth, RBAC (Phase 4
+      hosted).
+- [ ] **`selvedge-server-http` entry point** — installs alongside
+      `selvedge-server` (stdio). Both share the same underlying
+      tool implementations via the consolidated tool list from
+      v0.4.0.
+- [ ] **Tests** — `test_http_protocol.py` round-tripping every
+      endpoint (~20), `test_auth.py` covering API-key happy and
+      sad paths (~8). Soft budget: ≤30 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **HTTP layer untested at protocol level**: `test_http_protocol.py`
+  is a release-blocker, parallel to `test_mcp_protocol.py`.
+- **Auth as security theater**: API keys are the entry-level
+  defense for HTTP, not the long-term auth story. Phase 4 hosted
+  introduces SSO + RBAC for the multi-user case. v0.4.1 covers
+  single-user / single-org / CI-gate scenarios.
+- **MCP path accidentally requiring auth**: stdio assumption
+  documented in `selvedge.server` module docstring and asserted
+  by a test that hits MCP without credentials and expects success.
+
+### Phase 3.2 — Agent Trace interop (v0.4.2)
+> Selvedge becomes a compatible producer of [Agent Trace](https://github.com/cursor/agent-trace),
+> the open RFC (Cursor + Cognition AI, Jan 2026) for AI code
+> attribution traces. Non-breaking — purely additive export/import
+> formats. Ships after v0.4.1 because the AT spec may move during
+> the v0.4.0 / v0.4.1 window and we'd rather lock against a
+> settled version. Full design in `docs/agent-trace-interop.md`.
+> Theme: *compatible producer, not competitor.*
+
+- [ ] **`selvedge export --format agent-trace --output trace.json`**
+      — emits AT v0.1.0 records from the local event store.
+      Supports existing `--since` / `--entity` / `--project`
+      filters plus a new `--ndjson` mode for large histories.
+      Selvedge stays entity-centric internally; AT is purely a
+      wire format. Reasoning, change_type, entity_path for
+      non-file entities, changeset_id, and project all land in
+      `extensions.selvedge.*`.
+- [ ] **`selvedge import trace.json --format agent-trace`** —
+      best-effort round-trip. Other tools' AT output won't populate
+      `extensions.selvedge.*`, so Selvedge fills defaults
+      (`entity_path = files[].path`, `change_type = "modify"`,
+      `reasoning = ""` — validator warns at log time).
+- [ ] **`range_unknown` preamble** — every Selvedge AT export
+      emits a preamble explaining the fidelity profile. Events
+      imported from migration files genuinely don't have line
+      ranges; DB columns / env vars / dependencies don't either.
+      Selvedge emits `extensions.selvedge.range_unknown: true`
+      rather than fabricating `[1, 1]` placeholders.
+- [ ] **Tests** — `test_agent_trace_export.py` covering round-trip,
+      spec validation, non-file entity preservation, multi-event
+      session, reasoning quality pass-through (~15). Soft budget:
+      ≤20 new tests.
+
+#### Risks acknowledged & mitigations
+
 - **AT export low-fidelity perception (`range_unknown`)**:
-  defended with explicit preamble language explaining the source
-  of the flag, plus README guidance so AT consumers understand
-  the fidelity profile up front.
-- **`LinkedReadStorage` SQLite coupling**: deliberately rewritten
-  as part of the storage-abstraction work in this phase so the
-  v0.3.8 SQLite-only choice doesn't ossify.
+  preamble language explains the source of the flag, plus README
+  guidance so consumers understand the fidelity profile.
+- **AT spec movement during the v0.4.x window**: pin to the spec
+  version current at v0.4.2 ship; document mapping per version in
+  `docs/agent-trace-interop.md`.
+- **`extensions.selvedge.*` namespace squat**: AT spec recommends
+  reverse-domain notation; we use `selvedge.*` because flat
+  namespaces are in the wild and we don't want to gate on
+  registering `dev.selvedge`. Reversible later if it matters.
+
 
 ### Phase 4 — Platform (hosted business)
 - [ ] Web dashboard (React + the REST API)
 - [ ] Cross-repo queries (server-side, multi-tenant, with auth and
       cross-user permissioning). The single-user OSS variant —
       read-only local overlay across `.selvedge/` directories the same
-      user owns — ships separately as Phase 2.14 / v0.3.8. Hosted is
-      for teams sharing context across users; OSS is for individuals
-      across their own portfolio.
+      user owns — ships separately as Phases 2.19 / 2.20 (v0.3.13 +
+      v0.3.14). Hosted is for teams sharing context across users;
+      OSS is for individuals across their own portfolio.
 - [ ] Team/org-level retention policies (per-tenant, configurable
-      independently from the project-local `retention_days` shipped in
-      v0.3.5)
+      independently from the project-local `retention_days_events` +
+      `retention_days_tool_calls` settings shipped in v0.3.10)
 - [ ] Team/org management
 - [ ] Webhook events (Slack, PagerDuty, etc. on schema changes)
 
@@ -1095,29 +1267,44 @@ applies to every new result type by default.
 
 Test count: 57 at v0.1.0 → 244 at v0.3.1 → 282 at v0.3.2 → ~336 at
 v0.3.4. Continuing the trajectory naively puts the suite at 500+ by
-v0.4.0, with proportional CI-runtime and flakiness costs.
+v0.4.0, with proportional CI-runtime and flakiness costs. The
+release-scope restructure (2026-05-10) replaced 4 broad phases with
+11 narrower phases, so the per-phase budgets shrunk in step.
 
-**Soft budget per phase** (added to the phase plan as a target, not a
-hard cap):
+**Soft budget per phase** (target, not a hard cap):
 
-| Phase | Target test delta |
-|---|---|
-| 2.11 (v0.3.5) | ≤ 50 new tests |
-| 2.12 (v0.3.6) | ≤ 60 new tests |
-| 2.13 (v0.3.7) | ≤ 50 new tests |
-| 2.14 (v0.3.8) | ≤ 40 new tests |
-| 3 (v0.4.0)    | ≤ 80 new tests |
+| Phase | Version | Target test delta |
+|---|---|---|
+| 2.11 | v0.3.5  | ≤ 25 new tests |
+| 2.12 | v0.3.6  | ≤ 15 new tests |
+| 2.13 | v0.3.7  | ≤ 30 new tests |
+| 2.14 | v0.3.8  | ≤ 25 new tests |
+| 2.15 | v0.3.9  | ≤ 30 new tests |
+| 2.16 | v0.3.10 | ≤ 25 new tests |
+| 2.17 | v0.3.11 | ≤ 25 new tests |
+| 2.18 | v0.3.12 | ≤ 20 new tests |
+| 2.19 | v0.3.13 | ≤ 30 new tests |
+| 2.20 | v0.3.14 | ≤ 25 new tests |
+| 2.21 | v0.3.15 | ≤ 15 new tests (conditional ship) |
+| 3    | v0.4.0  | ≤ 50 new tests |
+| 3.1  | v0.4.1  | ≤ 30 new tests |
+| 3.2  | v0.4.2  | ≤ 20 new tests |
 
 When a phase exceeds its budget, the release notes call out *why* —
 typically a perf-regression suite (test_migrations_perf,
 test_linked_projects_perf) or a new protocol smoke test
 (test_http_protocol). Budget overruns aren't a failure; they're a
-visibility signal.
+visibility signal that the phase scope grew or that the test design
+needs review. Aggregate cap target at v0.4.2 ship: ~700 tests
+(versus ~500 in the original plan; the release-scope restructure
+shifted total test surface up because each release ships with
+narrower scope but the same coverage discipline).
 
 ### MCP tool count discipline
 
-Tool count grows: 6 today → 8 at v0.3.6 → 9 at v0.3.7 → tool
-consolidation review at v0.4.0 (see Phase 3). Past ~10 tools, agents
+Tool count grows: 6 today → 6 at v0.3.5 (no new tools) → 8 at v0.3.7
+(`prior_attempts` + `summary`) → 9 at v0.3.8 (`stale_decisions`) →
+tool consolidation review at v0.4.0 (Phase 3). Past ~10 tools, agents
 hit decision-fatigue picking the right one, and overlap between tools
 (e.g. `history`+`changeset_id` vs. `changeset`) makes wrong-tool calls
 likely.
@@ -1127,18 +1314,138 @@ existing tool with a different default, or genuinely a new shape?"
 before the design lands. The v0.4.0 consolidation review is the
 explicit budget-reset moment.
 
+### Release scope discipline
+
+Codified 2026-05-10 alongside the v0.3.5-onward phase restructure.
+Each v0.3.x and v0.4.x phase below must be sized as one focused
+unit of work: **one coherent theme, 3–5 features, ≤30 new tests,
+~400–800 LoC, one focused week.** When a planning pass produces a
+phase that exceeds those bounds, the phase splits before the work
+starts — not after a mid-ship realization that it was too big.
+
+**Why this matters**: smaller per-release surface means smaller
+blast radius if something regresses, cleaner CHANGELOG entries, and
+release-quality checkpoints that map 1:1 to a theme. A six-feature
+release where one feature regresses leaves the other five tangled
+in the rollback decision; a single-theme release just rolls back
+to the previous tag. Scope discipline at release-time is what
+turns the test suite, the doctor surface, and the version-bump
+checklist into useful gates instead of paperwork.
+
+**Discipline**: at the start of every phase, review the bullet list
+and ask "is this one theme, or am I bundling two adjacent themes
+because they're conveniently shippable together?" If it's the
+latter, split. Splits cost a release-cycle checklist run (more
+releases, more Smithery republishes, more website-sync PRs) but
+the per-ship risk shrinks dramatically. Net win is bigger than the
+cost.
+
+**Trade-off acknowledged**: more releases means more cumulative
+release-cycle overhead. The v0.3.5 → v0.4.2 arc now contains 14
+releases instead of 5. Each release's manual Smithery republish and
+selvedge-site PR is friction. The auto-PR GitHub Action listed in
+"Open follow-ups" (under Website ↔ codebase sync) gets more urgent
+as a result; the manual cadence stops being acceptable past ~v0.3.8
+if the work hasn't been built.
+
 ### Maintainer-capacity check
 
-v0.3.5 → v0.4.0 spans roughly a year of solo-maintainer effort under
-current scope. Each phase reads as ~5–8 substantive features; the
-aggregate is a lot. The robustness-first stance through v0.3.4 is the
-status quo, but feature accumulation is the slow drift.
+v0.3.5 → v0.4.2 spans roughly a year of solo-maintainer effort under
+the new release-scope discipline. The 2026-05-10 restructure traded
+4 broad phases for 14 narrower ones; calendar time is roughly similar
+but ship
+rate increases from ~5 releases per year to ~14 per year. Ship rate
+is itself a defense — "actively maintained, fast-evolving" reads
+differently from "big-bang every quarter."
 
 **Discipline** (cross-referenced in `long-term-thesis.md` §7): at the
-end of each phase ship, review the next phase's bullet list and
-*explicitly defer* any feature that isn't load-bearing for the
-release's headline goal. Deferred items move to the next phase or to a
-"Future work" appendix. The phase plan is a budget, not a vow.
+end of each phase ship, review the *next* phase's bullet list and
+*explicitly defer* any feature that isn't load-bearing for that
+release's headline goal. Deferred items move to the next phase or
+into the "Future work" appendix near the end of this doc. The phase
+plan is a budget, not a vow.
+
+### Website ↔ codebase sync
+
+Selvedge ships from two repos: `masondelan/selvedge` (this one — the
+code, MCP server, CLI, CHANGELOG, README) and
+`masondelan/selvedge-site` (Astro + Starlight, auto-deploys to
+selvedge.sh on push). The codebase repo is the source of truth for
+*what* shipped — CHANGELOG, server.py docstrings, manifest.json. The
+site is the source of truth for *how it's described* — homepage
+copy, the comparison page, the "decision archaeology" positioning,
+release-notes prose for non-users. Both must stay in lockstep or
+the most-visible-to-the-internet version of Selvedge ages out of
+date.
+
+`docs/comparison.html` is a transitional artifact: it predates
+selvedge-site (carried over from the old GitHub Pages deploy), and
+its canonical link points at `selvedge.sh/compare/agent-tools/`.
+Treat the site copy as canonical; `docs/comparison.html` is a stale
+mirror until the Pages-migration follow-up retires it.
+
+**Discipline (codified in this section, enforced via the release-
+cycle checklist in every phase from v0.3.5 onward):**
+
+* Every version bump triggers a paired commit/PR in
+  `masondelan/selvedge-site` — at minimum the version string and
+  the release-notes mirror; more if positioning or behavior
+  described on the site changed.
+* If a change in the codebase repo modifies the user-facing
+  narrative (new MCP tool, new CLI command, a wedge feature like
+  `prior_attempts`, a values-shift like the no-cloud claim), the
+  PR description on the codebase side must name the corresponding
+  site change in a "Site sync" section. No "Site sync: none"
+  default — the writer asserts it explicitly or it didn't get
+  considered.
+* Doctor's status output will surface the *installed* Selvedge
+  version. The site's homepage shows the *advertised* version. A
+  release where these two diverge for more than 24 hours is a
+  release-quality failure, not a marketing miss — track it in the
+  cross-cutting risk register if it happens.
+
+**Open follow-up** (tracked in the Future Work appendix): an
+auto-PR GitHub Action that opens a draft PR against `selvedge-site`
+on tag push. The release-scope restructure turned 5 releases into 14
+across the v0.3.5 → v0.4.2 arc, which means the manual selvedge-
+site PR runs 14 times instead of 5. Past ~v0.3.8 the manual cadence
+becomes the bottleneck and the auto-PR action needs to land.
+
+### Competitive narrative drift
+
+The 2026-05-07 internal teardown of Git AI (kept off-repo as
+competitive intel) identified five competitive moves that
+could pull Selvedge into a category it doesn't want to compete in:
+(1) Git AI ships an MCP server and narrows the architectural moat;
+(2) Git AI raises a public seed/Series A and the marketing-spend
+asymmetry widens; (3) Cursor / Anthropic / GitHub endorse Git AI's
+note format as the open standard for AI authorship; (4) an
+"AI-era observability" analyst category coalesces around Git AI's
+framing and Selvedge gets read as a weaker alternative;
+(5) Git AI's agent-vendor cooperation strategy works and every
+major agent ships a Git AI hook before Selvedge has equivalent
+reach. None of these are imminent; all of them are plausible inside
+the v0.3.5 → v0.4.2 window (the 2026-05-10 release-scope
+restructure widened the named window but did not lengthen the
+calendar arc).
+
+**Discipline**: every phase ship reviews this list and answers one
+question — "does this release widen the MCP-first / decision-
+archaeology lead, or does it cede ground?" Concrete defenses
+already sequenced into the phase plan: `prior_attempts` shipped
+with its positioning artifacts in v0.3.7 (wedge legible); Git Notes
+one-way reader in v0.3.12 (interop, not substitute); verifiable-
+no-network test in v0.3.12 (positioning claim made auditable); the
+cross-repo `prior_attempts` extension in v0.3.14 ("you considered
+this in your other project six months ago" — Git AI cannot match
+this with their data model); Agent Trace export in v0.4.2
+(compatible producer, not competitor). Position changes (homepage,
+comparison page) live in `docs/engagement-strategy.md` and
+`docs/comparison.html`; this section exists so the *engineering*
+phase plan keeps line-of-sight to the
+narrative those documents are trying to hold. If a future phase
+removes a competitive defense from this list without replacing it,
+the PR description must say which defense and why.
 
 ---
 
@@ -1162,3 +1469,56 @@ selvedge --version
 - No real-time streaming
 - No multi-user/team features (Phase 3)
 - No LLM calls inside Selvedge itself — reasoning is captured FROM agents, not generated by Selvedge
+
+---
+
+## Future work (no version assigned)
+
+Items removed from the versioned roadmap in the 2026-05-10
+release-scope restructure. Each was either gated on prerequisites
+that haven't been met, or wasn't load-bearing for any release's
+headline goal. They live here so the decision to defer is visible —
+not lost in chat history — and so they can be promoted back into a
+phase when the gating condition is satisfied.
+
+**VS Code extension scaffolding.** Lives in a separate repo, has a
+separate ship cadence, and depends on the `summary` MCP tool from
+v0.3.7 to spec against. Promote to a phase when (a) a tracking
+issue exists, (b) a named owner commits to a 90-day shipping
+review, and (c) the extension repo has been created. Until then,
+roadmap noise.
+
+**Auto-PR GitHub Action for selvedge-site.** Build-process
+improvement that opens a draft PR against `masondelan/selvedge-site`
+on every tag push, with version bumps and CHANGELOG diff
+pre-filled. Manual review still required (positioning prose isn't
+auto-translatable from CHANGELOG bullets), but the draft removes
+the "did anyone update the site?" friction. Promote to a phase
+when the manual release-cycle cadence has bedded in (post-v0.3.8)
+and the friction is observable.
+
+**Push-model `prior_attempts` variant.** Currently pull-only.
+The push model would auto-warn on `log_change` when the entity
+has prior rejected attempts. Deferred until pull-tool adoption
+signal shows agents actually act on what `prior_attempts` returns.
+If agents ignore the pull tool, the push tool is noise; if they
+act on it, the push tool is leverage.
+
+**`selvedge-server-http` health endpoint + structured logs.**
+Add observability surface to the HTTP layer post-v0.4.1.
+Promote when the HTTP layer ships and operational requirements
+surface from real deployments.
+
+**Selvedge → Git Notes writer (export direction).** v0.3.12 ships
+a one-way reader from Git Notes; the write direction would
+emit Selvedge events back into `refs/notes/selvedge-intent`. The
+read direction is the load-bearing competitive defense; write
+adds two-product release-pacing entanglement (Selvedge's note
+format would need to track Git AI's spec movement). Promote only
+if the Agent Trace alliance moves slower than expected and Git
+Notes becomes a de-facto cross-tool surface.
+
+**Tool consolidation as a v0.5.0 follow-on.** v0.4.0's
+consolidation review is the budget-reset; v0.5.0 reviews again
+once the v0.4.x line has shipped and we have post-rename
+usage data. Not a release commitment, just a tracking note.

@@ -62,6 +62,7 @@ When the user asks for a version bump:
 3. Tag the commit; the PyPI publish workflow runs on tag push (OIDC trusted publisher is pinned to the workflow filename — don't rename that file without updating PyPI config first).
 4. For Smithery: hand-zip the bundle (NOT `mcpb pack` — there's an MCPB-vs-Smithery schema mismatch around per-tool `inputSchema`), then `smithery mcp publish`.
 5. Add a "What's new in vX.Y.Z" section to `README.md`. Cap at 2 versions — oldest drops off stack-style (so v0.3.2 ship → v0.3.0 drops).
+6. **Propagate to `masondelan/selvedge-site`.** Open a PR (or direct commit) on the site repo: bump any displayed version string, mirror the README "What's new" content into the site's release-notes page, and revise prose that references behavior that changed in this release. The codebase repo is the source of truth for *what* shipped; the site is the source of truth for *how it's described*. Both must move together. See `docs/architecture.md` § "Website ↔ codebase sync" for the discipline rule and the open follow-up to evaluate auto-PR automation. If the release introduces no user-facing narrative shift, the PR description on the codebase side must say "Site sync: version-only" explicitly — no silent skips.
 
 ---
 

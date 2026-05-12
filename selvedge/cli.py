@@ -32,9 +32,11 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
+from . import backup as backup_mod
+from . import verify as verify_mod
 from .config import get_db_path, init_project, resolve_db_path
 from .logging_config import LOG_LEVEL_ENV, configure_logging
-from .migrations import get_applied_versions, latest_version
+from .migrations import MIGRATIONS, get_applied_versions, latest_version
 from .models import ChangeEvent, ChangeType
 from .storage import SelvedgeStorage
 from .timeutil import parse_time_string
@@ -217,6 +219,12 @@ def init(path):
     # Touch the DB to confirm it's writable
     SelvedgeStorage(db_path)
 
+    # Pre-emptively keep backup snapshots out of git. v0.3.5 introduces
+    # `.selvedge/backups/`; adding the line at init time avoids the
+    # first-backup race on shared repos. ensure_gitignore_entry is
+    # idempotent — re-running init on an existing project is safe.
+    backup_mod.ensure_gitignore_entry(root)
+
     console.print("\n[bold green]✓ Selvedge initialized[/bold green]")
     console.print(f"  Directory:  [dim]{selvedge_dir}[/dim]")
     console.print(f"  Database:   [dim]{db_path}[/dim]")
@@ -359,7 +367,7 @@ def _doctor_checks() -> list[dict]:
             "missing — run `selvedge init` in your project root"
         ))
 
-    # 3. Schema migration version
+    # 3. Schema migration version (+ downgrade detection)
     db_exists = resolved.path.is_file()
     if not db_exists:
         checks.append(_check(
@@ -370,9 +378,22 @@ def _doctor_checks() -> list[dict]:
         try:
             with sqlite3.connect(resolved.path) as conn:
                 applied = get_applied_versions(conn)
+            declared = {m.version for m in MIGRATIONS}
             target = latest_version()
-            missing = sorted(set(range(1, target + 1)) - applied)
-            if not missing:
+            missing = sorted(declared - applied)
+            extra = sorted(applied - declared)
+            if extra:
+                # The DB was last opened by a newer Selvedge that knew about
+                # migrations this version doesn't. Downgrading is not
+                # supported — surface as FAIL so users notice before any
+                # write attempts schema work it doesn't understand.
+                checks.append(_check(
+                    "Schema version", "FAIL",
+                    f"DB has applied migration(s) {extra} that this Selvedge "
+                    f"build does not declare — likely opened by a newer version "
+                    f"and downgraded; downgrades are not supported"
+                ))
+            elif not missing:
                 checks.append(_check(
                     "Schema version", "PASS",
                     f"at v{target} (latest)"
@@ -478,6 +499,50 @@ def _doctor_checks() -> list[dict]:
             f"valid: {', '.join(_KNOWN_LOG_LEVELS)}"
         ))
 
+    # 8. Last backup freshness. Severity ladder:
+    #   • newest backup ≤7d old  → INFO
+    #   • newest backup >7d old  → WARN
+    #   • no backups + events table small → INFO (nothing precious to lose yet)
+    #   • no backups + events table ≥10k rows → FAIL (precious; back up now)
+    # 10k is the "real project" floor — small enough that most teams hit it
+    # within weeks, large enough that a no-backups state at that size is a
+    # genuine data-loss exposure rather than a CI/scratch DB.
+    backups_dir = backup_mod.default_backups_dir(resolved.path)
+    last_backup_dt = backup_mod.last_backup_time(backups_dir)
+    if last_backup_dt is not None:
+        age_td = datetime.now(timezone.utc) - last_backup_dt
+        if age_td.days <= 7:
+            checks.append(_check(
+                "Last backup", "INFO",
+                f"{last_backup_dt.isoformat(timespec='seconds')} ({age_td.days}d ago)"
+            ))
+        else:
+            checks.append(_check(
+                "Last backup", "WARN",
+                f"{last_backup_dt.isoformat(timespec='seconds')} ({age_td.days}d ago) — "
+                f"run `selvedge backup`"
+            ))
+    elif db_exists:
+        try:
+            event_count = SelvedgeStorage(resolved.path).count()
+        except sqlite3.Error:
+            event_count = 0
+        if event_count >= 10_000:
+            checks.append(_check(
+                "Last backup", "FAIL",
+                f"no backups in {backups_dir} but events table has "
+                f"{event_count:,} rows — run `selvedge backup` now"
+            ))
+        else:
+            checks.append(_check(
+                "Last backup", "INFO",
+                f"no backups yet ({event_count:,} events; threshold for FAIL is 10,000)"
+            ))
+    else:
+        checks.append(_check(
+            "Last backup", "INFO", "no DB yet — nothing to back up"
+        ))
+
     return checks
 
 
@@ -491,10 +556,13 @@ def doctor(as_json):
       • which DB path is being resolved (and which step of the precedence chain hit)
       • whether .selvedge/ exists where it should
       • whether the schema is at the latest migration version
+        (FAIL if schema_migrations contains an unknown version — downgrade)
       • whether the post-commit hook is installed
       • whether the post-commit hook has been failing silently
       • last tool_calls entry timestamp (proxy for "is the agent wired up?")
       • whether SELVEDGE_LOG_LEVEL is set to a recognized value
+      • last backup freshness (INFO ≤7d, WARN >7d, FAIL when no backups
+        exist AND the events table has ≥10k rows)
 
     \b
     Exit codes:
@@ -538,6 +606,148 @@ def doctor(as_json):
         console.print(f"\n[yellow]{warn_count} warning(s).[/yellow]")
     else:
         console.print("\n[green]All checks passed.[/green]")
+    console.print()
+
+
+# ---------------------------------------------------------------------------
+# verify
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Treat should-warn checks as failures too.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def verify(strict, as_json):
+    """Run correctness checks against the Selvedge store.
+
+    \b
+    Two tiers:
+      must_fail   — SQLite corruption, schema mismatch, invariant violations
+                    (empty entity_path, unknown change_type, bad timestamps)
+      should_warn — soft signals (singleton changesets, events past the
+                    backfill window with no git_commit)
+
+    \b
+    Exit codes:
+      0 — clean, or only should-warn rows triggered
+      1 — any must-fail row triggered (or any row triggered with --strict)
+
+    Wire ``selvedge verify`` into CI without ``|| true`` on day one — the
+    should-warn tier means transient soft signals don't break the build.
+    Add ``--strict`` once your team is comfortable promoting them.
+    """
+    db_path = get_db_path()
+    results = verify_mod.run_checks(db_path)
+    code = verify_mod.exit_code(results, strict=strict)
+
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "strict": strict,
+                    "db_path": str(db_path),
+                    "checks": [r.to_dict() for r in results],
+                    "exit_code": code,
+                },
+                indent=2,
+            )
+        )
+        sys.exit(code)
+
+    console.print(f"\n[bold]Selvedge verify[/bold]  [dim]{db_path}[/dim]\n")
+
+    style_for = {
+        "PASS": "[green]✓ PASS[/green]",
+        "WARN": "[yellow]! WARN[/yellow]",
+        "FAIL": "[red]✗ FAIL[/red]",
+    }
+
+    table = Table(box=box.SIMPLE_HEAD, show_header=True, header_style="bold")
+    table.add_column("Check", style="bold")
+    table.add_column("Tier", no_wrap=True, style="dim")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Detail", style="dim", overflow="fold")
+
+    for r in results:
+        table.add_row(
+            r.id,
+            r.tier,
+            style_for.get(r.status, r.status),
+            r.detail,
+        )
+    console.print(table)
+
+    fail_count = sum(1 for r in results if r.status == "FAIL")
+    warn_count = sum(1 for r in results if r.status == "WARN")
+
+    if fail_count:
+        console.print(f"\n[red]{fail_count} must-fail check(s) failed.[/red]")
+    if warn_count:
+        msg = f"[yellow]{warn_count} should-warn check(s).[/yellow]"
+        if strict:
+            msg += " [red](escalated by --strict)[/red]"
+        console.print(f"\n{msg}")
+    if not fail_count and not warn_count:
+        console.print("\n[green]All checks passed.[/green]")
+    console.print()
+    sys.exit(code)
+
+
+# ---------------------------------------------------------------------------
+# backup
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--output",
+    "-o",
+    "output_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Destination file. Default: .selvedge/backups/selvedge-YYYYMMDD-HHMMSS.db",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def backup(output_path, as_json):
+    """Snapshot the Selvedge store via SQLite VACUUM INTO.
+
+    \b
+    Rotation: keeps the most recent 7 backups in ``.selvedge/backups/``.
+    Custom ``--output`` destinations outside that directory are never
+    pruned. Backups are kept out of git via ``.selvedge/backups/`` in
+    the project ``.gitignore`` — appended by ``selvedge init`` (v0.3.5+)
+    and by the first ``selvedge backup`` run on existing repos.
+    """
+    db_path = get_db_path()
+    project_root = Path.cwd()
+
+    # First-run gitignore hygiene for repos that initialized pre-v0.3.5.
+    backup_mod.ensure_gitignore_entry(project_root)
+
+    try:
+        result = backup_mod.create_backup(db_path, output=output_path)
+    except FileNotFoundError as exc:
+        if as_json:
+            click.echo(json.dumps({"error": str(exc)}))
+        else:
+            err_console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
+
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2))
+        return
+
+    console.print(
+        f"\n[bold green]✓ Backup written[/bold green]  "
+        f"[dim]{result.output_path}[/dim]"
+    )
+    console.print(f"  Size:    [dim]{result.bytes_written:,} bytes[/dim]")
+    if result.pruned:
+        console.print(f"  Pruned:  [dim]{len(result.pruned)} older snapshot(s)[/dim]")
     console.print()
 
 

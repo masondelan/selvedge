@@ -468,7 +468,7 @@ github.com).
 > ships in v0.3.15 only if telemetry shows corruption incidents
 > warrant it. Theme: *find out what's wrong, take a safe snapshot.*
 
-- [ ] **`selvedge verify` command** — runs SQLite's
+- [x] **`selvedge verify` command** — runs SQLite's
       `PRAGMA integrity_check`, validates the `schema_migrations` set
       against `MIGRATIONS`, and walks both tables for invariants
       (entity_path non-empty, change_type in valid set, timestamp
@@ -480,7 +480,7 @@ github.com).
       but exit 0 by default; pass `--strict` to escalate warnings to
       failures. Categorization lives in `selvedge.verify.CHECK_TIERS`
       and is locked in by `tests/test_verify.py`.
-- [ ] **`selvedge backup` command** — produces a known-good copy of
+- [x] **`selvedge backup` command** — produces a known-good copy of
       `.selvedge/selvedge.db` via SQLite's online backup
       (`VACUUM INTO`), default destination
       `.selvedge/backups/selvedge-YYYYMMDD-HHMMSS.db`. Hardcoded
@@ -489,13 +489,13 @@ github.com).
       lands in v0.3.10. `.selvedge/backups/` added to the `.gitignore`
       template applied by `selvedge init`; existing repos get the
       same line on first `selvedge backup` run.
-- [ ] **Doctor — minimal expansion**: `last_backup` row (INFO when
+- [x] **Doctor — minimal expansion**: `last_backup` row (INFO when
       fresh, WARN >7 days, FAIL when no backups exist and the events
       table has ≥10k rows) plus `schema_migrations`-downgrade
       detection (FAIL when `schema_migrations` contains a version
       not in the current `MIGRATIONS` tuple). Bigger doctor curation
       pass deferred to v0.3.8 when more checks are stacking up.
-- [ ] **Release-cycle checklist** — already landed in this doc and
+- [x] **Release-cycle checklist** — already landed in this doc and
       in `CLAUDE.md` via the prior planning pass. No code work; the
       v0.3.5 ship just exercises it for the first time: pyproject +
       `__init__.py` + manifest.json + server.json bumped together,
@@ -503,8 +503,8 @@ github.com).
       Node-20-supported majors (deadline 2026-06-02), README
       "What's new" stack-cap at 2, Smithery hand-zip + publish,
       paired PR against `masondelan/selvedge-site`.
-- [ ] **Tests** — `test_verify.py` (~12), `test_backup.py` (~6),
-      `test_doctor.py` extension (~4). Soft budget: ≤25 new tests.
+- [x] **Tests** — `test_verify.py` (13), `test_backup.py` (7),
+      `test_doctor.py` extension (4). Total: 24 new tests (within ≤25 budget).
 
 #### Risks acknowledged & mitigations
 

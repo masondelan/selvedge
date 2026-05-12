@@ -6,6 +6,70 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.5] — 2026-05-11
+
+The recovery-basics release. v0.3.1 made the runtime safe; v0.3.2 made
+problems visible; v0.3.5 adds the *minimum viable* "what happens when
+something has gone wrong" surface. Verify so you can detect corruption.
+Backup so you have a known-good snapshot to fall back to. **Drop-in
+upgrade for anyone on 0.3.4.**
+
+### Added
+
+- **`selvedge verify` — DB-correctness gate with two exit tiers.** Walks
+  the store and reports each check as PASS / WARN / FAIL. Must-fail
+  conditions (SQLite corruption from `PRAGMA integrity_check`, schema
+  mismatch against the declared `MIGRATIONS` tuple, empty `entity_path`,
+  unknown `change_type` in the store, unparseable timestamps, malformed
+  `tool_calls` rows) exit non-zero. Should-warn conditions (singleton
+  `changeset_id` groups, events past the 60-minute backfill window with
+  no `git_commit`) print warnings but exit 0 by default. Pass `--strict`
+  to escalate warnings to failures — `selvedge verify` is meant to drop
+  into CI on day one without `|| true`. `--json` for machine output.
+  Tier mapping is locked in by `selvedge.verify.CHECK_TIERS` and
+  asserted by `tests/test_verify.py` — adding a check without a tier
+  trips CI.
+- **`selvedge backup` — online SQLite snapshot via VACUUM INTO.**
+  Default destination
+  `.selvedge/backups/selvedge-YYYYMMDD-HHMMSS.db`. Hardcoded
+  `keep_last=7` for this release; the setting becomes
+  `backup_keep_last` in `.selvedge/config.toml` when that file lands
+  in v0.3.10. Two backups within the same second don't collide — the
+  second one gets a `-1` suffix rather than clobbering the first.
+  `--output <path>` overrides the default destination and is excluded
+  from rotation. `--json` for scripting.
+- **`.selvedge/backups/` added to the project `.gitignore`.**
+  `selvedge init` writes it on fresh repos; the first `selvedge backup`
+  run on an existing repo appends it the same way. Idempotent — safe
+  to re-run.
+- **Doctor — `Last backup` row.** INFO when the newest backup is ≤7
+  days old, WARN when older, FAIL when no backups exist *and* the
+  events table has ≥10,000 rows (the threshold where no-backups
+  becomes a real data-loss exposure rather than a CI/scratch DB).
+- **Doctor — `Schema version` now FAILs on downgrade.** When
+  `schema_migrations` contains a version not declared in the current
+  `MIGRATIONS` tuple, the row fails rather than silently appearing
+  PASS — surfaces "this DB was last opened by a newer Selvedge" before
+  any write attempts schema work it doesn't understand.
+
+### Changed
+
+- **`selvedge doctor` docstring** updated to describe the new rows and
+  the downgrade-failure semantics.
+
+### Tests
+
+- **`tests/test_verify.py`** (13 tests) — covers tier locking, the
+  happy path, every must-fail trigger, the warn-only paths, and the
+  CLI surface including `--strict` escalation.
+- **`tests/test_backup.py`** (7 tests) — covers snapshot validity,
+  rotation, same-second collisions, missing-DB error path, and the
+  `.gitignore` append idempotency.
+- **`tests/test_doctor.py`** — 4 new tests for the `Last backup` row
+  and the downgrade-detection branch.
+
+---
+
 ## [0.3.4] — 2026-04-26
 
 The first-run release. The install funnel was six manual steps with

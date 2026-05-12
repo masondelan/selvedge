@@ -107,6 +107,53 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.5
+
+The recovery-basics release. v0.3.1 made the runtime safe; v0.3.2 made
+problems visible; v0.3.5 ships the *minimum viable* "what happens when
+something has gone wrong" surface. **Drop-in upgrade for anyone on
+0.3.4.**
+
+**`selvedge verify` — DB-correctness gate with two exit tiers.** Walks
+the store and reports each check as PASS / WARN / FAIL. Must-fail
+conditions (SQLite corruption, schema mismatch against the declared
+`MIGRATIONS`, empty `entity_path`, unknown `change_type` in the store,
+unparseable timestamps, malformed `tool_calls` rows) exit non-zero.
+Should-warn conditions (singleton `changeset_id` groups, events past
+the 60-minute backfill window with no `git_commit`) print warnings but
+exit 0 by default. Pass `--strict` to escalate warnings to failures —
+the tiering means `selvedge verify` can drop into CI on day one
+without `|| true`. `--json` for machine output.
+
+**`selvedge backup` — online SQLite snapshot via `VACUUM INTO`.**
+Default destination
+`.selvedge/backups/selvedge-YYYYMMDD-HHMMSS.db`, kept out of git
+because `selvedge init` now appends `.selvedge/backups/` to the
+project `.gitignore` (and the first `selvedge backup` run on an
+existing repo appends it the same way — idempotent). Hardcoded
+`keep_last=7` for this release; the setting becomes `backup_keep_last`
+in `.selvedge/config.toml` when that file lands in v0.3.10.
+`--output <path>` overrides the default and is excluded from rotation
+so ad-hoc destinations aren't swept up. Two backups in the same second
+don't collide.
+
+**Doctor — `Last backup` row.** INFO when the newest backup is ≤7
+days old, WARN when older, FAIL when no backups exist *and* the
+events table has ≥10,000 rows (the threshold where no-backups becomes
+a real data-loss exposure rather than a CI/scratch DB).
+
+**Doctor — `Schema version` now FAILs on downgrade.** When
+`schema_migrations` contains a version not declared in the current
+`MIGRATIONS` tuple, the row fails rather than silently passing —
+surfaces "this DB was last opened by a newer Selvedge" before any
+write attempts schema work it doesn't understand.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the full list including the
+24 new tests across `test_verify.py`, `test_backup.py`, and the
+`test_doctor.py` extension.
+
+---
+
 ## What's new in v0.3.4
 
 The first-run release. The install funnel was six manual steps with
@@ -149,58 +196,6 @@ look.
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list including the
 test-coverage additions (54 new tests across `test_setup.py`,
 `test_prompt.py`, `test_watch.py`).
-
----
-
-## What's new in v0.3.3
-
-A discoverability + ergonomics release. No new MCP tools, no behavior
-changes that affect stored data — but the live tool schema is now
-substantially richer for the agents that call it and the directories
-that score it. **Drop-in upgrade for anyone on 0.3.2.**
-
-**Per-parameter descriptions on every tool.** All 6 MCP tools now
-declare each parameter via `Annotated[T, Field(description=...)]`,
-populating the per-parameter `description` field in `tools/list`.
-Previously each parameter shipped only `type` and `title`; the rich
-docstrings sat in the function body where agents couldn't see them at
-tool-call time. Coverage went 0/21 → 21/21. Agents picking which tool
-to call read these directly, so it's a DX win for Claude Code / Cursor
-use — not just a directory-score win.
-
-**MCP tool annotations.** Each tool now declares `readOnlyHint`,
-`destructiveHint`, `idempotentHint`, `openWorldHint`, and a
-human-friendly `title`. `log_change` is the only writer (append-only,
-not idempotent — each call mints a new event). The five readers
-(`diff`, `blame`, `history`, `changeset`, `search`) are read-only and
-idempotent. None are open-world. Lets MCP clients gate or surface the
-tools appropriately.
-
-**Output schemas on every tool.** New `LogChangeResult` and
-`BlameResult` TypedDicts give the JSON-RPC layer concrete output
-schemas to advertise — was missing on the two `dict`-returning tools.
-The list-returning ones already had auto-generated schemas, so all 6
-are now consistent.
-
-**Custom server icon.** A "stitched timeline" mark — a horizontal
-running stitch where each visible stitch is a captured change event.
-Lives at `assets/icon.svg` and a 512×512 `assets/icon.png`, shipped
-in the Smithery bundle.
-
-**`log_change` and `blame` return stable shapes.** `log_change` now
-always returns `id`, `timestamp`, `status`, `error`, and `warnings`
-keys (with empty values when not applicable) — easier to type-check
-without branching. `blame` does the same on miss: every event field is
-empty, `error` carries the "no history found" message. Same conventions
-as before, just consistent payloads.
-
-**`CLAUDE.md` ↔ `docs/architecture.md` split.** `CLAUDE.md` is now a
-slim agent-instructions file (sources of truth, code conventions,
-version bump checklist). Architecture, data model, MCP tool reference,
-full CLI reference, and the phase plan all moved to
-`docs/architecture.md`.
-
-See [`CHANGELOG.md`](CHANGELOG.md) for the full list and reasoning.
 
 ---
 

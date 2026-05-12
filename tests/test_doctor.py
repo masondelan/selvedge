@@ -9,7 +9,9 @@ contract callers will rely on.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import time
 
 import pytest
 from click.testing import CliRunner
@@ -306,3 +308,57 @@ def test_doctor_cli_includes_log_level_warning(runner, tmp_path, monkeypatch):
     result = runner.invoke(cli, ["doctor"])
     assert "BOGUS" in result.output
     assert "SELVEDGE_LOG_LEVEL" in result.output
+
+
+# ---------------------------------------------------------------------------
+# v0.3.5 — last_backup row + schema_migrations downgrade detection
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_last_backup_info_when_no_backups_and_small_db(tmp_path):
+    """No backups + tiny events table → INFO (not yet a data-loss exposure)."""
+    SelvedgeStorage(tmp_path / ".selvedge" / "selvedge.db")
+    checks = _doctor_checks()
+    assert _status_for(checks, "Last backup") == "INFO"
+
+
+def test_doctor_last_backup_info_when_fresh(tmp_path):
+    """A backup ≤7d old → INFO with the timestamp."""
+    from selvedge import backup as backup_mod
+    db = tmp_path / ".selvedge" / "selvedge.db"
+    SelvedgeStorage(db)
+    backup_mod.create_backup(db)
+
+    checks = _doctor_checks()
+    row = next(c for c in checks if c["label"] == "Last backup")
+    assert row["status"] == "INFO"
+
+
+def test_doctor_last_backup_warns_when_stale(tmp_path):
+    """An old backup (mtime >7d ago) → WARN."""
+    from selvedge import backup as backup_mod
+    db = tmp_path / ".selvedge" / "selvedge.db"
+    SelvedgeStorage(db)
+    backup_mod.create_backup(db)
+    snap = next(backup_mod.default_backups_dir(db).glob("selvedge-*.db"))
+    old = time.time() - (30 * 86400)
+    os.utime(snap, (old, old))
+
+    checks = _doctor_checks()
+    row = next(c for c in checks if c["label"] == "Last backup")
+    assert row["status"] == "WARN"
+
+
+def test_doctor_schema_downgrade_fails(tmp_path):
+    """schema_migrations row from a future version → FAIL (downgrade signal)."""
+    db = tmp_path / ".selvedge" / "selvedge.db"
+    SelvedgeStorage(db)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+            (9999, "future_migration", "2030-01-01T00:00:00Z"),
+        )
+        conn.commit()
+
+    checks = _doctor_checks()
+    assert _status_for(checks, "Schema version") == "FAIL"

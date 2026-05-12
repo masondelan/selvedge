@@ -30,7 +30,7 @@ For everything else:
 - **Rich for all terminal output.** No bare `print()` in `cli.py`.
 - **`--json` flag on every read command.** Machine-readable output is a first-class concern.
 - **Type hints everywhere.** Python 3.10+ syntax (`X | Y`, `list[dict]`, etc.).
-- **Destructive actions require both interactive consent AND environment-level opt-in.** Any command that can delete events from the store (e.g. `selvedge prune --include-events` in v0.3.5) must require BOTH a confirmation prompt AND `SELVEDGE_DESTRUCTIVE=1` in the environment. Defends against the cron / non-interactive `--yes` footgun.
+- **Destructive actions require both interactive consent AND environment-level opt-in.** Any command that can delete events from the store (e.g. `selvedge prune --include-events`, landing in v0.3.10 alongside `.selvedge/config.toml`) must require BOTH a confirmation prompt AND `SELVEDGE_DESTRUCTIVE=1` in the environment. Defends against the cron / non-interactive `--yes` footgun.
 
 ---
 

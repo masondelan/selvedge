@@ -107,6 +107,82 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.6
+
+Two themes in one release as a one-time exception to the single-theme
+cadence: **stay-current** (background PyPI version check) and
+**retention basics** (`selvedge prune` for the `tool_calls` table).
+**Drop-in upgrade for anyone on 0.3.5.**
+
+### Stay-current
+
+**Background version check in `selvedge` (the CLI only — never the MCP
+server).** A daemon thread fetches the latest published version from
+PyPI's JSON endpoint, caches the result at
+`~/.selvedge/update_check.json` (user-global so you don't re-check per
+project), and on process exit prints to stderr:
+
+```
+selvedge: v0.3.7 available (you're on 0.3.6) — https://selvedge.sh/upgrade
+```
+
+The notice is printed via `atexit` so it appears *after* the command's
+output, never interleaved. Cache TTL is 24h, matching `gh` and `npm`.
+
+**Generous suppression.** The check is disabled when any of
+`SELVEDGE_NO_UPDATE_CHECK=1`, `SELVEDGE_QUIET=1`, or `CI` is set in
+the environment, when stderr isn't a TTY (piping, agent stdio,
+`--json` to a file), and on dev / editable installs. The TTY gate is
+re-checked at print time too — even a cached notice can't pollute
+redirected output. The 1.5s fetch timeout and the no-raise posture of
+every code path mean a network blip can't slow or break the CLI.
+
+**`selvedge-server` stays silent.** The check is wired into the CLI
+group callback only — the MCP server's stdio is the JSON-RPC channel
+and an inadvertent stderr write would surface in the calling agent's
+logs as noise.
+
+### Retention basics
+
+**`selvedge prune` — trim old `tool_calls` rows.** Default retention
+is 90 days; `--days N` overrides. The default is long enough that the
+previous month's agents are still in the data. Every run appends a
+tab-separated audit line to `.selvedge/prune.log` so the cadence is
+visible later — even empty prunes log, so you can tell the difference
+between "no prunes yet" and "nothing to prune."
+
+```
+selvedge prune                # 90-day default
+selvedge prune --days 30      # tighter window
+selvedge prune --json         # for cron / scripting
+```
+
+Only `tool_calls` is pruned in this release. The destructive
+events-table path waits for `.selvedge/config.toml` in v0.3.10 and
+will require both `SELVEDGE_DESTRUCTIVE=1` *and* an interactive
+confirmation — the cron / non-interactive `--yes` footgun is
+defended against by design.
+
+**Doctor — `Last prune` row + oversized-`tool_calls` WARN.** The
+doctor table now surfaces the tail of `.selvedge/prune.log` (most
+recent timestamp, rows pruned, day threshold) and WARNs when the
+`tool_calls` table exceeds 100k rows so users get a nudge to run
+`selvedge prune` before the noise table gets large.
+
+### Note on cadence
+
+This release combines two themes — a **one-time exception** to the
+single-theme-per-release discipline locked in on 2026-05-10. The
+retention work could have slipped to v0.3.7 (entity foundation +
+`prior_attempts` wedge), but combining here avoided a renumbering
+pass on the phase plan. Single-theme resumes at v0.3.7.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the full list including the
+new tests in `test_prune.py`, `test_update_check.py`, and the
+`test_doctor.py` extension.
+
+---
+
 ## What's new in v0.3.5
 
 The recovery-basics release. v0.3.1 made the runtime safe; v0.3.2 made
@@ -151,51 +227,6 @@ write attempts schema work it doesn't understand.
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list including the
 24 new tests across `test_verify.py`, `test_backup.py`, and the
 `test_doctor.py` extension.
-
----
-
-## What's new in v0.3.4
-
-The first-run release. The install funnel was six manual steps with
-three documentation lookups; v0.3.4 collapses it to one command.
-**Drop-in upgrade for anyone on 0.3.3.**
-
-**`selvedge setup` — interactive first-run wizard.** Detects which AI
-tools are already on your machine (Claude Code, Cursor, Copilot) and
-walks through every install step in one pass: writes the MCP entry
-into each tool's config, drops the canonical agent-instructions block
-into your project's `CLAUDE.md` / `.cursorrules` / copilot-instructions
-file, runs `selvedge init` if needed, installs the post-commit hook.
-Every modified file gets a `.bak` next to it before any change reaches
-disk; re-running is a no-op. For CI bootstrap and devcontainer
-`postCreateCommand`: `selvedge setup --non-interactive --yes`.
-
-**`selvedge prompt` — canonical agent instructions on tap.** Prints
-the recommended system-prompt block to stdout, or installs it
-idempotently into a target file with `--install <file>`. The block is
-sentinel-bracketed (`<!-- selvedge:start -->` / `<!-- selvedge:end -->`),
-so re-running `--install` updates the bracketed region without
-disturbing the rest of the file. No more copy-paste drift between
-releases.
-
-**`selvedge watch` — live tail of new events.** Polls the SQLite store
-at `--interval` (default 1s) and prints each new event as it lands,
-Rich-formatted. Filters mirror `selvedge history` exactly: `--since`,
-`--entity`, `--project`, `--agent`. `--json` for piping into `jq`.
-Ctrl-C exits cleanly. Trust-but-verify surface for users who want to
-see what their agent is actually capturing in real time, and a much
-better debugging tool than running `selvedge status` repeatedly.
-
-**Better empty-state diagnosis in `selvedge status` and `doctor`.**
-The "no events yet" message now distinguishes "MCP entry installed
-but agent hasn't reloaded" (5-minute restart-your-agent grace) from
-"MCP entry not installed anywhere we can see" (run `selvedge setup`).
-Surfaces the actual config path in either case so you know where to
-look.
-
-See [`CHANGELOG.md`](CHANGELOG.md) for the full list including the
-test-coverage additions (54 new tests across `test_setup.py`,
-`test_prompt.py`, `test_watch.py`).
 
 ---
 

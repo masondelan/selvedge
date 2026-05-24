@@ -401,6 +401,38 @@ class SelvedgeStorage:
             ).fetchone()
         return row[0] if row else None
 
+    def count_tool_calls(self) -> int:
+        """Total rows in the ``tool_calls`` table.
+
+        Used by ``selvedge doctor`` to drive the oversized-table WARN row
+        introduced in v0.3.6. Exposed as its own method so doctor tests
+        can stub the count via monkeypatch without inserting 100k rows.
+        """
+        with self._session() as conn:
+            return conn.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0]
+
+    @_retry_on_locked
+    def prune_tool_calls(self, cutoff: str) -> int:
+        """Delete ``tool_calls`` rows older than ``cutoff`` (exclusive).
+
+        ``cutoff`` is a UTC ISO timestamp; rows with ``timestamp < cutoff``
+        are removed. Returns the number of rows deleted.
+
+        Wraps with :func:`_retry_on_locked` so a concurrent ``log_change``
+        insert can't lose the prune to a transient ``database is locked``
+        in WAL mode.
+
+        v0.3.6 only prunes ``tool_calls``; the events-table prune path
+        lands in v0.3.10 alongside ``.selvedge/config.toml`` and an
+        explicit ``SELVEDGE_DESTRUCTIVE=1`` gate.
+        """
+        with self._session() as conn:
+            cursor = conn.execute(
+                "DELETE FROM tool_calls WHERE timestamp < ?",
+                (cutoff,),
+            )
+            return cursor.rowcount
+
     # ------------------------------------------------------------------
     # Read — change events
     # ------------------------------------------------------------------

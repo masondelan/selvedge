@@ -6,6 +6,110 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.6] — 2026-05-24
+
+Two themes in one release — a one-time exception to the single-theme
+cadence so the retention-basics work can ship without a renumbering
+pass on the phase plan. v0.3.4 made install one command; v0.3.5 made
+recovery possible; v0.3.6 closes the version-drift gap **and** bounds
+the noise table so old `tool_calls` telemetry doesn't accumulate
+forever. **Drop-in upgrade for anyone on 0.3.5.**
+
+### Added — stay-current
+
+- **Background PyPI version check in the CLI.** On every `selvedge`
+  invocation, a daemon thread fetches the latest published version
+  from PyPI's JSON endpoint and caches the result at
+  `~/.selvedge/update_check.json` (user-global, not per-project — a
+  user with ten Selvedge projects doesn't pay for ten checks). If a
+  newer release exists, a one-line notice is printed to stderr on
+  process exit:
+
+  ```
+  selvedge: v0.3.7 available (you're on 0.3.6) — https://selvedge.sh/upgrade
+  ```
+
+  The notice prints *after* the command's output (via `atexit`) so it
+  never interleaves with `selvedge log`, `selvedge watch`, or `--json`
+  pipelines. Cache TTL is 24h — matches what `gh` and `npm` use; `pip`
+  uses 7 days but that's longer than most users want.
+
+- **Generous suppression.** The check is disabled when any of
+  `SELVEDGE_NO_UPDATE_CHECK=1`, `SELVEDGE_QUIET=1`, or `CI` is set in
+  the environment; when stderr isn't a TTY (piping, agent stdio,
+  redirected output); and on dev / editable installs
+  (`pip install -e .` where the version contains `.dev` / `+` / `rc`).
+  The TTY gate is also re-checked at print time, so even a cached
+  notice can't pollute redirected output.
+
+- **Soft-fail everywhere.** The fetch has a 1.5-second timeout and
+  every code path in `selvedge/update_check.py` swallows exceptions —
+  a network blip, an unwritable `$HOME`, or a malformed PyPI response
+  can never affect the command the user invoked. The upgrade-URL is
+  the only hard-coded copy; pointing at `selvedge.sh/upgrade` rather
+  than inlining `pip install -U selvedge` keeps the notice correct
+  across PyPI / Smithery / Glama users.
+
+### Added — retention basics
+
+- **`selvedge prune` — trim old `tool_calls` rows.** Hardcoded default
+  of 90 days; `--days N` overrides. The 90-day default is long enough
+  that the previous month's agents are still in the data, and is
+  surfaced explicitly in `selvedge prune --help`. **Only `tool_calls`
+  is pruned in this release** — the events-table prune path waits for
+  `.selvedge/config.toml` in v0.3.10 and will require both
+  `SELVEDGE_DESTRUCTIVE=1` and an interactive confirmation. `--json`
+  for machine output.
+
+- **`.selvedge/prune.log` audit trail.** Every prune appends a
+  tab-separated one-liner — `<utc-iso>\t<count_pruned>\t<days_threshold>` —
+  mirroring the format of the post-commit `.selvedge/hook.log`. The
+  log is written even when 0 rows were deleted, so cadence is visible
+  in the doctor row regardless of whether a given run had work to do.
+
+- **Doctor — `Last prune` row.** Parses the tail of
+  `.selvedge/prune.log` and surfaces the most recent timestamp,
+  pruned-row count, and day threshold. INFO when present, INFO with
+  a "run `selvedge prune`" nudge when the log doesn't exist yet.
+
+- **Doctor — `tool_calls size` WARN at >100k rows.** A rough oversized-
+  table signal that points users at `selvedge prune`. Threshold lives
+  at `selvedge.prune.TOOL_CALLS_WARN_ROWS` and is revisitable once the
+  v0.3.5/v0.3.6 telemetry has bedded in.
+
+### Changed
+
+- **`selvedge-server` stays silent.** The update check is deliberately
+  wired into `selvedge/cli.py` only — not `server.py`. The MCP
+  server's stdio is the JSON-RPC channel; a stray stderr write from a
+  daemon thread would surface in the calling agent's logs as noise.
+
+### Tests
+
+- **`tests/test_update_check.py`** (24 tests) — covers env-var and TTY
+  gating, dev-install detection, 24h TTL behavior, malformed-cache
+  recovery, the network-error / timeout / unexpected-exception soft
+  fails, the `packaging`-vs-fallback comparison paths, and the
+  notice's once-per-process idempotency. **No test in the module hits
+  the network** — `urlopen` is monkeypatched everywhere.
+- **`tests/test_prune.py`** (10 tests) — covers old-row deletion,
+  preserve-recent semantics, `--days` override, log-line shape,
+  empty-table still-logs, append-on-subsequent-run, last-line parsing,
+  missing-log handling, and the CLI `--json` shape.
+- **`tests/test_doctor.py`** — +2 tests for the new `Last prune` row
+  (parsed from the log) and the oversized-`tool_calls` WARN (stubbed
+  via a monkeypatched count helper rather than inserting 100k rows).
+
+### Note on cadence
+
+This release combines two themes — stay-current (Phase 2.11 leftover,
+deferred from v0.3.5) and retention basics (Phase 2.12). It is a
+**one-time exception** to the single-theme-per-release discipline
+locked in on 2026-05-10. Single-theme resumes at v0.3.7 (entity
+foundation + `prior_attempts` wedge).
+
+---
+
 ## [0.3.5] — 2026-05-11
 
 The recovery-basics release. v0.3.1 made the runtime safe; v0.3.2 made

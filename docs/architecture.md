@@ -525,17 +525,21 @@ github.com).
 > destructive operations on the events table in this release — the
 > events-prune path requires `.selvedge/config.toml` (v0.3.10) and
 > ships then. Theme: *bound the noise.*
+>
+> **Shipped combined with the stay-current work as v0.3.6** — a
+> one-time exception to the single-theme-per-release discipline
+> locked in on 2026-05-10. Single-theme resumes at v0.3.7.
 
-- [ ] **`selvedge prune` command** — prunes `tool_calls` only in this
+- [x] **`selvedge prune` command** — prunes `tool_calls` only in this
       release. Hardcoded default of 90 days; CLI flag `--days N`
       overrides. **No `--include-events` flag in v0.3.6** — the
       destructive path waits for `config.toml` in v0.3.10. Every
       prune writes a one-liner to `.selvedge/prune.log` (timestamp,
       count pruned, days threshold) so the pattern is visible later.
-- [ ] **Doctor — `prune.log` tail row + oversized-`tool_calls`
+- [x] **Doctor — `prune.log` tail row + oversized-`tool_calls`
       warning** (WARN at row-count >100k for `tool_calls`; threshold
       revisitable once v0.3.5 telemetry has bedded in).
-- [ ] **Tests** — `test_prune.py` (~8), `test_doctor.py` extension
+- [x] **Tests** — `test_prune.py` (~8), `test_doctor.py` extension
       (~2). Soft budget: ≤15 new tests.
 
 #### Risks acknowledged & mitigations

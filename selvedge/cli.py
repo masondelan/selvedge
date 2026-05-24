@@ -18,6 +18,7 @@ Commands:
   selvedge backfill-commit    Stamp git_commit on recent events
   selvedge import             Import migration files
   selvedge export             Export history as JSON or CSV
+  selvedge prune              Trim old tool_calls rows (90-day retention)
 """
 
 import json
@@ -33,6 +34,8 @@ from rich.console import Console
 from rich.table import Table
 
 from . import backup as backup_mod
+from . import prune as prune_mod
+from . import update_check as update_check_mod
 from . import verify as verify_mod
 from .config import get_db_path, init_project, resolve_db_path
 from .logging_config import LOG_LEVEL_ENV, configure_logging
@@ -201,6 +204,17 @@ def cli():
     # Configure structured logging once per CLI invocation. Verbosity is
     # controlled by SELVEDGE_LOG_LEVEL (default WARNING).
     configure_logging()
+
+    # Background PyPI version check. Fires a daemon thread that fetches
+    # the latest published version into ~/.selvedge/update_check.json
+    # (at most once per 24h, gated by TTY / CI / suppression env vars).
+    # The notice itself is printed on atexit so it appears after the
+    # command's output rather than interleaved with it. All entry points
+    # in update_check are no-raise — a network blip never affects the
+    # CLI. Intentionally not wired into selvedge-server: see the module
+    # docstring in selvedge/update_check.py.
+    update_check_mod.check_for_update_async()
+    update_check_mod.register_atexit_notice()
 
 
 # ---------------------------------------------------------------------------
@@ -543,6 +557,51 @@ def _doctor_checks() -> list[dict]:
             "Last backup", "INFO", "no DB yet — nothing to back up"
         ))
 
+    # 9. Last prune — parsed from .selvedge/prune.log if present.
+    # An INFO row when the log exists, a softer INFO when it doesn't:
+    # absence is not a failure, just a "you haven't run it yet" signal.
+    log_path = prune_mod.prune_log_path(resolved.path)
+    last_prune = prune_mod.last_prune_line(log_path)
+    if last_prune is None:
+        checks.append(_check(
+            "Last prune", "INFO",
+            "no prune.log yet — run `selvedge prune` to start trimming "
+            "tool_calls"
+        ))
+    else:
+        ts, count, threshold = last_prune
+        checks.append(_check(
+            "Last prune", "INFO",
+            f"{ts}  ({count} row(s) pruned, {threshold}-day threshold)"
+        ))
+
+    # 10. tool_calls row count — WARN when oversized. Counter is
+    # exposed as its own storage method so tests can stub it without
+    # actually inserting 100k rows.
+    if db_exists:
+        try:
+            tc_count = SelvedgeStorage(resolved.path).count_tool_calls()
+        except sqlite3.Error as e:
+            checks.append(_check(
+                "tool_calls size", "FAIL", f"sqlite error: {e}"
+            ))
+        else:
+            if tc_count > prune_mod.TOOL_CALLS_WARN_ROWS:
+                checks.append(_check(
+                    "tool_calls size", "WARN",
+                    f"{tc_count:,} rows (threshold {prune_mod.TOOL_CALLS_WARN_ROWS:,}) — "
+                    f"run `selvedge prune` to trim old telemetry"
+                ))
+            else:
+                checks.append(_check(
+                    "tool_calls size", "PASS",
+                    f"{tc_count:,} rows (threshold {prune_mod.TOOL_CALLS_WARN_ROWS:,})"
+                ))
+    else:
+        checks.append(_check(
+            "tool_calls size", "INFO", "no DB yet"
+        ))
+
     return checks
 
 
@@ -563,6 +622,8 @@ def doctor(as_json):
       • whether SELVEDGE_LOG_LEVEL is set to a recognized value
       • last backup freshness (INFO ≤7d, WARN >7d, FAIL when no backups
         exist AND the events table has ≥10k rows)
+      • last prune from .selvedge/prune.log (timestamp, rows pruned, threshold)
+      • tool_calls table size (WARN above 100k rows — run `selvedge prune`)
 
     \b
     Exit codes:
@@ -748,6 +809,60 @@ def backup(output_path, as_json):
     console.print(f"  Size:    [dim]{result.bytes_written:,} bytes[/dim]")
     if result.pruned:
         console.print(f"  Pruned:  [dim]{len(result.pruned)} older snapshot(s)[/dim]")
+    console.print()
+
+
+# ---------------------------------------------------------------------------
+# prune
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--days",
+    default=prune_mod.DEFAULT_DAYS,
+    show_default=True,
+    type=int,
+    help=(
+        "Delete tool_calls older than this many days. Default of 90 days is "
+        "long enough that the previous month's agents are still in the data."
+    ),
+)
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def prune(days, as_json):
+    """Trim old ``tool_calls`` rows. v0.3.6 prunes telemetry only.
+
+    \b
+    Default retention is 90 days. Pass ``--days N`` to override.
+    Every run appends a one-liner to ``.selvedge/prune.log`` so the
+    cadence is visible in ``selvedge doctor``.
+
+    \b
+    No ``--include-events`` flag in v0.3.6 — the destructive
+    events-prune path waits for ``.selvedge/config.toml`` in v0.3.10
+    and requires both ``SELVEDGE_DESTRUCTIVE=1`` and an interactive
+    confirmation.
+
+    \b
+    Examples:
+      selvedge prune
+      selvedge prune --days 30
+      selvedge prune --json
+    """
+    db_path = get_db_path()
+    result = prune_mod.run_prune(db_path, days=days)
+
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2))
+        return
+
+    console.print(
+        f"\n[bold green]✓ Pruned[/bold green] "
+        f"[bold]{result.pruned}[/bold] tool_call row(s) older than "
+        f"[bold]{result.days_threshold}[/bold] day(s)"
+    )
+    console.print(f"  Cutoff:  [dim]{result.cutoff}[/dim]")
+    console.print(f"  Log:     [dim]{result.log_path}[/dim]")
     console.print()
 
 

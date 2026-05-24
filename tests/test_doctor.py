@@ -362,3 +362,40 @@ def test_doctor_schema_downgrade_fails(tmp_path):
 
     checks = _doctor_checks()
     assert _status_for(checks, "Schema version") == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# Last prune row + oversized tool_calls WARN (v0.3.6)
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_last_prune_reflects_log_tail(tmp_path):
+    """``Last prune`` row surfaces the most recent prune.log entry."""
+    from selvedge import prune as prune_mod
+    db = tmp_path / ".selvedge" / "selvedge.db"
+    SelvedgeStorage(db)
+    prune_mod.run_prune(db, days=30)
+
+    checks = _doctor_checks()
+    row = next(c for c in checks if c["label"] == "Last prune")
+    assert row["status"] == "INFO"
+    assert "30-day threshold" in row["detail"]
+
+
+def test_doctor_tool_calls_warns_when_oversized(tmp_path, monkeypatch):
+    """Counter above 100k → WARN row recommending `selvedge prune`."""
+    from selvedge import prune as prune_mod
+    db = tmp_path / ".selvedge" / "selvedge.db"
+    SelvedgeStorage(db)
+
+    # Stub the count helper rather than inserting 100k rows.
+    monkeypatch.setattr(
+        SelvedgeStorage,
+        "count_tool_calls",
+        lambda self: prune_mod.TOOL_CALLS_WARN_ROWS + 1,
+    )
+
+    checks = _doctor_checks()
+    row = next(c for c in checks if c["label"] == "tool_calls size")
+    assert row["status"] == "WARN"
+    assert "selvedge prune" in row["detail"]

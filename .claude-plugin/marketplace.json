@@ -1,8 +1,8 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "selvedge",
   "owner": {
-    "name": "Mason Delan",
-    "url": "https://github.com/masondelan"
+    "name": "Mason Delan"
   },
   "plugins": [
     {

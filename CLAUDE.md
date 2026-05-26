@@ -57,7 +57,7 @@ Never write to the real DB in tests — always set `SELVEDGE_DB` to a `tmp_path`
 
 When the user asks for a version bump:
 
-1. Update `pyproject.toml` AND `selvedge/__init__.py` AND `manifest.json` AND `server.json` (all four must match — `server.json` is the Glama / catalog descriptor and missed v0.3.3, see CHANGELOG).
+1. Update `pyproject.toml` AND `selvedge/__init__.py` AND `manifest.json` AND `server.json` AND `.claude-plugin/plugin.json` (all five must match — `server.json` is the Glama / catalog descriptor and missed v0.3.3, see CHANGELOG; `.claude-plugin/plugin.json` is the Claude Code plugin descriptor added in v0.3.7).
 2. **Run `pytest`, `ruff check`, AND `mypy selvedge/` locally** — the GitHub Actions lint job runs all three, and a CI-only mypy failure means your CI badge goes red post-publish (happened on v0.3.4 with the `ToolAnnotations` dict→model issue). Catch it on your machine first.
 3. Tag the commit; the PyPI publish workflow runs on tag push (OIDC trusted publisher is pinned to the workflow filename — don't rename that file without updating PyPI config first).
 4. For Smithery: hand-zip the bundle (NOT `mcpb pack` — there's an MCPB-vs-Smithery schema mismatch around per-tool `inputSchema`), then `smithery mcp publish`.

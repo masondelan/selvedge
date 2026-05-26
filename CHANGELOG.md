@@ -31,6 +31,19 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ### Added
 
+- **Claude Code plugin marketplace scaffolding.** Adds
+  `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`,
+  and `.mcp.json` at the repo root, declaring this repo as a
+  self-hosted Claude Code marketplace. After the next tag, users
+  can install Selvedge into Claude Code with two commands:
+  `/plugin marketplace add masondelan/selvedge`, then
+  `/plugin install selvedge@selvedge`. No Anthropic gatekeeping
+  required — Track 0 of the plugin-marketplace rollout. Submission
+  to `claude-plugins-official` / `claude-plugins-community` is
+  tracked separately. The version field in
+  `.claude-plugin/plugin.json` is now a fifth sibling to
+  `pyproject.toml` / `selvedge/__init__.py` / `manifest.json` /
+  `server.json` — version-bump checklist in `CLAUDE.md` updated.
 - **`docs/og-image.png` — wide wordmark banner for social previews.**
   2064×512 'selvedge' wordmark with the red selvedge edge stitch.
   Referenced from `og:image` and `twitter:image` meta tags on the

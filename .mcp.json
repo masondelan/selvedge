@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "selvedge": {
+      "command": "selvedge-server"
+    }
+  }
+}

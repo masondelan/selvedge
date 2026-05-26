@@ -1,0 +1,11 @@
+{
+  "name": "selvedge",
+  "version": "0.3.6",
+  "description": "Change tracking for AI-era codebases — captures the why behind every change as the agent makes it. git blame for semantic entities (DB columns, functions, env vars, deps), with reasoning written by the agent in the same context that produced the change.",
+  "author": {
+    "name": "Mason Delan",
+    "url": "https://github.com/masondelan"
+  },
+  "homepage": "https://selvedge.sh",
+  "license": "MIT"
+}

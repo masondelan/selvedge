@@ -6,6 +6,51 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Server icon redesigned.** The "stitched timeline" mark from
+  v0.3.3 is replaced with a minimalist square mark — a navy 'S'
+  beside a red selvedge edge stitch on cream. Lives at
+  `docs/icon.png` (canonical tracked location), referenced by
+  `manifest.json`, the selvedge.sh favicon / apple-touch-icon, and
+  Smithery thumbnail. Verified to hold up from 16×16 favicon scale
+  through Smithery thumbnail render sizes.
+- **`manifest.json` icon path repointed from `assets/icon.png` to
+  `docs/icon.png`.** `assets/` is now gitignored as internal-only,
+  so a fresh clone no longer has `assets/icon.png` to bundle. The
+  byte-identical-but-tracked copy at `docs/icon.png` becomes the
+  single source — bundle, site, and social previews now build from
+  the same file.
+- **`twitter:card` upgraded from `summary` to `summary_large_image`**
+  on `docs/index.html`, `docs/comparison.html`, and `docs/faq.html`.
+  The new wide og-image banner would be center-cropped to a small
+  square by the summary card; the large-image card renders the full
+  banner.
+
+### Added
+
+- **`docs/og-image.png` — wide wordmark banner for social previews.**
+  2064×512 'selvedge' wordmark with the red selvedge edge stitch.
+  Referenced from `og:image` and `twitter:image` meta tags on the
+  three main site pages. Favicon and apple-touch-icon continue to
+  use the square `docs/icon.png` mark — wide banner for share
+  previews, tight square mark for tab and home-screen icons.
+
+### Internal
+
+- **Bulk `launch/` and `assets/` rules in `.gitignore`** (PR #8).
+  Replaces six individual `launch/` sub-path entries with a single
+  bulk rule (matches the `.mcpbignore` convention so MCPB builds
+  are unaffected). Adds `assets/` and three new strategy-doc paths
+  (`docs/strategy-2026-q3.md`, `docs/top-priority-actions.md`,
+  `docs/seo-gsc-primer.md`) alongside the existing internal-docs
+  block. No public-facing content change; existing local copies
+  remain on disk.
+
+---
+
 ## [0.3.6] — 2026-05-24
 
 Two themes in one release — a one-time exception to the single-theme

@@ -388,9 +388,12 @@ Rules:
       the decision is intentional, not accidental.
 - [x] **Custom server icon.** "Stitched timeline" mark — a horizontal
       running stitch where each visible stitch is a captured change
-      event. Lives at `assets/icon.svg` and a 512×512 `assets/icon.png`,
-      shipped in the Smithery bundle. Replaces the auto-generated
-      mosaic.
+      event. Originally lived at `assets/icon.svg` and a 512×512
+      `assets/icon.png`, shipped in the Smithery bundle. Replaces the
+      auto-generated mosaic. *(Superseded post-v0.3.6: redesigned to
+      a minimalist 'S' + selvedge edge stitch mark; current art lives
+      at `docs/icon.png` and is referenced by `manifest.json`. See
+      [Unreleased] in `CHANGELOG.md`.)*
 - [x] **Tool-level descriptions dedented at startup.** Each tool's
       docstring runs through `inspect.cleandoc` once at import time so
       `tools/list` doesn't leak the function-body indent.

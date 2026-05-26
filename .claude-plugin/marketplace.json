@@ -1,6 +1,8 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "selvedge",
+  "metadata": {
+    "description": "Self-hosted marketplace for Selvedge — change tracking for AI-era codebases. Captures the why behind every change as the agent makes it."
+  },
   "owner": {
     "name": "Mason Delan"
   },

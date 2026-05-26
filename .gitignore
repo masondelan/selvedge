@@ -38,15 +38,6 @@ Thumbs.db
 .env
 .env.local
 
-# Internal strategy docs — not for public consumption
-docs/long-term-thesis.md
-docs/engagement-strategy.md
-docs/content-prompts/
-docs/directory-audits/
-docs/release-content/
-launch/listings/
-launch/engagement/
-
 # Internal — strategy, working notes, dashboard system. Surfaced in
 # docs/dashboard.html → "internal" section so they stay visible locally.
 docs/long-term-thesis.md
@@ -58,13 +49,23 @@ docs/content-prompts/
 docs/directory-audits/
 docs/release-content/
 docs/mcp-registry-submission.md
-launch/listings/
-launch/engagement/
-launch/seo-rewrite-handoff.md
-launch/awesome-lists-general.md
-launch/twitter-thread.md
-launch/newsletters.md
-launch/sales-faq.md
+docs/strategy-2026-q3.md
+docs/top-priority-actions.md
+docs/seo-gsc-primer.md
+
+# Internal — all launch / distribution drafts (positioning content,
+# submission templates, per-release playbooks). Bundle excludes via
+# .mcpbignore, so removing from tracking does not affect Smithery
+# publish.
+launch/
+
+# Internal — brand assets. Local only as of 2026-05-25.
+# CAVEAT: manifest.json references assets/icon.png and the MCPB
+# bundle build expects the file to exist at that path. If you build
+# the bundle on a fresh clone, restore assets/icon.png from your
+# local copy first (or repoint manifest.json at docs/icon.png, which
+# is byte-identical and already tracked).
+assets/
 
 # Internal — competitive intel (kept local only, never committed)
 *competitive-teardown*.docx

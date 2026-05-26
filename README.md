@@ -315,6 +315,26 @@ For CI bootstrap or `devcontainer.json` `postCreateCommand`:
 selvedge setup --non-interactive --yes
 ```
 
+### Claude Code plugin marketplace (alternative)
+
+If you're a Claude Code user and want to install Selvedge through
+the official plugin marketplace flow, run these inside Claude Code
+*after* `pip install selvedge`:
+
+```
+/plugin marketplace add masondelan/selvedge
+/plugin install selvedge@selvedge
+```
+
+The plugin system wires the MCP server into Claude Code, but it
+does **not** install the Python package for you — `pip install
+selvedge` first, otherwise the `selvedge-server` command won't
+exist on your PATH and the plugin can't start. For the full setup
+(post-commit hook, project `CLAUDE.md` instructions block, etc.),
+`selvedge setup` is still the recommended path; the plugin
+marketplace install is just the lightweight Claude-Code-only
+entry point.
+
 **Verify the wiring** — open a second terminal in the same project:
 
 ```bash

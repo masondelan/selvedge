@@ -82,7 +82,20 @@ The phase plan lives in `docs/architecture.md`.
 
 ---
 
+## Idea capture pipeline
+
+Good ideas raised in chats must not evaporate when the session ends — capture them. This is Selvedge's own thesis (intent that lives only in chat history is lost intent) applied to our own workflow.
+
+- **What counts:** any concrete, non-trivial Selvedge idea (feature, doc, positioning, infra, content angle) that surfaces in a chat. Off-topic / non-Selvedge ideas stay out. When in doubt, capture — Mason can say "log that" to force one in or "skip" to drop one.
+- **Where:** append a stub to `docs/ideas-backlog.json` — the single canonical store. Schema and status legend live in the file's `_comment` / `status_legend`. Field convention matches the rest of the codebase: every field always populated, never `null` (empty string / empty list for absent).
+- **At capture time:** write the stub with `status: "captured"`, the `captured` date, `source`, a one-line `summary`, and a `rationale`. Leave the `research` fields empty — the weekly regen fills them. Don't research at capture time unless Mason asks.
+- **Lifecycle:** `captured` → `researched` (weekly enrich pass) → `promoted` (onto the work board / plays; `promoted_to` names the slot) | `parked` | `dropped`. Parked and dropped ideas stay on the record with a reason, so a defer is visible and not re-litigated from zero.
+- **Surfacing:** the `selvedge-weekly-dashboard` task enriches new `captured` ideas and renders them in the "ideas / research backlog" section of `docs/dashboard.html`. See `docs/dashboard-task-prompt.md`.
+
+---
+
 ## Scheduled recurring tasks (managed by Cowork)
 
 - **Weekly phase-plan drift check** — compare `CHANGELOG.md` against the phase plan in `docs/architecture.md` and flag any shipped items still showing as unchecked.
 - **Weekly coverage report** — run `scripts/coverage_check.py` against the git log and report the `log_change` call ratio per commit.
+- **Weekly idea backlog enrich + render** — part of the `selvedge-weekly-dashboard` run: research new `captured` ideas in `docs/ideas-backlog.json`, promote/park as warranted, and render the "ideas / research backlog" dashboard section. See "Idea capture pipeline" above.

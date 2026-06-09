@@ -45,6 +45,7 @@ docs/engagement-strategy.md
 docs/dashboard.html
 docs/dashboard-data.json
 docs/dashboard-task-prompt.md
+docs/ideas-backlog.json
 docs/content-prompts/
 docs/directory-audits/
 docs/release-content/
@@ -71,3 +72,8 @@ assets/
 *competitive-teardown*.docx
 *-teardown.docx
 usegitai-competitive-teardown.docx
+
+# Internal — staging for the selvedge-site repo (a one-time SEO patch with
+# its own apply guide). Belongs in masondelan/selvedge-site, not the code
+# repo; kept here locally only.
+_selvedge-site-seo-patch/

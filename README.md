@@ -107,6 +107,89 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.7
+
+The brand-defining release: **`prior_attempts`** — the tool that lets an
+agent ask "was this tried before, and how did it turn out?" *before* it
+starts — plus the **entity-canonicalization foundation** it sits on.
+**Drop-in upgrade for anyone on 0.3.6.**
+
+### `prior_attempts` — the wedge
+
+Given an entity (or a free-text description), `prior_attempts` returns the
+prior change attempts on it, each annotated with an **inferred outcome**
+(`reverted` / `active`), a **confidence** tier, and — for reverted attempts —
+the reasoning explaining *why it was rejected*. Outcome is inferred from
+add→remove proximity (no LLM, ever — it's a templated query over reasoning
+the agents wrote live).
+
+Worked example — an agent about to re-add a column it doesn't know was
+already pulled:
+
+```jsonc
+// The agent is asked to keep mobile users signed in across restarts. Its
+// instinct is to add a persistent token column. It checks FIRST:
+prior_attempts({ "entity_path": "users.auth_token" })
+
+// → one high-confidence hit: this was tried and reverted.
+[
+  {
+    "entity_path": "users.auth_token",
+    "change_type": "add",
+    "reasoning": "Store a per-user auth token so the app stays signed in.",
+    "outcome": "reverted",
+    "confidence": "proximity_high",
+    "outcome_reasoning": "Reverted: DB tokens couldn't be revoked without a write; moved to short-lived JWTs."
+  }
+]
+```
+
+The agent reads the rejection reason and **changes its plan** — a
+refresh-token endpoint on the stateless-JWT path, instead of re-introducing
+the column the team already pulled. Full
+[demo transcript](docs/demos/prior-attempts.md).
+
+**Conservative by design.** `min_confidence` defaults to `proximity_high`,
+so `prior_attempts` only returns the clear "tried, then reverted" signal —
+an empty list is the trustworthy "nothing to worry about" answer, not noise.
+Pass `min_confidence="proximity_low"` to widen recall. Pull-only: the agent
+decides when to ask. This is the
+["alternatives tried, rejected paths"](docs/comparison.html) capability the
+line-attribution tools don't have.
+
+### Entity foundation (lands first)
+
+`prior_attempts` is only as good as the entity matching under it, so v0.3.7
+fixes the silent history-split problem first:
+
+- **Canonicalization on write.** `src/auth.py::login` and
+  `./src/auth.py::login` used to resolve to *different* entities. Now every
+  write goes through one chokepoint that strips `./`, collapses `//`,
+  normalizes separators, and trims — **preserving case on purpose**
+  (filesystems differ; silently lowercasing would collapse genuinely distinct
+  entities on case-sensitive Linux). `selvedge doctor` warns on sibling paths
+  that differ only by case instead of merging them.
+- **`selvedge migrate-paths`** backfills existing rows. **Dry-run is the
+  default** — it prints a collisions report (pre-canonicalization paths that
+  would merge) so you inspect before committing; pass `--apply` to write.
+  Idempotent, with an audit row per run.
+- **Renames, folded into `log_change`.** Pass `rename_from` with
+  `change_type="rename"` and Selvedge records the dual-event pattern (a
+  rename on the old path, a create on the new path with
+  `metadata.renamed_from`) so history follows the entity. No new tool.
+- **Soft entity-path shape warnings** — a `function` path without `::`, a
+  `column` without `.`, a `file` without a separator or extension get a
+  nudge, never a rejection.
+
+`prior_attempts` is the **7th** MCP tool (the only one this release adds);
+the grouped-digest helper ships as a `selvedge.aggregates.summary()` library
+function, not a tool. See [`CHANGELOG.md`](CHANGELOG.md) for the full list,
+including the 47 new tests — a called-out overrun of the ≤30 per-phase budget
+(≤40 phase target) because the entity foundation and the wedge ship together
+and a review pass hardened the acceptance-criteria edges.
+
+---
+
 ## What's new in v0.3.6
 
 Two themes in one release as a one-time exception to the single-theme
@@ -179,53 +262,6 @@ pass on the phase plan. Single-theme resumes at v0.3.7.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list including the
 new tests in `test_prune.py`, `test_update_check.py`, and the
-`test_doctor.py` extension.
-
----
-
-## What's new in v0.3.5
-
-The recovery-basics release. v0.3.1 made the runtime safe; v0.3.2 made
-problems visible; v0.3.5 ships the *minimum viable* "what happens when
-something has gone wrong" surface. **Drop-in upgrade for anyone on
-0.3.4.**
-
-**`selvedge verify` — DB-correctness gate with two exit tiers.** Walks
-the store and reports each check as PASS / WARN / FAIL. Must-fail
-conditions (SQLite corruption, schema mismatch against the declared
-`MIGRATIONS`, empty `entity_path`, unknown `change_type` in the store,
-unparseable timestamps, malformed `tool_calls` rows) exit non-zero.
-Should-warn conditions (singleton `changeset_id` groups, events past
-the 60-minute backfill window with no `git_commit`) print warnings but
-exit 0 by default. Pass `--strict` to escalate warnings to failures —
-the tiering means `selvedge verify` can drop into CI on day one
-without `|| true`. `--json` for machine output.
-
-**`selvedge backup` — online SQLite snapshot via `VACUUM INTO`.**
-Default destination
-`.selvedge/backups/selvedge-YYYYMMDD-HHMMSS.db`, kept out of git
-because `selvedge init` now appends `.selvedge/backups/` to the
-project `.gitignore` (and the first `selvedge backup` run on an
-existing repo appends it the same way — idempotent). Hardcoded
-`keep_last=7` for this release; the setting becomes `backup_keep_last`
-in `.selvedge/config.toml` when that file lands in v0.3.10.
-`--output <path>` overrides the default and is excluded from rotation
-so ad-hoc destinations aren't swept up. Two backups in the same second
-don't collide.
-
-**Doctor — `Last backup` row.** INFO when the newest backup is ≤7
-days old, WARN when older, FAIL when no backups exist *and* the
-events table has ≥10,000 rows (the threshold where no-backups becomes
-a real data-loss exposure rather than a CI/scratch DB).
-
-**Doctor — `Schema version` now FAILs on downgrade.** When
-`schema_migrations` contains a version not declared in the current
-`MIGRATIONS` tuple, the row fails rather than silently passing —
-surfaces "this DB was last opened by a newer Selvedge" before any
-write attempts schema work it doesn't understand.
-
-See [`CHANGELOG.md`](CHANGELOG.md) for the full list including the
-24 new tests across `test_verify.py`, `test_backup.py`, and the
 `test_doctor.py` extension.
 
 ---
@@ -459,12 +495,13 @@ When connected as an MCP server, Selvedge exposes:
 
 | Tool | Description |
 |------|-------------|
-| `log_change` | Record a change event with entity, diff, and reasoning |
+| `log_change` | Record a change event with entity, diff, and reasoning (pass `rename_from` with `change_type="rename"` for the dual-event rename pattern) |
 | `diff` | History for an entity or entity prefix |
 | `blame` | Most recent change + context for an exact entity |
 | `history` | Filtered history across all entities |
 | `changeset` | All events grouped under a named feature/task slug |
 | `search` | Full-text search across all events |
+| `prior_attempts` | Prior change attempts on an entity + inferred outcome (was it tried and reverted?) — call it before editing |
 
 ---
 
@@ -507,6 +544,10 @@ selvedge log ENTITY CHANGE_TYPE           Manually log a change
              [--commit HASH]
              [--project NAME]
              [--changeset CS]
+             [--rename-from OLD]          OLD path when CHANGE_TYPE is 'rename'
+selvedge migrate-paths                    Re-canonicalize stored entity paths
+                      [--apply]           (dry-run by default; --apply writes)
+                      [--json]
 ```
 
 All read commands support `--json` for machine-readable output.

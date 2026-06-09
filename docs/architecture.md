@@ -64,10 +64,11 @@ selvedge/
 │   ├── __init__.py       version string
 │   ├── models.py         ChangeEvent dataclass, ChangeType + EntityType enums
 │   ├── config.py         DB path resolution (env → walk-up → ~/.selvedge)
-│   ├── storage.py        SelvedgeStorage — SQLite CRUD layer
-│   ├── server.py         FastMCP server — 6 tools exposed to AI agents
+│   ├── storage.py        SelvedgeStorage — SQLite CRUD layer + entity-path canonicalization
+│   ├── aggregates.py     summary() — schema-versioned digest library (no LLM, no tool)
+│   ├── server.py         FastMCP server — 7 tools exposed to AI agents
 │   ├── importers.py      Migration file parsers — SQL DDL + Alembic
-│   └── cli.py            Click + Rich CLI — init, status, diff, blame, history, search, log, import, export, install-hook
+│   └── cli.py            Click + Rich CLI — init, status, diff, blame, history, search, log, migrate-paths, import, export, install-hook
 ├── scripts/
 │   └── coverage_check.py cross-references git log vs Selvedge events
 ├── tests/
@@ -135,17 +136,21 @@ Prefix queries work everywhere: `users` matches `users`, `users.email`, `users.c
 
 ## MCP Server tools
 
-The MCP server (`selvedge/server.py`) exposes these 6 tools to AI agents:
+The MCP server (`selvedge/server.py`) exposes these 7 tools to AI agents:
 
 ### `log_change`
 Record a change. Call this immediately after making any meaningful change.
 
 **Required:** `entity_path`, `change_type`
-**Optional:** `diff`, `entity_type`, `reasoning`, `agent`, `session_id`, `git_commit`, `project`, `changeset_id`
+**Optional:** `diff`, `entity_type`, `reasoning`, `agent`, `session_id`, `git_commit`, `project`, `changeset_id`, `rename_from`
 
-The `reasoning` field is validated at write time — the server returns a `warnings` array if it's empty, too short (< 20 chars), or a generic placeholder like `"user request"` or `"done"`. Aim for a full sentence describing intent.
+The `reasoning` field is validated at write time — the server returns a `warnings` array if it's empty, too short (< 20 chars), or a generic placeholder like `"user request"` or `"done"`. The `entity_path` is also shape-checked per `entity_type` (e.g. a `function` path without `::`) — a soft warning, never a rejection. Aim for a full sentence describing intent.
 
 The `changeset_id` field groups related events under a shared slug (e.g. `"add-stripe-billing"`). All events in a changeset can be retrieved together via the `changeset` tool.
+
+The `rename_from` field (with `change_type="rename"`) records a rename as the dual-event pattern — a `rename` event on the old path plus a `create` event on the new path with `metadata.renamed_from` set — so blame/diff/`prior_attempts` on the new path keep the history. Rename is a `log_change` parameter, not a separate tool.
+
+`entity_path` is canonicalized on write (strip `./`, collapse `//`, normalize separators to `/`, trim; **case preserved**) at a single storage chokepoint shared by the MCP and CLI write paths, so `src/auth.py::login` and `./src/auth.py::login` resolve to the same entity. The `selvedge migrate-paths` CLI backfills existing rows.
 
 ### `diff`
 Get change history for an entity or entity prefix. Returns list of events, newest first.
@@ -161,6 +166,9 @@ Get all events belonging to a `changeset_id`, oldest first. Use to reconstruct t
 
 ### `search`
 Full-text substring search across `entity_path`, `diff`, `reasoning`, `agent`.
+
+### `prior_attempts`
+Given an `entity_path` or a free-text `description`, return prior change attempts on that entity, each annotated with an inferred `outcome` (`reverted` / `active`), a `confidence` (`proximity_high` / `proximity_low`), and `outcome_reasoning` (why a reverted attempt was rejected). Outcome is inferred from add→remove proximity within a configurable window (explicit `reject`/`revert` change types arrive in v0.3.11). Conservative-recall: `min_confidence` defaults to `proximity_high`, so an empty list is the preferred answer over a false positive. Templated, no LLM, pull-only.
 
 ---
 
@@ -178,6 +186,9 @@ selvedge history --entity users --since 30d
 selvedge history --project my-api
 selvedge search "billing"                  # full-text search
 selvedge log users.phone add --reasoning "2FA" --agent me  # manual entry
+selvedge log new.path rename --rename-from old.path        # dual-event rename
+selvedge migrate-paths                     # dry-run re-canonicalization + collisions report
+selvedge migrate-paths --apply             # write canonical entity_paths (backfill)
 selvedge stats                             # tool call coverage (per-tool, per-agent, missing-reasoning)
 selvedge doctor                            # PASS/WARN/FAIL health check (DB path, schema, hook, MCP wiring)
 selvedge import ./migrations/              # backfill from SQL/Alembic migration files
@@ -260,8 +271,11 @@ Rules:
 - For multi-entity changes (e.g. adding a whole feature), set a shared `changeset_id`
   on all related log_change calls — use a short slug like "add-stripe-billing".
   This lets anyone query the full scope of the change with selvedge.changeset().
-- Before modifying an entity, call selvedge.diff or selvedge.blame to understand
-  its history and avoid conflicting with past decisions.
+- Before editing an entity, call selvedge.prior_attempts on it — if the same change
+  was tried before and reverted, you'll see the prior reasoning and why it was
+  rejected, and can change your plan instead of repeating a rejected approach.
+- Then call selvedge.diff or selvedge.blame for the entity's broader history before
+  conflicting with past decisions.
 ```
 
 ---
@@ -572,7 +586,7 @@ github.com).
 
 #### Entity foundation (lands first within the release)
 
-- [ ] **Entity-path canonicalization on write** — the storage write
+- [x] **Entity-path canonicalization on write** — the storage write
       path normalizes `entity_path` deterministically: strip leading
       `./`, collapse `//`, normalize separators to `/`, trim
       whitespace. **Case preservation is intentional** — filesystems
@@ -584,7 +598,7 @@ github.com).
       when sibling paths differ only by case. Canonicalization lives
       in `selvedge.storage.canonicalize_entity_path` and is the
       single chokepoint exercised by both the MCP write and the CLI.
-- [ ] **`selvedge migrate-paths` one-shot backfill** — re-canonicalizes
+- [x] **`selvedge migrate-paths` one-shot backfill** — re-canonicalizes
       existing rows. **`--dry-run` is default-on** (must pass
       `--apply` to write) and prints a collisions report:
       pre-canonicalization paths that would converge to the same
@@ -593,7 +607,7 @@ github.com).
       One audit row per run goes to a new `path_migrations` table
       so the operation is visible to `doctor` and to future
       releases.
-- [ ] **Rename support via `log_change` extension** (no new MCP
+- [x] **Rename support via `log_change` extension** (no new MCP
       tool). Add a `rename_from` parameter to `log_change`; when
       set together with `change_type="rename"`, the storage layer
       emits the same dual-event pattern the SQL DDL importer already
@@ -605,14 +619,14 @@ github.com).
       (`prior_attempts` only) instead of +3, and agents discover
       the rename pattern through the existing `log_change`
       docstring (worked rename example added in the same PR).
-- [ ] **Soft validation warnings in `log_change`** — pattern-shape
+- [x] **Soft validation warnings in `log_change`** — pattern-shape
       checks per `entity_type` that warn but never reject:
       `function`/`method` paths without `::`, `column` paths without
       `.`, `file` paths without a separator or extension. Consistent
       with the v0.3.4 reasoning-quality validator pattern (nudge,
       not gate). Patterns live in `selvedge.validate.ENTITY_PATTERNS`
       so they can be extended without touching the write path.
-- [ ] **Explicit non-goal — no code parser, no AST.** Selvedge does
+- [x] **Explicit non-goal — no code parser, no AST.** Selvedge does
       not extract entities from source code; it stores what the
       agent tells it, canonicalized and queryable. AST work is
       language-specific, drags in dependencies, and fights the
@@ -622,7 +636,7 @@ github.com).
 
 #### Wedge
 
-- [ ] **`prior_attempts` MCP tool** — given a description or
+- [x] **`prior_attempts` MCP tool** — given a description or
       `entity_path`, returns prior change events at the same path or
       shape with their `reasoning`, `change_type`, and inferred
       outcome. v0.3.7 infers outcome from add→remove proximity
@@ -635,7 +649,7 @@ github.com).
       Empty result preferred over false positives — one shot at the
       agent's trust budget. Pull-model only. Templated output, no
       LLM calls.
-- [ ] **Aggregate helper ships as a library, not an MCP tool.**
+- [x] **Aggregate helper ships as a library, not an MCP tool.**
       The grouped-digest logic (changesets touched, agents
       involved, top entities by activity) lands in
       `selvedge.aggregates.summary()` as a pure Python function
@@ -649,7 +663,7 @@ github.com).
       reach for an aggregate primitive. Schema-versioned via
       `summary_version` in the dataclass so the shape can be
       lifted to MCP without breaking the v0.3.9 CLI consumers.
-- [ ] **Positioning artifacts (release-blocker, not optional polish):**
+- [x] **Positioning artifacts (release-blocker, not optional polish):**
     * `docs/comparison.html` update naming `prior_attempts` as the
       "alternatives tried, rejected paths" capability the
       line-attribution competitors don't have. Site PR in
@@ -660,7 +674,7 @@ github.com).
       checked-in transcript at `docs/demos/prior-attempts.md`.
     * Worked-example section in `README.md` (counts toward the
       "What's new" stack cap for this release).
-- [ ] **Tests** — `test_entity_canonicalize.py` for the
+- [x] **Tests** — `test_entity_canonicalize.py` for the
       canonicalization function and its invariants (~6),
       `test_migrate_paths.py` for the backfill including the
       dry-run collisions report (~6), `test_server.py` /
@@ -1598,7 +1612,7 @@ selvedge --version
 - No real-time streaming
 - No multi-user/team features (Phase 3)
 - No LLM calls inside Selvedge itself — reasoning is captured FROM agents, not generated by Selvedge
-- No AST / code parser — Selvedge stores entity events the agent supplies, canonicalized and queryable, but does not extract entities from source code. Entity *extraction* is language-specific (Python, TS, Go, Rust, Java, …), drags in per-language dependencies, and fights the dependency-free-core rule. The v0.3.7 entity foundation (canonicalization, `log_rename`, soft validation) is the durable answer; "wouldn't it be cool if Selvedge parsed Python" is the wrong fork and PRs proposing it bounce against this line.
+- No AST / code parser — Selvedge stores entity events the agent supplies, canonicalized and queryable, but does not extract entities from source code. Entity *extraction* is language-specific (Python, TS, Go, Rust, Java, …), drags in per-language dependencies, and fights the dependency-free-core rule. The v0.3.7 entity foundation (write-path canonicalization with intentional case-preservation, rename support folded into `log_change` as `rename_from`, soft entity-path shape validation) is the durable answer; "wouldn't it be cool if Selvedge parsed Python" is the wrong fork and PRs proposing it bounce against this line.
 
 ---
 

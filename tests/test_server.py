@@ -18,7 +18,15 @@ def isolate_db(tmp_path, monkeypatch):
 
 
 # Import server tools after the fixture patches the env
-from selvedge.server import blame, changeset, diff, history, log_change, search  # noqa: E402
+from selvedge.server import (  # noqa: E402
+    blame,
+    changeset,
+    diff,
+    history,
+    log_change,
+    prior_attempts,
+    search,
+)
 
 # ---------------------------------------------------------------------------
 # log_change
@@ -259,3 +267,95 @@ def test_log_change_event_still_logged_even_with_warning():
     assert "id" in result
     rows = history()
     assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# log_change — rename_from dual-event extension (v0.3.7)
+# ---------------------------------------------------------------------------
+
+
+def test_log_change_rename_emits_dual_event():
+    result = log_change(
+        entity_path="src/auth/session.py::login",
+        change_type="rename",
+        rename_from="src/auth.py::login",
+        entity_type="function",
+        reasoning="Split auth.py into a package; login moved to session.py.",
+    )
+    assert result["status"] == "logged"
+    # Exactly two events were written — no spurious third leg.
+    assert len(history()) == 2
+    # Old path carries the rename event...
+    old = blame("src/auth.py::login")
+    assert old["change_type"] == "rename"
+    # ...new path carries the create event with metadata.renamed_from set.
+    new = blame("src/auth/session.py::login")
+    assert new["change_type"] == "create"
+    assert new["metadata"]["renamed_from"] == "src/auth.py::login"
+
+
+def test_log_change_rename_from_requires_rename_type():
+    result = log_change(
+        entity_path="new.path", change_type="add", rename_from="old.path"
+    )
+    assert result["status"] == "error"
+    assert "rename" in result["error"]
+
+
+def test_log_change_warns_on_malformed_entity_path():
+    # A 'function' path with no '::' separator gets a shape warning, not a
+    # rejection — the event is still logged.
+    result = log_change(
+        entity_path="justaname",
+        change_type="add",
+        entity_type="function",
+        reasoning="Adding a helper for the retry path in the worker loop.",
+    )
+    assert result["status"] == "logged"
+    assert any("::" in w for w in result["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# prior_attempts (v0.3.7)
+# ---------------------------------------------------------------------------
+
+
+def test_prior_attempts_high_confidence_default():
+    log_change(entity_path="users.token", change_type="add", reasoning="Tried a token column.")
+    log_change(entity_path="users.token", change_type="remove", reasoning="Reverted: switched to JWTs.")
+    results = prior_attempts(entity_path="users.token")
+    assert len(results) == 1
+    assert results[0]["outcome"] == "reverted"
+    assert results[0]["confidence"] == "proximity_high"
+    assert results[0]["outcome_reasoning"] == "Reverted: switched to JWTs."
+    # Free-text `description` mode (MCP param remapped to storage `query`)
+    # reaches the same reverted attempt through the server boundary.
+    by_desc = prior_attempts(description="token column")
+    assert any(r["entity_path"] == "users.token" for r in by_desc)
+
+
+def test_prior_attempts_is_pull_only_and_logs_no_event():
+    from selvedge.server import get_storage
+
+    log_change(entity_path="users.token", change_type="add", reasoning="Tried a token column.")
+    log_change(entity_path="users.token", change_type="remove", reasoning="Reverted it.")
+    before = get_storage().count()
+    prior_attempts(entity_path="users.token")
+    # Pull-only: querying prior attempts writes no change event.
+    assert get_storage().count() == before
+
+
+def test_prior_attempts_is_conservative_by_default():
+    # An entity only ever added (never reverted) returns an empty list under
+    # the default high-confidence floor — empty over false positive.
+    log_change(entity_path="users.email", change_type="add", reasoning="Email for auth, in use.")
+    assert prior_attempts(entity_path="users.email") == []
+    # The active attempt shows up only in the low-confidence tail.
+    tail = prior_attempts(entity_path="users.email", min_confidence="proximity_low")
+    assert len(tail) == 1
+    assert tail[0]["outcome"] == "active"
+
+
+def test_prior_attempts_requires_an_argument():
+    result = prior_attempts()
+    assert result and "error" in result[0]

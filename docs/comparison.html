@@ -128,9 +128,10 @@
     <h1 class="h-section text-4xl md:text-5xl mb-6 leading-tight">How Selvedge compares to AgentDiff, Origin, Git AI, and BlamePrompt.</h1>
     <p class="text-fade max-w-prose mb-10" style="font-size:17px;line-height:1.55;">
       The "git blame for AI" category is fast-growing — five tools, all promising
-      to surface the why behind agent-written code. They differ on four axes
+      to surface the why behind agent-written code. They differ on the axes
       that matter: where reasoning comes from, what unit it's attached to,
-      when it's collected, and how it's stored.
+      when it's collected, how it's stored — and whether the tool can tell an
+      agent what was already <em>tried and rejected</em> before it starts.
     </p>
 
     <div class="overflow-x-auto -mx-4 px-4 mb-10">
@@ -142,6 +143,7 @@
             <th>Granularity</th>
             <th>Mechanism</th>
             <th>Grouping</th>
+            <th>Prior attempts</th>
             <th>Storage</th>
           </tr>
         </thead>
@@ -152,6 +154,7 @@
             <td>Entity — DB column, table, env var, dep, API route, function</td>
             <td>MCP server — agent calls it as work happens</td>
             <td>Changesets — named feature/task slugs across many entities</td>
+            <td>Yes — surfaces alternatives tried &amp; rejected paths via <code class="font-mono text-sm">prior_attempts</code></td>
             <td>SQLite, zero deps</td>
           </tr>
           <tr>
@@ -159,6 +162,7 @@
             <td>Inferred post-hoc by Claude Haiku from the diff at session end</td>
             <td>Line</td>
             <td>Git pre/post-commit hook</td>
+            <td>None</td>
             <td>None</td>
             <td>JSONL on disk</td>
           </tr>
@@ -168,6 +172,7 @@
             <td>Line</td>
             <td>Git hook</td>
             <td>None</td>
+            <td>None</td>
             <td>Local</td>
           </tr>
           <tr>
@@ -176,6 +181,7 @@
             <td>Line</td>
             <td>Git hook + Agent Trace alliance</td>
             <td>None</td>
+            <td>None</td>
             <td>Git notes</td>
           </tr>
           <tr>
@@ -183,6 +189,7 @@
             <td>Prompt-only</td>
             <td>Line</td>
             <td>Git hook</td>
+            <td>None</td>
             <td>None</td>
             <td>Local</td>
           </tr>
@@ -231,6 +238,36 @@
       tools have an analogue.
     </p>
 
+    <h2 class="h-section text-2xl mt-14 mb-4">Why "prior attempts" matters</h2>
+    <p class="text-inkwell max-w-prose mb-4" style="font-size:16px;line-height:1.6;">
+      Line attribution answers <em>"who wrote this, and roughly why."</em> It
+      can't answer the question an agent actually has before it starts:
+      <em>"has this been tried before, and how did it turn out?"</em> Selvedge's
+      <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">prior_attempts</code>
+      tool answers exactly that — given an entity, it returns the
+      <strong>alternatives that were tried and the paths that got rejected</strong>,
+      each with the original reasoning <em>and</em> the reason it was reverted.
+      An agent about to re-add a column that was already pulled for a good
+      reason finds out <em>first</em>, and changes its plan.
+    </p>
+    <div class="callout max-w-prose mb-4">
+      <p class="text-inkwell" style="font-size:15px;line-height:1.55;">
+        It's deliberately conservative: the default only returns the clear
+        "tried, then reverted" signal, so an empty result is a trustworthy
+        "nothing to worry about" rather than noise. No second LLM is involved —
+        it's a templated query over the reasoning agents wrote live. None of the
+        line-attribution competitors surface rejected paths at all.
+      </p>
+    </div>
+    <p class="text-inkwell max-w-prose mb-10" style="font-size:16px;line-height:1.6;">
+      See the
+      <a class="linky" href="https://github.com/masondelan/selvedge/blob/main/docs/demos/prior-attempts.md">worked demo transcript</a>
+      — an agent asked to keep mobile users signed in calls
+      <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">prior_attempts</code>,
+      learns the DB-token approach was tried and reverted (revocation cost), and
+      pivots to a refresh-token endpoint instead of repeating it.
+    </p>
+
     <h2 class="h-section text-2xl mt-14 mb-4">Selvedge ↔ Agent Trace</h2>
     <p class="text-inkwell max-w-prose mb-4" style="font-size:16px;line-height:1.6;">
       <a class="linky" href="https://github.com/cursor/agent-trace">Agent Trace</a>
@@ -250,6 +287,7 @@
     <h2 class="h-section text-2xl mt-14 mb-4">When you'd pick Selvedge</h2>
     <ul class="max-w-prose space-y-3 mb-12" style="font-size:16px;line-height:1.55;">
       <li class="pl-4 border-l-2 border-indigo">Your agent makes a lot of <em>schema</em> or <em>config</em> changes you'll need to audit later.</li>
+      <li class="pl-4 border-l-2 border-indigo">You want your agent to know what was <em>already tried and rejected</em> on an entity before it repeats a mistake — that's <code class="font-mono text-sm">prior_attempts</code>.</li>
       <li class="pl-4 border-l-2 border-indigo">You roll out features that touch many entities (billing, auth migrations, deprecations) and want to query them as a unit.</li>
       <li class="pl-4 border-l-2 border-indigo">You want the reasoning at the moment the change happens, not a paraphrase of the diff.</li>
       <li class="pl-4 border-l-2 border-indigo">You'd rather use <a class="linky" href="https://modelcontextprotocol.io">MCP</a> than a git hook because your agent already speaks MCP.</li>

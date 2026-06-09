@@ -6,31 +6,68 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.3.7] — 2026-06-08
 
-### Changed
+The brand-defining release: the **`prior_attempts`** MCP tool — an agent
+about to change an entity can ask *"was this tried before, and how did it
+turn out?"* — plus the **entity-canonicalization foundation** it depends on.
+A single new MCP tool (`prior_attempts`), bringing the surface to **7**.
+**Drop-in upgrade for anyone on 0.3.6.** This release also folds in the icon
+redesign, Claude Code plugin-marketplace scaffolding, and og-image work that
+had accumulated under `[Unreleased]`.
 
-- **Server icon redesigned.** The "stitched timeline" mark from
-  v0.3.3 is replaced with a minimalist square mark — a navy 'S'
-  beside a red selvedge edge stitch on cream. Lives at
-  `docs/icon.png` (canonical tracked location), referenced by
-  `manifest.json`, the selvedge.sh favicon / apple-touch-icon, and
-  Smithery thumbnail. Verified to hold up from 16×16 favicon scale
-  through Smithery thumbnail render sizes.
-- **`manifest.json` icon path repointed from `assets/icon.png` to
-  `docs/icon.png`.** `assets/` is now gitignored as internal-only,
-  so a fresh clone no longer has `assets/icon.png` to bundle. The
-  byte-identical-but-tracked copy at `docs/icon.png` becomes the
-  single source — bundle, site, and social previews now build from
-  the same file.
-- **`twitter:card` upgraded from `summary` to `summary_large_image`**
-  on `docs/index.html`, `docs/comparison.html`, and `docs/faq.html`.
-  The new wide og-image banner would be center-cropped to a small
-  square by the summary card; the large-image card renders the full
-  banner.
+**No-LLM guard.** Both `prior_attempts` and `aggregates.summary()` are
+templated, deterministic assembly over reasoning the agents wrote live — no
+model hop anywhere in Selvedge core, by design.
+
+**Test-budget overrun (called out).** 47 new tests against the standard ≤30
+per-phase soft budget. The ≤40 target was set for this phase because the
+entity foundation and the wedge ship together; the final 7 over that came
+from an adversarial review pass that surfaced acceptance-criteria coverage
+gaps (the `doctor` case-collision / path-migration rows, the `column` / `file`
+entity-path shape rules, and the `summary()` empty-DB never-null contract) —
+all on already-correct code. Closing them was judged worth the overrun on the
+brand-defining release.
 
 ### Added
 
+- **`prior_attempts` MCP tool — the wedge (7th tool).** Given an
+  `entity_path` or free-text `description`, returns prior change attempts on
+  the entity, each annotated with an inferred `outcome` (`reverted` /
+  `active`), a `confidence` tier (`proximity_high` / `proximity_low`), and
+  `outcome_reasoning` (why a reverted attempt was rejected). Outcome is
+  inferred from add→remove proximity within a configurable window — explicit
+  `reject`/`revert` change types arrive in v0.3.11. Conservative-recall:
+  `min_confidence` defaults to `proximity_high`, so an empty list is the
+  preferred answer over a false positive. Templated, no LLM, pull-only.
+- **`rename_from` parameter on `log_change`.** With `change_type="rename"`,
+  records the dual-event rename pattern — a `rename` event on the old path
+  plus a `create` event on the new path with `metadata.renamed_from` set —
+  so blame / diff / `prior_attempts` on the new path keep the history.
+  Rename is a `log_change` parameter, **not** a new tool, keeping the v0.3.7
+  surface at +1. A worked rename example is in the `log_change` docstring.
+- **`selvedge migrate-paths` — one-shot entity-path backfill.** Re-
+  canonicalizes existing rows. **Dry-run is the default**; it prints a
+  collisions report (pre-canonicalization paths that converge, i.e.
+  histories that would merge) so you inspect before `--apply` writes.
+  Idempotent on the event data; one audit row per `--apply` run goes to a
+  new `path_migrations` table (visible to `doctor`). `--json` for machine
+  output.
+- **Soft entity-path shape validation in `log_change`.** Per-`entity_type`
+  shape checks (a `function` path without `::`, a `column` without `.`, a
+  `file` without a separator or extension) that **warn but never reject**,
+  mirroring the v0.3.4 reasoning-quality validator. Patterns live in
+  `selvedge.validation.ENTITY_PATTERNS` so new types extend without touching
+  the write path.
+- **`selvedge.aggregates.summary()` — library digest helper.** A pure-
+  Python, schema-versioned (`summary_version`) roll-up — changesets touched,
+  agents involved, top entities by activity — that v0.3.9's `selvedge audit`
+  / `digest` will consume. Ships as a **library function, not an MCP tool and
+  not a CLI command**: a deliberate tool-surface-discipline call.
+- **`doctor` — case-collision watch + path-migration row.** A WARN row
+  surfaces sibling entity paths that differ only by case (the pair to the
+  intentional case-preservation stance), and an INFO row surfaces the last
+  `migrate-paths --apply` run.
 - **Claude Code plugin marketplace scaffolding.** Adds
   `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`,
   and `.mcp.json` at the repo root, declaring this repo as a
@@ -51,8 +88,64 @@ Selvedge uses [semantic versioning](https://semver.org/).
   use the square `docs/icon.png` mark — wide banner for share
   previews, tight square mark for tab and home-screen icons.
 
+### Changed
+
+- **Entity-path canonicalization on write (the foundation).** Every write —
+  the MCP `log_change` tool, the `selvedge log` CLI, and the migration
+  importers — now routes through a single
+  `selvedge.storage.canonicalize_entity_path` chokepoint that strips leading
+  `./`, collapses `//`, normalizes separators to `/`, and trims, so
+  `src/auth.py::login` and `./src/auth.py::login` resolve to the same entity
+  instead of silently splitting history. **Case is preserved on purpose** —
+  filesystems differ (case-insensitive on macOS/Windows, case-sensitive on
+  most Linux), and lowercasing would collapse genuinely distinct entities on
+  case-sensitive hosts; collisions surface as a `doctor` warning instead.
+- **Agent-guidance prompt leads with `prior_attempts`.** The canonical
+  prompt block (`selvedge prompt`) and the architecture system-prompt section
+  now tell agents to call `prior_attempts` before editing an entity, ahead of
+  the existing `diff` / `blame` guidance.
+- **Server icon redesigned.** The "stitched timeline" mark from
+  v0.3.3 is replaced with a minimalist square mark — a navy 'S'
+  beside a red selvedge edge stitch on cream. Lives at
+  `docs/icon.png` (canonical tracked location), referenced by
+  `manifest.json`, the selvedge.sh favicon / apple-touch-icon, and
+  Smithery thumbnail. Verified to hold up from 16×16 favicon scale
+  through Smithery thumbnail render sizes.
+- **`manifest.json` icon path repointed from `assets/icon.png` to
+  `docs/icon.png`.** `assets/` is now gitignored as internal-only,
+  so a fresh clone no longer has `assets/icon.png` to bundle. The
+  byte-identical-but-tracked copy at `docs/icon.png` becomes the
+  single source — bundle, site, and social previews now build from
+  the same file.
+- **`twitter:card` upgraded from `summary` to `summary_large_image`**
+  on `docs/index.html`, `docs/comparison.html`, and `docs/faq.html`.
+  The new wide og-image banner would be center-cropped to a small
+  square by the summary card; the large-image card renders the full
+  banner.
+
+### Fixed
+
+- **Silent entity history-split.** Differently-spelled paths for the same
+  entity (`./src/auth.py` vs `src//auth.py`) previously created separate
+  histories. Canonicalization on write, plus `migrate-paths` for existing
+  rows, closes the gap — the correctness fix that makes `prior_attempts`
+  trustworthy.
+
 ### Internal
 
+- **Explicit non-goal reaffirmed: no code parser / AST.** Selvedge stores
+  the canonicalized entity events the agent supplies; it does not extract
+  entities from source code (language-specific, dependency-dragging, and
+  against the dependency-free-core rule). Documented in the release notes and
+  added to the cross-cutting non-goals section so the boundary survives
+  roadmap pressure.
+- **Test-budget overrun (47 vs. the standard ≤30; the phase target was ≤40).**
+  New tests across `test_entity_canonicalize.py`, `test_migrate_paths.py`,
+  `test_prior_attempts.py`, `test_aggregates.py`, and extensions to
+  `test_server.py` / `test_mcp_protocol.py` (entity foundation + wedge share
+  the release), plus a review-driven round in `test_validation.py` and
+  `test_doctor.py` covering the entity-path shape rules and the new doctor
+  rows. Total suite: 450 tests, coverage 86.6% (gate is 85%).
 - **Bulk `launch/` and `assets/` rules in `.gitignore`** (PR #8).
   Replaces six individual `launch/` sub-path entries with a single
   bulk rule (matches the `.mcpbignore` convention so MCPB builds

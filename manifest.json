@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "selvedge",
   "display_name": "Selvedge",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Change tracking for AI-era codebases \u2014 captures the why behind every change as the agent makes it. git blame for semantic entities (DB columns, functions, env vars, deps), with reasoning written by the agent in the same context that produced the change.",
   "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning \u2014 the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code \u2014 your data stays yours.",
   "author": {
@@ -54,7 +54,7 @@
     {
       "name": "log_change",
       "title": "Log a code change",
-      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), the result includes a `warnings`\narray \u2014 the event is still stored.\n\nOn validation failure (invalid change_type, missing entity_path) the\nresult is `{\"status\": \"error\", \"error\": \"...\"}` with no event written.",
+      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), or the entity_path doesn't match the\nusual shape for its entity_type, the result includes a `warnings`\narray \u2014 the event is still stored.\n\nRenames: pass the new path in `entity_path`, set `change_type=\"rename\"`,\nand pass the old path in `rename_from`. Selvedge then writes two events \u2014\na `rename` on the old path and a `create` on the new path with\n`metadata.renamed_from` set \u2014 so the entity's history follows it. Example:\n\n    log_change(\n        entity_path=\"src/auth/session.py::login\",   # new path\n        change_type=\"rename\",\n        rename_from=\"src/auth.py::login\",            # old path\n        entity_type=\"function\",\n        reasoning=\"Split auth.py into an auth/ package; login moved.\",\n    )\n\nOn validation failure (invalid change_type, missing entity_path, or\n`rename_from` set without change_type='rename') the result is\n`{\"status\": \"error\", \"error\": \"...\"}` with no event written.",
       "inputSchema": {
         "properties": {
           "entity_path": {
@@ -113,6 +113,12 @@
             "default": "",
             "description": "Optional grouping ID for related changes that belong to the same feature or task. Use a short slug like 'add-stripe-billing'. All events sharing a changeset_id can be queried together via the `changeset` tool.",
             "title": "Changeset Id",
+            "type": "string"
+          },
+          "rename_from": {
+            "default": "",
+            "description": "The entity's previous path, when this change is a rename. Set it together with change_type='rename' and put the NEW path in entity_path. Selvedge records the dual-event rename pattern: a 'rename' event on the old path and a 'create' event on the new path whose metadata.renamed_from points back to the old one, so blame/diff/prior_attempts on the new path still see the history. Leave empty for any non-rename change.",
+            "title": "Rename From",
             "type": "string"
           }
         },
@@ -466,6 +472,72 @@
           "result"
         ],
         "title": "searchOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "prior_attempts",
+      "title": "Prior attempts on an entity",
+      "description": "Prior change attempts on an entity, each with an inferred outcome.\n\nCall this BEFORE editing an entity. If the same change was tried before\nand reverted, you get the prior `reasoning` and `change_type` plus an\ninferred `outcome` \u2014 so you can change your plan instead of repeating a\nrejected approach.\n\nEach result is a change event with three extra fields:\n\n  - `outcome`           \u2014 \"reverted\" (a later remove/delete on the same\n                          path) or \"active\" (no later removal seen).\n  - `confidence`        \u2014 \"proximity_high\" or \"proximity_low\".\n  - `outcome_reasoning` \u2014 the reverting event's reasoning (WHY it was\n                          rejected), or \"\" while still active.\n\nOutcome is inferred from add->remove proximity \u2014 v0.3.7 has no explicit\nreject/revert change types yet (those arrive in v0.3.11). Output is\ntemplated, deterministic, and makes no LLM call. This is a pull-only\ntool: it never writes and never pushes; you decide when to ask.\n\nConservative by design \u2014 `min_confidence` defaults to \"proximity_high\",\nso an empty list (nothing clearly tried-and-rejected) is the normal,\npreferred answer over a speculative false positive. Pass\n`min_confidence=\"proximity_low\"` to widen recall.",
+      "inputSchema": {
+        "properties": {
+          "entity_path": {
+            "default": "",
+            "description": "The entity you're about to change. Exact path with prefix matching \u2014 'users' also covers 'users.email'. Examples: 'src/auth.py::login', 'users.email', 'env/STRIPE_SECRET_KEY'. Provide this OR `description`.",
+            "title": "Entity Path",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "description": "Free-text description of what you're about to do, when you don't have an exact entity_path. Matched as a substring against prior reasoning, diffs, and entity paths. Provide this OR `entity_path` (entity_path takes precedence if both are given).",
+            "title": "Description",
+            "type": "string"
+          },
+          "min_confidence": {
+            "default": "proximity_high",
+            "description": "Confidence floor. 'proximity_high' (default) returns only attempts that were clearly tried and then reverted within the window \u2014 the high-signal 'rejected before' cases. Pass 'proximity_low' to also see the noisy tail (still-active changes and far-apart reverts).",
+            "title": "Min Confidence",
+            "type": "string"
+          },
+          "window_minutes": {
+            "default": 10080,
+            "description": "Proximity window in minutes for the add->remove revert heuristic. An attempt removed within this many minutes is 'proximity_high'; beyond it, 'proximity_low'. Default 10080 (7 days).",
+            "minimum": 1,
+            "title": "Window Minutes",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Maximum number of results.",
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "prior_attemptsArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "prior_attemptsOutput",
         "type": "object"
       },
       "annotations": {

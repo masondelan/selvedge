@@ -1,13 +1,14 @@
 """
 Selvedge MCP Server.
 
-Exposes 6 tools that AI coding agents call to track and query codebase changes:
-  - log_change   : record a change event
-  - diff         : get change history for an entity
-  - blame        : get the most recent change + context for an entity
-  - history      : filtered history across all entities
-  - changeset    : retrieve all events in a named feature/task group
-  - search       : full-text search across all events
+Exposes 7 tools that AI coding agents call to track and query codebase changes:
+  - log_change     : record a change event (incl. dual-event renames)
+  - diff           : get change history for an entity
+  - blame          : get the most recent change + context for an entity
+  - history        : filtered history across all entities
+  - changeset      : retrieve all events in a named feature/task group
+  - search         : full-text search across all events
+  - prior_attempts : prior change attempts on an entity + inferred outcome
 
 Convention notes for v0.3.3+:
   - All tool parameters use Annotated[T, Field(description=...)] so agents
@@ -41,7 +42,7 @@ from .logging_config import configure_logging
 from .models import ChangeEvent
 from .storage import SelvedgeStorage
 from .timeutil import parse_time_string
-from .validation import check_reasoning_quality
+from .validation import check_entity_path_shape, check_reasoning_quality
 
 mcp = FastMCP(
     "selvedge",
@@ -66,12 +67,17 @@ mcp = FastMCP(
         "feature so they can later be retrieved together via the changeset "
         "tool.\n"
         "\n"
+        "BEFORE EDITING an entity, call prior_attempts on it — if the same "
+        "change was tried before and reverted, you'll see why and can change "
+        "your plan instead of repeating a rejected approach.\n"
+        "\n"
         "WHEN TO READ:\n"
-        "  - blame      — 'who/why for THIS entity, most recent change'\n"
-        "  - diff       — 'full history for THIS entity, newest first'\n"
-        "  - history    — 'everything in the last N days/across a project'\n"
-        "  - changeset  — 'all changes that belong to THIS feature'\n"
-        "  - search     — 'anything mentioning these words'\n"
+        "  - prior_attempts — 'was this entity tried-and-rejected before? why?'\n"
+        "  - blame          — 'who/why for THIS entity, most recent change'\n"
+        "  - diff           — 'full history for THIS entity, newest first'\n"
+        "  - history        — 'everything in the last N days/across a project'\n"
+        "  - changeset      — 'all changes that belong to THIS feature'\n"
+        "  - search         — 'anything mentioning these words'\n"
     ),
 )
 
@@ -300,33 +306,92 @@ def log_change(
             ),
         ),
     ] = "",
+    rename_from: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "The entity's previous path, when this change is a rename. Set it "
+                "together with change_type='rename' and put the NEW path in "
+                "entity_path. Selvedge records the dual-event rename pattern: a "
+                "'rename' event on the old path and a 'create' event on the new "
+                "path whose metadata.renamed_from points back to the old one, so "
+                "blame/diff/prior_attempts on the new path still see the history. "
+                "Leave empty for any non-rename change."
+            ),
+        ),
+    ] = "",
 ) -> LogChangeResult:
     """Record a change to a codebase entity.
 
     Call this immediately after making any meaningful change. The event is
     written to the local SQLite store and returned with its assigned id and
     timestamp. If the reasoning fails the quality validator (empty, too
-    short, or a generic placeholder), the result includes a `warnings`
+    short, or a generic placeholder), or the entity_path doesn't match the
+    usual shape for its entity_type, the result includes a `warnings`
     array — the event is still stored.
 
-    On validation failure (invalid change_type, missing entity_path) the
-    result is `{"status": "error", "error": "..."}` with no event written.
+    Renames: pass the new path in `entity_path`, set `change_type="rename"`,
+    and pass the old path in `rename_from`. Selvedge then writes two events —
+    a `rename` on the old path and a `create` on the new path with
+    `metadata.renamed_from` set — so the entity's history follows it. Example:
+
+        log_change(
+            entity_path="src/auth/session.py::login",   # new path
+            change_type="rename",
+            rename_from="src/auth.py::login",            # old path
+            entity_type="function",
+            reasoning="Split auth.py into an auth/ package; login moved.",
+        )
+
+    On validation failure (invalid change_type, missing entity_path, or
+    `rename_from` set without change_type='rename') the result is
+    `{"status": "error", "error": "..."}` with no event written.
     """
     storage = get_storage()
     storage.record_tool_call("log_change", entity_path=entity_path, agent=agent)
+
+    if rename_from and change_type != "rename":
+        return {
+            "id": "",
+            "timestamp": "",
+            "status": "error",
+            "error": "rename_from is only valid with change_type='rename'",
+            "warnings": [],
+        }
+
     try:
-        event = ChangeEvent(
-            entity_path=entity_path,
-            change_type=change_type,
-            diff=diff,
-            entity_type=entity_type,
-            reasoning=reasoning,
-            agent=agent,
-            session_id=session_id,
-            git_commit=git_commit,
-            project=project,
-            changeset_id=changeset_id,
-        )
+        if rename_from:
+            # Dual-event rename: rename(old) + create(new, metadata.renamed_from).
+            # The create-on-new-path event is the surviving entity, so it's
+            # the one reported back as the result.
+            events = storage.log_rename(
+                old_path=rename_from,
+                new_path=entity_path,
+                entity_type=entity_type,
+                diff=diff,
+                reasoning=reasoning,
+                agent=agent,
+                session_id=session_id,
+                git_commit=git_commit,
+                project=project,
+                changeset_id=changeset_id,
+            )
+            stored = events[-1]
+        else:
+            event = ChangeEvent(
+                entity_path=entity_path,
+                change_type=change_type,
+                diff=diff,
+                entity_type=entity_type,
+                reasoning=reasoning,
+                agent=agent,
+                session_id=session_id,
+                git_commit=git_commit,
+                project=project,
+                changeset_id=changeset_id,
+            )
+            stored = storage.log_event(event)
     except ValueError as e:
         return {
             "id": "",
@@ -336,14 +401,14 @@ def log_change(
             "warnings": [],
         }
 
-    stored = storage.log_event(event)
     warnings = check_reasoning_quality(reasoning)
+    warnings += check_entity_path_shape(stored.entity_path, stored.entity_type)
     return {
         "id": stored.id,
         "timestamp": stored.timestamp,
         "status": "logged",
         "error": "",
-        "warnings": warnings or [],
+        "warnings": warnings,
     }
 
 
@@ -543,6 +608,108 @@ def search(
     storage = get_storage()
     storage.record_tool_call("search")
     return storage.search(query, limit)
+
+
+@mcp.tool(
+    title="Prior attempts on an entity",
+    annotations=_READ_ANNOTATIONS,
+)
+def prior_attempts(
+    entity_path: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "The entity you're about to change. Exact path with prefix "
+                "matching — 'users' also covers 'users.email'. Examples: "
+                "'src/auth.py::login', 'users.email', 'env/STRIPE_SECRET_KEY'. "
+                "Provide this OR `description`."
+            ),
+        ),
+    ] = "",
+    description: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "Free-text description of what you're about to do, when you don't "
+                "have an exact entity_path. Matched as a substring against prior "
+                "reasoning, diffs, and entity paths. Provide this OR `entity_path` "
+                "(entity_path takes precedence if both are given)."
+            ),
+        ),
+    ] = "",
+    min_confidence: Annotated[
+        str,
+        Field(
+            default="proximity_high",
+            description=(
+                "Confidence floor. 'proximity_high' (default) returns only "
+                "attempts that were clearly tried and then reverted within the "
+                "window — the high-signal 'rejected before' cases. Pass "
+                "'proximity_low' to also see the noisy tail (still-active changes "
+                "and far-apart reverts)."
+            ),
+        ),
+    ] = "proximity_high",
+    window_minutes: Annotated[
+        int,
+        Field(
+            default=10080,
+            ge=1,
+            description=(
+                "Proximity window in minutes for the add->remove revert "
+                "heuristic. An attempt removed within this many minutes is "
+                "'proximity_high'; beyond it, 'proximity_low'. Default 10080 "
+                "(7 days)."
+            ),
+        ),
+    ] = 10080,
+    limit: Annotated[
+        int,
+        Field(default=20, ge=1, description="Maximum number of results."),
+    ] = 20,
+) -> list[dict]:
+    """Prior change attempts on an entity, each with an inferred outcome.
+
+    Call this BEFORE editing an entity. If the same change was tried before
+    and reverted, you get the prior `reasoning` and `change_type` plus an
+    inferred `outcome` — so you can change your plan instead of repeating a
+    rejected approach.
+
+    Each result is a change event with three extra fields:
+
+      - `outcome`           — "reverted" (a later remove/delete on the same
+                              path) or "active" (no later removal seen).
+      - `confidence`        — "proximity_high" or "proximity_low".
+      - `outcome_reasoning` — the reverting event's reasoning (WHY it was
+                              rejected), or "" while still active.
+
+    Outcome is inferred from add->remove proximity — v0.3.7 has no explicit
+    reject/revert change types yet (those arrive in v0.3.11). Output is
+    templated, deterministic, and makes no LLM call. This is a pull-only
+    tool: it never writes and never pushes; you decide when to ask.
+
+    Conservative by design — `min_confidence` defaults to "proximity_high",
+    so an empty list (nothing clearly tried-and-rejected) is the normal,
+    preferred answer over a speculative false positive. Pass
+    `min_confidence="proximity_low"` to widen recall.
+    """
+    storage = get_storage()
+    storage.record_tool_call("prior_attempts", entity_path=entity_path)
+    if not entity_path and not description:
+        return [{"error": "prior_attempts requires either entity_path or description"}]
+    if min_confidence not in ("proximity_high", "proximity_low"):
+        return [
+            {"error": "min_confidence must be 'proximity_high' or 'proximity_low'"}
+        ]
+    return storage.get_prior_attempts(
+        entity_path=entity_path,
+        query=description,
+        min_confidence=min_confidence,
+        window_minutes=window_minutes,
+        limit=limit,
+    )
 
 
 # ---------------------------------------------------------------------------

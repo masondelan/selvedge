@@ -1,7 +1,9 @@
 """SQLite storage layer for Selvedge."""
 
 import functools
+import json
 import logging
+import re
 import sqlite3
 import time
 import uuid
@@ -65,6 +67,26 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 );
 """
 
+# One audit row per `selvedge migrate-paths --apply` run (v0.3.7). Makes the
+# entity-path re-canonicalization operation visible to `selvedge doctor` and
+# to future releases, and keeps it reversible by inspection — `detail` holds
+# the JSON list of {from, to} rewrites the run performed. Introduced as a
+# plain ``CREATE TABLE IF NOT EXISTS`` (the same way ``tool_calls`` was added)
+# rather than a versioned migration, since it's a brand-new table, not an
+# alteration of an existing one — so opening a v0.3.7 DB with an older
+# Selvedge doesn't trip the doctor's downgrade detector.
+CREATE_PATH_MIGRATIONS_SQL = """
+CREATE TABLE IF NOT EXISTS path_migrations (
+    id             TEXT PRIMARY KEY,
+    timestamp      TEXT NOT NULL,
+    rows_scanned   INTEGER NOT NULL DEFAULT 0,
+    rows_rewritten INTEGER NOT NULL DEFAULT 0,
+    collisions     INTEGER NOT NULL DEFAULT 0,
+    agent          TEXT NOT NULL DEFAULT '',
+    detail         TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
 CREATE_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_entity_path   ON events(entity_path);",
     "CREATE INDEX IF NOT EXISTS idx_timestamp     ON events(timestamp);",
@@ -72,6 +94,7 @@ CREATE_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_change_type   ON events(change_type);",
     "CREATE INDEX IF NOT EXISTS idx_tc_tool_name  ON tool_calls(tool_name);",
     "CREATE INDEX IF NOT EXISTS idx_tc_timestamp  ON tool_calls(timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_pm_timestamp  ON path_migrations(timestamp);",
 ]
 
 # Schema migrations are now declared in selvedge.migrations as an explicit,
@@ -94,6 +117,69 @@ def _escape_like(s: str) -> str:
          .replace("_", _LIKE_ESCAPE + "_")
          .replace("%", _LIKE_ESCAPE + "%")
     )
+
+
+# Entity-path canonicalization (v0.3.7) -------------------------------------
+#
+# A single deterministic chokepoint so that ``src/auth.py::login`` and
+# ``./src/auth.py::login`` resolve to the SAME entity instead of silently
+# splitting history. Wired into ``_normalize_for_storage`` so EVERY write —
+# the MCP ``log_change`` tool, the ``selvedge log`` CLI command, and the
+# migration importers (which batch through ``log_event_batch``) — stores a
+# canonical path. Nothing writes an un-canonicalized ``entity_path`` after
+# this lands.
+_LEADING_DOT_SLASH_RE = re.compile(r"^(?:\./)+")
+_MULTI_SLASH_RE = re.compile(r"/{2,}")
+
+
+def canonicalize_entity_path(entity_path: str) -> str:
+    """Return the canonical form of an ``entity_path``.
+
+    Deterministic and idempotent. Applies, in order:
+
+      1. trim surrounding whitespace,
+      2. normalize separators to ``/`` (Windows-style ``\\`` becomes ``/``),
+      3. collapse runs of slashes (``a//b`` -> ``a/b``),
+      4. strip any number of leading ``./`` segments (``././src`` -> ``src``).
+
+    **Case is preserved on purpose.** Filesystems differ — macOS and Windows
+    are case-insensitive by default, but most Linux filesystems are
+    case-sensitive — so silently lowercasing would collapse genuinely
+    distinct entities (``Users`` vs ``users``) on case-sensitive hosts.
+    Case-collisions are surfaced as a ``selvedge doctor`` warning instead of
+    being merged away. The ``::`` symbol separator and dotted column paths
+    are left untouched (only slash separators are normalized).
+
+    A non-empty input never canonicalizes to the empty string: if the rules
+    above would strip everything (e.g. ``"./"``), the trimmed original is
+    returned so a write can't end up with an empty ``entity_path``.
+    """
+    trimmed = entity_path.strip()
+    canonical = trimmed.replace("\\", "/")
+    canonical = _MULTI_SLASH_RE.sub("/", canonical)
+    canonical = _LEADING_DOT_SLASH_RE.sub("", canonical)
+    return canonical or trimmed
+
+
+def _parse_iso(ts: str) -> datetime:
+    """Parse a stored canonical UTC timestamp into an aware ``datetime``.
+
+    Stored timestamps always carry the ``Z`` suffix (see ``timeutil``), so
+    this is the inverse used for proximity-window math in
+    :meth:`SelvedgeStorage.get_prior_attempts`.
+    """
+    s = ts[:-1] + "+00:00" if ts.endswith(("Z", "z")) else ts
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+# Change types that represent the removal/teardown of an entity. An "attempt"
+# (any non-removal event) is inferred as *reverted* when one of these follows
+# it on the same path — the v0.3.7 add->remove proximity heuristic that stands
+# in until explicit ``reject``/``revert`` change_types ship in v0.3.11.
+_REMOVAL_CHANGE_TYPES: frozenset[str] = frozenset({"remove", "delete", "index_remove"})
 
 
 def _is_locked_error(exc: BaseException) -> bool:
@@ -220,6 +306,7 @@ class SelvedgeStorage:
         with self._session() as conn:
             conn.execute(CREATE_TABLE_SQL)
             conn.execute(CREATE_TOOL_CALLS_SQL)
+            conn.execute(CREATE_PATH_MIGRATIONS_SQL)
             for idx_sql in CREATE_INDEXES_SQL:
                 conn.execute(idx_sql)
         # Migrations open their own connection and manage transactions
@@ -233,7 +320,15 @@ class SelvedgeStorage:
 
     @staticmethod
     def _normalize_for_storage(event: ChangeEvent) -> ChangeEvent:
-        """Defense-in-depth: normalize the timestamp before insertion."""
+        """Canonicalize the entity_path and normalize the timestamp pre-insert.
+
+        This is the single write chokepoint for entity-path canonicalization
+        (v0.3.7): both :meth:`log_event` and :meth:`log_event_batch` route
+        through here, so the MCP tool, the CLI, and the importers all store
+        canonical paths without each having to remember to call
+        :func:`canonicalize_entity_path` themselves.
+        """
+        event.entity_path = canonicalize_entity_path(event.entity_path)
         try:
             event.timestamp = normalize_timestamp(event.timestamp)
         except (ValueError, TypeError):
@@ -293,6 +388,60 @@ class SelvedgeStorage:
                 rows,
             )
         return events
+
+    @_retry_on_locked
+    def log_rename(
+        self,
+        old_path: str,
+        new_path: str,
+        *,
+        entity_type: str = "other",
+        diff: str = "",
+        reasoning: str = "",
+        agent: str = "",
+        session_id: str = "",
+        git_commit: str = "",
+        project: str = "",
+        changeset_id: str = "",
+    ) -> list[ChangeEvent]:
+        """Record a rename as the dual-event pattern (v0.3.7).
+
+        Emits a ``rename`` event on ``old_path`` and a ``create`` event on
+        ``new_path`` whose ``metadata.renamed_from`` records the canonical old
+        path. This is the same shape the SQL DDL / Alembic importers already
+        emit internally, so a later ``blame`` / ``diff`` on the new path
+        surfaces the rename history instead of returning empty. Both paths run
+        through the shared write chokepoint, so both land canonicalized.
+
+        Returns the two stored events ``[rename, create]``, oldest first.
+        """
+        canonical_old = canonicalize_entity_path(old_path)
+        rename_event = ChangeEvent(
+            entity_path=old_path,
+            change_type="rename",
+            entity_type=entity_type,
+            diff=diff,
+            reasoning=reasoning,
+            agent=agent,
+            session_id=session_id,
+            git_commit=git_commit,
+            project=project,
+            changeset_id=changeset_id,
+        )
+        create_event = ChangeEvent(
+            entity_path=new_path,
+            change_type="create",
+            entity_type=entity_type,
+            diff=diff,
+            reasoning=reasoning,
+            agent=agent,
+            session_id=session_id,
+            git_commit=git_commit,
+            project=project,
+            changeset_id=changeset_id,
+            metadata=json.dumps({"renamed_from": canonical_old}),
+        )
+        return self.log_event_batch([rename_event, create_event])
 
     # ------------------------------------------------------------------
     # Write — tool call telemetry (local only, never networked)
@@ -434,6 +583,103 @@ class SelvedgeStorage:
             return cursor.rowcount
 
     # ------------------------------------------------------------------
+    # Entity-path migration (v0.3.7 — `selvedge migrate-paths`)
+    # ------------------------------------------------------------------
+
+    @_retry_on_locked
+    def recanonicalize_paths(self, *, apply: bool = False, agent: str = "") -> dict:
+        """Re-canonicalize every stored ``entity_path`` (v0.3.7 backfill).
+
+        Scans the events table, computes the canonical form of each path, and
+        reports the rows whose stored value differs. With ``apply=False`` (the
+        ``selvedge migrate-paths`` dry-run default) nothing is written — the
+        caller gets the planned rewrites plus the *collisions report*:
+        pre-canonicalization paths that converge to the same canonical value,
+        i.e. histories that the migration would MERGE. With ``apply=True`` the
+        rewrites land in one transaction and a single audit row is appended to
+        ``path_migrations``.
+
+        Idempotent on the event data: re-running after an ``apply`` rewrites
+        zero rows because every path is already canonical. (Each ``apply`` run
+        still records its own ``path_migrations`` audit row — the trail is the
+        point.)
+
+        Returns a report dict with ``applied``, ``rows_scanned``,
+        ``rows_to_rewrite``, ``rows_rewritten`` (0 on a dry run), the
+        ``rewrites`` list (``{id, from, to}``), and the ``collisions`` list
+        (``{canonical, paths}``).
+        """
+        with self._session() as conn:
+            rows = conn.execute("SELECT id, entity_path FROM events").fetchall()
+            rows_scanned = len(rows)
+
+            rewrites: list[dict] = []
+            # canonical value -> set of distinct original paths feeding into it
+            convergence: dict[str, set[str]] = {}
+            for r in rows:
+                original = r["entity_path"]
+                canonical = canonicalize_entity_path(original)
+                convergence.setdefault(canonical, set()).add(original)
+                if canonical != original:
+                    rewrites.append(
+                        {"id": r["id"], "from": original, "to": canonical}
+                    )
+
+            # A collision is any canonical value reached from >1 DISTINCT
+            # original path — applying the migration merges those histories.
+            collisions = [
+                {"canonical": canonical, "paths": sorted(paths)}
+                for canonical, paths in sorted(convergence.items())
+                if len(paths) > 1
+            ]
+
+            if apply:
+                for rw in rewrites:
+                    conn.execute(
+                        "UPDATE events SET entity_path = ? WHERE id = ?",
+                        (rw["to"], rw["id"]),
+                    )
+                conn.execute(
+                    """
+                    INSERT INTO path_migrations
+                        (id, timestamp, rows_scanned, rows_rewritten,
+                         collisions, agent, detail)
+                    VALUES (?,?,?,?,?,?,?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        utc_now_iso(),
+                        rows_scanned,
+                        len(rewrites),
+                        len(collisions),
+                        agent,
+                        json.dumps({"rewrites": rewrites, "collisions": collisions}),
+                    ),
+                )
+
+        return {
+            "applied": apply,
+            "rows_scanned": rows_scanned,
+            "rows_to_rewrite": len(rewrites),
+            "rows_rewritten": len(rewrites) if apply else 0,
+            "rewrites": rewrites,
+            "collisions": collisions,
+        }
+
+    def get_last_path_migration(self) -> dict | None:
+        """Return the most recent ``path_migrations`` audit row, or None.
+
+        Used by ``selvedge doctor`` to surface when ``migrate-paths`` last ran
+        and what it rewrote — keeping the entity-path migration visible.
+        """
+        with self._session() as conn:
+            row = conn.execute(
+                "SELECT id, timestamp, rows_scanned, rows_rewritten, collisions, "
+                "agent FROM path_migrations ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    # ------------------------------------------------------------------
     # Read — change events
     # ------------------------------------------------------------------
 
@@ -573,6 +819,205 @@ class SelvedgeStorage:
         """Total number of change events logged."""
         with self._session() as conn:
             return conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+
+    def find_case_collisions(self) -> list[dict]:
+        """Return groups of distinct entity_paths that differ only by case.
+
+        Powers the ``selvedge doctor`` case-collision watch (v0.3.7). Because
+        canonicalization preserves case on purpose, sibling paths like
+        ``Users.email`` and ``users.email`` coexist as separate entities —
+        correct on case-sensitive Linux, but usually a typo on
+        case-insensitive macOS/Windows. Surfacing them keeps the divergence
+        visible without silently merging it. Each group is
+        ``{"lower": <lowercased path>, "paths": [<distinct originals>]}``.
+        """
+        with self._session() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT entity_path FROM events"
+            ).fetchall()
+        groups: dict[str, set[str]] = {}
+        for r in rows:
+            path = r["entity_path"]
+            groups.setdefault(path.lower(), set()).add(path)
+        return [
+            {"lower": lower, "paths": sorted(paths)}
+            for lower, paths in sorted(groups.items())
+            if len(paths) > 1
+        ]
+
+    def get_prior_attempts(
+        self,
+        *,
+        entity_path: str = "",
+        query: str = "",
+        min_confidence: str = "proximity_high",
+        window_minutes: int = 10080,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Return prior change attempts on an entity, each with inferred outcome.
+
+        Storage layer for the v0.3.7 ``prior_attempts`` wedge. Two lookup
+        modes (``entity_path`` takes precedence when both are given):
+
+          - ``entity_path`` — events at that canonical path (exact + ``.``
+            prefix, so a table query also sees its columns).
+          - ``query`` — free-text substring across reasoning / diff /
+            entity_path, to find candidate entities by description.
+
+        For each candidate path the timeline is walked oldest-first and every
+        non-removal event (the "attempt") is paired with the next removal
+        event (``remove`` / ``delete`` / ``index_remove``) on the same path. A
+        paired attempt reports ``outcome="reverted"``; an unpaired one
+        ``outcome="active"``. ``confidence`` is ``proximity_high`` when the
+        attempt->removal gap is within ``window_minutes``, else
+        ``proximity_low`` (active attempts are always ``proximity_low``).
+
+        Conservative-recall posture: ``min_confidence="proximity_high"`` (the
+        default) returns only the high-confidence "tried then rejected"
+        signal; pass ``"proximity_low"`` to include the noisy tail. An empty
+        list is the preferred answer over a false positive.
+
+        Each result is an event dict plus three always-present keys —
+        ``outcome``, ``confidence``, ``outcome_reasoning`` (the reverting
+        event's reasoning, or ``""`` while active). Removal events are folded
+        into the attempt they close and never appear on their own. Newest
+        first, capped at ``limit``.
+        """
+        with self._session() as conn:
+            if entity_path:
+                canonical = canonicalize_entity_path(entity_path)
+                prefix = f"{_escape_like(canonical)}.%"
+                rows = conn.execute(
+                    """
+                    SELECT * FROM events
+                    WHERE entity_path = ? OR entity_path LIKE ? ESCAPE '\\'
+                    ORDER BY entity_path ASC, timestamp ASC
+                    """,
+                    (canonical, prefix),
+                ).fetchall()
+            elif query:
+                pattern = f"%{_escape_like(query)}%"
+                path_rows = conn.execute(
+                    """
+                    SELECT DISTINCT entity_path FROM events
+                    WHERE entity_path LIKE ? ESCAPE '\\'
+                       OR diff        LIKE ? ESCAPE '\\'
+                       OR reasoning   LIKE ? ESCAPE '\\'
+                    """,
+                    (pattern, pattern, pattern),
+                ).fetchall()
+                paths = [r["entity_path"] for r in path_rows]
+                if not paths:
+                    return []
+                placeholders = ",".join("?" for _ in paths)
+                rows = conn.execute(
+                    f"SELECT * FROM events WHERE entity_path IN ({placeholders}) "
+                    "ORDER BY entity_path ASC, timestamp ASC",
+                    paths,
+                ).fetchall()
+            else:
+                return []
+
+        # Group the (already path/time-ordered) rows by entity_path.
+        by_path: dict[str, list[dict]] = {}
+        for r in rows:
+            by_path.setdefault(r["entity_path"], []).append(dict(r))
+
+        window = timedelta(minutes=window_minutes)
+        results: list[dict] = []
+        for events in by_path.values():
+            removals = [e for e in events if e["change_type"] in _REMOVAL_CHANGE_TYPES]
+            for e in events:
+                if e["change_type"] in _REMOVAL_CHANGE_TYPES:
+                    continue  # removals surface via the attempt they close
+                attempt_ts = _parse_iso(e["timestamp"])
+                closing = next(
+                    (
+                        rm
+                        for rm in removals
+                        if _parse_iso(rm["timestamp"]) >= attempt_ts
+                    ),
+                    None,
+                )
+                if closing is None:
+                    outcome, confidence, outcome_reasoning = (
+                        "active",
+                        "proximity_low",
+                        "",
+                    )
+                else:
+                    gap = _parse_iso(closing["timestamp"]) - attempt_ts
+                    confidence = (
+                        "proximity_high" if gap <= window else "proximity_low"
+                    )
+                    outcome = "reverted"
+                    outcome_reasoning = closing["reasoning"]
+                annotated = dict(e)
+                annotated["outcome"] = outcome
+                annotated["confidence"] = confidence
+                annotated["outcome_reasoning"] = outcome_reasoning
+                results.append(annotated)
+
+        if min_confidence == "proximity_high":
+            results = [r for r in results if r["confidence"] == "proximity_high"]
+
+        # Newest-first, then cap.
+        results.sort(key=lambda r: r["timestamp"], reverse=True)
+        return results[:limit]
+
+    def summarize(
+        self, *, since: str = "", project: str = "", top_n: int = 10
+    ) -> dict:
+        """Return aggregate activity counts for ``selvedge.aggregates.summary()``.
+
+        Pure read. Powers the schema-versioned digest dataclass that v0.3.9's
+        ``selvedge audit`` / ``digest`` will consume. Returns the total event
+        count, the distinct changesets and agents touched in the window, and
+        the top entities by event count (capped at ``top_n``).
+        """
+        clauses = ["1=1"]
+        params: list = []
+        if since:
+            clauses.append("timestamp >= ?")
+            params.append(since)
+        if project:
+            clauses.append("project = ?")
+            params.append(project)
+        where = " AND ".join(clauses)
+        with self._session() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM events WHERE {where}", params
+            ).fetchone()[0]
+            changesets = [
+                r[0]
+                for r in conn.execute(
+                    f"SELECT DISTINCT changeset_id FROM events WHERE {where} "
+                    "AND changeset_id != '' ORDER BY changeset_id",
+                    params,
+                ).fetchall()
+            ]
+            agents = [
+                r[0]
+                for r in conn.execute(
+                    f"SELECT DISTINCT agent FROM events WHERE {where} "
+                    "AND agent != '' ORDER BY agent",
+                    params,
+                ).fetchall()
+            ]
+            top_entities = [
+                {"entity_path": r["entity_path"], "event_count": r["cnt"]}
+                for r in conn.execute(
+                    f"SELECT entity_path, COUNT(*) AS cnt FROM events WHERE {where} "
+                    "GROUP BY entity_path ORDER BY cnt DESC, entity_path ASC LIMIT ?",
+                    [*params, top_n],
+                ).fetchall()
+            ]
+        return {
+            "total_events": total,
+            "changesets": changesets,
+            "agents": agents,
+            "top_entities": top_entities,
+        }
 
     # ------------------------------------------------------------------
     # Read — tool call telemetry

@@ -29,6 +29,7 @@ _EXPECTED_TOOL_NAMES = frozenset({
     "history",
     "changeset",
     "search",
+    "prior_attempts",
 })
 
 
@@ -85,7 +86,7 @@ def _payload(result):
 
 
 @pytest.mark.asyncio
-async def test_server_initializes_and_lists_six_tools(server_params):
+async def test_server_initializes_and_lists_seven_tools(server_params):
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             init = await session.initialize()
@@ -250,3 +251,60 @@ async def test_log_change_returns_warnings_for_short_reasoning(server_params):
             assert payload["status"] == "logged"
             assert "warnings" in payload
             assert any("generic" in w for w in payload["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# v0.3.7 — prior_attempts + the log_change rename extension over real stdio
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_prior_attempts_round_trip(server_params):
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            await session.call_tool("log_change", arguments={
+                "entity_path": "users.token",
+                "change_type": "add",
+                "reasoning": "Tried a per-user token column for SSO.",
+            })
+            await session.call_tool("log_change", arguments={
+                "entity_path": "users.token",
+                "change_type": "remove",
+                "reasoning": "Reverted: SSO moved to short-lived JWTs.",
+            })
+
+            result = await session.call_tool(
+                "prior_attempts", arguments={"entity_path": "users.token"}
+            )
+            payload = _payload(result)
+            assert isinstance(payload, list)
+            assert len(payload) == 1
+            assert payload[0]["outcome"] == "reverted"
+            assert payload[0]["confidence"] == "proximity_high"
+            assert "JWTs" in payload[0]["outcome_reasoning"]
+
+
+@pytest.mark.asyncio
+async def test_log_change_rename_dual_event_round_trip(server_params):
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("log_change", arguments={
+                "entity_path": "src/auth/session.py::login",
+                "change_type": "rename",
+                "rename_from": "src/auth.py::login",
+                "entity_type": "function",
+                "reasoning": "Split auth.py into a package; login moved.",
+            })
+            assert not result.isError
+            assert _payload(result)["status"] == "logged"
+
+            # New path carries the create event with metadata.renamed_from.
+            new = _payload(
+                await session.call_tool(
+                    "blame", arguments={"entity_path": "src/auth/session.py::login"}
+                )
+            )
+            assert new["change_type"] == "create"
+            assert new["metadata"]["renamed_from"] == "src/auth.py::login"

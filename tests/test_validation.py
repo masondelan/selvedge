@@ -10,8 +10,10 @@ from __future__ import annotations
 import pytest
 
 from selvedge.validation import (
+    ENTITY_PATTERNS,
     GENERIC_REASONING_PATTERNS,
     REASONING_MIN_LENGTH,
+    check_entity_path_shape,
     check_reasoning_quality,
 )
 
@@ -136,3 +138,37 @@ def test_patterns_constant_is_tuple():
 def test_min_length_is_positive_int():
     assert isinstance(REASONING_MIN_LENGTH, int)
     assert REASONING_MIN_LENGTH > 0
+
+
+# ---------------------------------------------------------------------------
+# Entity-path shape validation (v0.3.7) — warn, never reject
+# ---------------------------------------------------------------------------
+
+
+def test_check_entity_path_shape_warns_on_malformed_per_type():
+    # function/method path missing the '::' file→symbol separator
+    fn = check_entity_path_shape("justaname", "function")
+    assert fn and "::" in fn[0]
+    # column path missing the '.' table→column separator
+    col = check_entity_path_shape("justatable", "column")
+    assert col and "." in col[0]
+    # file path with neither a separator nor an extension
+    fl = check_entity_path_shape("README", "file")
+    assert fl and "file" in fl[0].lower()
+
+
+def test_check_entity_path_shape_accepts_well_formed():
+    # Each well-formed shape produces no warning.
+    assert check_entity_path_shape("src/auth.py::login", "function") == []
+    assert check_entity_path_shape("users.email", "column") == []
+    assert check_entity_path_shape("src/auth.py", "file") == []  # has separator
+    assert check_entity_path_shape("Makefile.in", "file") == []  # has extension
+
+
+def test_check_entity_path_shape_is_silent_for_unshaped_types_and_empty():
+    # Entity types without a rule (and empty paths) never warn.
+    assert check_entity_path_shape("anything", "other") == []
+    assert check_entity_path_shape("anything", "dependency") == []
+    assert check_entity_path_shape("", "function") == []
+    # The patterns are keyed by the documented entity types.
+    assert set(ENTITY_PATTERNS) == {"function", "column", "file"}

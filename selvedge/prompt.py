@@ -67,8 +67,12 @@ You have access to Selvedge (MCP server: `selvedge`) for change tracking.
   `changeset_id` on all related `log_change` calls — use a short slug
   like `add-stripe-billing`. This lets anyone query the full scope of
   the change with `selvedge.changeset()`.
-- Before modifying an entity, call `selvedge.diff` or `selvedge.blame`
-  to understand its history and avoid conflicting with past decisions.
+- Before editing an entity, call `selvedge.prior_attempts` on it — if the
+  same change was tried before and reverted, you'll see the prior
+  reasoning and why it was rejected, and can change your plan instead of
+  repeating a rejected approach.
+- Then call `selvedge.diff` or `selvedge.blame` for the entity's broader
+  history before conflicting with past decisions.
 """
 
 

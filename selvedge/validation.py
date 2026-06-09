@@ -10,6 +10,7 @@ agents toward better intent capture without dropping data on the floor.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 # Patterns matching placeholder reasoning that an agent might log instead
 # of describing actual intent. Matched case-insensitively against the
@@ -75,3 +76,67 @@ def check_reasoning_quality(reasoning: str) -> list[str]:
         )
 
     return warnings
+
+
+# ---------------------------------------------------------------------------
+# Entity-path shape validation (v0.3.7)
+#
+# Per-``entity_type`` shape checks that WARN but never reject — the same
+# nudge-not-gate posture as the reasoning-quality validator above. The
+# patterns live here (not inline in the write path) so new entity types can
+# be added by extending ``ENTITY_PATTERNS`` without touching ``log_change``.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EntityPattern:
+    """The expected-shape regex for one entity type plus its nudge message.
+
+    If ``expected`` does NOT match the path, ``hint`` is returned as a
+    warning. The regex describes what a well-formed path *looks like*, so a
+    missing match is the signal something is probably mis-shaped.
+    """
+
+    expected: re.Pattern[str]
+    hint: str
+
+
+#: Expected-shape rules keyed by ``entity_type``. Extend this dict to cover a
+#: new type — the write path picks it up with no further changes.
+ENTITY_PATTERNS: dict[str, EntityPattern] = {
+    "function": EntityPattern(
+        re.compile(r"::"),
+        "function/method paths usually look like 'src/auth.py::login' "
+        "(no '::' separator found between file and symbol).",
+    ),
+    "column": EntityPattern(
+        re.compile(r"\."),
+        "column paths usually look like 'table.column' "
+        "(no '.' separator found between table and column).",
+    ),
+    "file": EntityPattern(
+        # A file path normally has a directory separator OR a file extension.
+        re.compile(r"/|\.[^./]+$"),
+        "file paths usually have a directory separator or an extension, "
+        "like 'src/auth.py' (none found).",
+    ),
+}
+
+
+def check_entity_path_shape(entity_path: str, entity_type: str) -> list[str]:
+    """Return soft warnings when ``entity_path`` doesn't fit ``entity_type``.
+
+    Warn-never-reject — the event is still logged, exactly like
+    :func:`check_reasoning_quality`. Returns an empty list when the type has
+    no shape rule, the path is empty, or the path already matches the
+    expected shape.
+    """
+    pattern = ENTITY_PATTERNS.get(entity_type)
+    if pattern is None:
+        return []
+    stripped = entity_path.strip()
+    if not stripped:
+        return []
+    if pattern.expected.search(stripped):
+        return []
+    return [pattern.hint]

@@ -399,3 +399,32 @@ def test_doctor_tool_calls_warns_when_oversized(tmp_path, monkeypatch):
     row = next(c for c in checks if c["label"] == "tool_calls size")
     assert row["status"] == "WARN"
     assert "selvedge prune" in row["detail"]
+
+
+# ---------------------------------------------------------------------------
+# v0.3.7 — case-collision watch + path-migration visibility
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_case_collision_and_path_migration_rows(tmp_path, monkeypatch):
+    """The v0.3.7 doctor rows: case-collision WARN + path-migration INFO."""
+    from selvedge.models import ChangeEvent
+
+    db = tmp_path / ".selvedge" / "selvedge.db"
+    storage = SelvedgeStorage(db)
+    # Two sibling paths differing only by case (preserved on purpose).
+    storage.log_event(ChangeEvent(entity_path="Users.email", change_type="add"))
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add"))
+    # An applied migrate-paths run so the path_migrations audit row exists.
+    storage.recanonicalize_paths(apply=True, agent="claude-code")
+
+    checks = _doctor_checks()
+    # Case-collision watch warns (exit-0-by-default: WARN, not FAIL).
+    case_row = next(c for c in checks if c["label"] == "Case collisions")
+    assert case_row["status"] == "WARN"
+    assert "case" in case_row["detail"].lower()
+    assert not any(c["status"] == "FAIL" for c in checks)
+    # Path-migration row surfaces the last apply run as INFO.
+    mig_row = next(c for c in checks if c["label"] == "Path migration")
+    assert mig_row["status"] == "INFO"
+    assert "rewritten" in mig_row["detail"]

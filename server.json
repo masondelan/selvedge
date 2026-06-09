@@ -2,7 +2,7 @@
   "namespace": "io.github.masondelan",
   "name": "selvedge",
   "description": "Change tracking for AI-era codebases \u2014 captures the why behind every change as the agent makes it. git blame for semantic entities (DB columns, functions, env vars, deps), with reasoning written by the agent in the same context that produced the change.",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "repository": "https://github.com/masondelan/selvedge",
   "homepage": "https://selvedge.sh",
   "license": "MIT",
@@ -10,7 +10,7 @@
     {
       "registry_name": "pypi",
       "name": "selvedge",
-      "version": "0.3.6",
+      "version": "0.3.7",
       "command": "selvedge-server",
       "runtime_arguments": []
     }
@@ -18,7 +18,7 @@
   "tools": [
     {
       "name": "log_change",
-      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), the result includes a `warnings`\narray \u2014 the event is still stored.\n\nOn validation failure (invalid change_type, missing entity_path) the\nresult is `{\"status\": \"error\", \"error\": \"...\"}` with no event written."
+      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), or the entity_path doesn't match the\nusual shape for its entity_type, the result includes a `warnings`\narray \u2014 the event is still stored.\n\nRenames: pass the new path in `entity_path`, set `change_type=\"rename\"`,\nand pass the old path in `rename_from`. Selvedge then writes two events \u2014\na `rename` on the old path and a `create` on the new path with\n`metadata.renamed_from` set \u2014 so the entity's history follows it. Example:\n\n    log_change(\n        entity_path=\"src/auth/session.py::login\",   # new path\n        change_type=\"rename\",\n        rename_from=\"src/auth.py::login\",            # old path\n        entity_type=\"function\",\n        reasoning=\"Split auth.py into an auth/ package; login moved.\",\n    )\n\nOn validation failure (invalid change_type, missing entity_path, or\n`rename_from` set without change_type='rename') the result is\n`{\"status\": \"error\", \"error\": \"...\"}` with no event written."
     },
     {
       "name": "diff",
@@ -39,6 +39,10 @@
     {
       "name": "search",
       "description": "Full-text search across entity paths, diffs, reasoning, and agents.\n\nUseful for questions like 'what changes were made for the billing\nfeature?', 'which columns were added by cursor?', or 'show everything\nrelated to authentication'."
+    },
+    {
+      "name": "prior_attempts",
+      "description": "Prior change attempts on an entity, each with an inferred outcome.\n\nCall this BEFORE editing an entity. If the same change was tried before\nand reverted, you get the prior `reasoning` and `change_type` plus an\ninferred `outcome` \u2014 so you can change your plan instead of repeating a\nrejected approach.\n\nEach result is a change event with three extra fields:\n\n  - `outcome`           \u2014 \"reverted\" (a later remove/delete on the same\n                          path) or \"active\" (no later removal seen).\n  - `confidence`        \u2014 \"proximity_high\" or \"proximity_low\".\n  - `outcome_reasoning` \u2014 the reverting event's reasoning (WHY it was\n                          rejected), or \"\" while still active.\n\nOutcome is inferred from add->remove proximity \u2014 v0.3.7 has no explicit\nreject/revert change types yet (those arrive in v0.3.11). Output is\ntemplated, deterministic, and makes no LLM call. This is a pull-only\ntool: it never writes and never pushes; you decide when to ask.\n\nConservative by design \u2014 `min_confidence` defaults to \"proximity_high\",\nso an empty list (nothing clearly tried-and-rejected) is the normal,\npreferred answer over a speculative false positive. Pass\n`min_confidence=\"proximity_low\"` to widen recall."
     }
   ]
 }

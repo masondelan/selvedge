@@ -13,6 +13,7 @@ Commands:
   selvedge history            Filtered history across all entities
   selvedge search <query>     Full-text search across all events
   selvedge log                Manually log a change event
+  selvedge migrate-paths      Re-canonicalize stored entity paths (backfill)
   selvedge stats              Tool-call coverage report
   selvedge install-hook       Install git post-commit hook
   selvedge backfill-commit    Stamp git_commit on recent events
@@ -43,7 +44,7 @@ from .migrations import MIGRATIONS, get_applied_versions, latest_version
 from .models import ChangeEvent, ChangeType
 from .storage import SelvedgeStorage
 from .timeutil import parse_time_string
-from .validation import check_reasoning_quality
+from .validation import check_entity_path_shape, check_reasoning_quality
 
 console = Console()
 err_console = Console(stderr=True)
@@ -601,6 +602,55 @@ def _doctor_checks() -> list[dict]:
         checks.append(_check(
             "tool_calls size", "INFO", "no DB yet"
         ))
+
+    # 11. Case-collision watch — sibling entity paths that differ only by
+    # case. Canonicalization preserves case on purpose (most Linux
+    # filesystems are case-sensitive), so these coexist rather than being
+    # merged. WARN when present so an unintended typo collision is visible.
+    if db_exists:
+        try:
+            collisions = SelvedgeStorage(resolved.path).find_case_collisions()
+        except sqlite3.Error as e:
+            checks.append(_check("Case collisions", "FAIL", f"sqlite error: {e}"))
+        else:
+            if collisions:
+                sample = "; ".join(" vs ".join(c["paths"]) for c in collisions[:3])
+                more = f" (+{len(collisions) - 3} more)" if len(collisions) > 3 else ""
+                checks.append(_check(
+                    "Case collisions", "WARN",
+                    f"{len(collisions)} group(s) of paths differing only by case: "
+                    f"{sample}{more} — kept distinct (case-sensitive hosts); "
+                    f"reconcile if unintended"
+                ))
+            else:
+                checks.append(_check(
+                    "Case collisions", "PASS",
+                    "no sibling paths differ only by case"
+                ))
+    else:
+        checks.append(_check("Case collisions", "INFO", "no DB yet"))
+
+    # 12. Entity-path migration — surface the last migrate-paths --apply run.
+    if db_exists:
+        try:
+            last_mig = SelvedgeStorage(resolved.path).get_last_path_migration()
+        except sqlite3.Error as e:
+            checks.append(_check("Path migration", "FAIL", f"sqlite error: {e}"))
+        else:
+            if last_mig is None:
+                checks.append(_check(
+                    "Path migration", "INFO",
+                    "migrate-paths not applied — run `selvedge migrate-paths` "
+                    "to preview re-canonicalization"
+                ))
+            else:
+                checks.append(_check(
+                    "Path migration", "INFO",
+                    f"{last_mig['timestamp']}  ({last_mig['rows_rewritten']} "
+                    f"row(s) rewritten, {last_mig['collisions']} collision(s))"
+                ))
+    else:
+        checks.append(_check("Path migration", "INFO", "no DB yet"))
 
     return checks
 
@@ -1263,7 +1313,13 @@ _CHANGE_TYPE_CHOICES = [ct.value for ct in ChangeType]
 @click.option("--commit", default="", help="Git commit hash")
 @click.option("--project", default="", help="Project name")
 @click.option("--changeset", "-c", default="", help="Changeset ID to group related changes")
-def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, commit, project, changeset):
+@click.option(
+    "--rename-from",
+    default="",
+    help="Old path when CHANGE_TYPE is 'rename'; ENTITY_PATH is the new path. "
+    "Records the dual-event rename pattern (rename on old + create on new).",
+)
+def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, commit, project, changeset, rename_from):
     """Manually log a change event.
 
     \b
@@ -1276,32 +1332,164 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
       selvedge log users.email add --reasoning "Added for auth"
       selvedge log src/auth.py modify --diff "Updated login logic" --agent "me"
       selvedge log payments.amount add --changeset add-stripe-billing
+      selvedge log src/auth/session.py::login rename --rename-from src/auth.py::login
     """
-    try:
-        event = ChangeEvent(
-            entity_path=entity_path,
-            change_type=change_type,
-            diff=diff_text,
-            entity_type=entity_type,
-            reasoning=reasoning,
-            agent=agent,
-            git_commit=commit,
-            project=project,
-            changeset_id=changeset,
+    if rename_from and change_type != "rename":
+        err_console.print(
+            "[red]error:[/red] --rename-from is only valid with CHANGE_TYPE 'rename'"
         )
+        sys.exit(2)
+
+    storage = get_storage()
+    try:
+        if rename_from:
+            events = storage.log_rename(
+                old_path=rename_from,
+                new_path=entity_path,
+                entity_type=entity_type,
+                diff=diff_text,
+                reasoning=reasoning,
+                agent=agent,
+                git_commit=commit,
+                project=project,
+                changeset_id=changeset,
+            )
+            stored = events[-1]
+        else:
+            event = ChangeEvent(
+                entity_path=entity_path,
+                change_type=change_type,
+                diff=diff_text,
+                entity_type=entity_type,
+                reasoning=reasoning,
+                agent=agent,
+                git_commit=commit,
+                project=project,
+                changeset_id=changeset,
+            )
+            stored = storage.log_event(event)
     except ValueError as e:
         err_console.print(f"[red]error:[/red] {e}")
         sys.exit(2)
 
-    storage = get_storage()
-    stored = storage.log_event(event)
     suffix = f"  [dim]changeset:{stored.changeset_id}[/dim]" if stored.changeset_id else ""
-    console.print(f"[green]✓[/green] Logged [bold]{entity_path}[/bold] ({change_type})  [dim]{stored.id[:8]}[/dim]{suffix}")
+    if rename_from:
+        console.print(
+            f"[green]✓[/green] Renamed [bold]{rename_from}[/bold] → "
+            f"[bold]{stored.entity_path}[/bold]  [dim]{stored.id[:8]}[/dim]{suffix}"
+        )
+    else:
+        console.print(
+            f"[green]✓[/green] Logged [bold]{stored.entity_path}[/bold] ({change_type})  "
+            f"[dim]{stored.id[:8]}[/dim]{suffix}"
+        )
 
-    # Surface reasoning-quality warnings so manual entries get the same
-    # nudges that agent-driven log_change calls do.
-    for warning in check_reasoning_quality(reasoning):
+    # Surface reasoning-quality + entity-path-shape warnings so manual entries
+    # get the same nudges that agent-driven log_change calls do.
+    warnings = check_reasoning_quality(reasoning)
+    warnings += check_entity_path_shape(stored.entity_path, stored.entity_type)
+    for warning in warnings:
         err_console.print(f"[yellow]warning:[/yellow] {warning}")
+
+
+# ---------------------------------------------------------------------------
+# migrate-paths
+# ---------------------------------------------------------------------------
+
+
+@cli.command("migrate-paths")
+@click.option(
+    "--apply",
+    "apply_changes",
+    is_flag=True,
+    help="Write the re-canonicalized paths. Without this flag it's a dry run "
+    "(the default) — nothing is written.",
+)
+@click.option(
+    "--agent",
+    default="",
+    help="Label this migration run with an agent/author name in the audit row.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def migrate_paths(apply_changes, agent, as_json):
+    """Re-canonicalize stored entity paths (one-shot backfill).
+
+    \b
+    DRY RUN IS THE DEFAULT — nothing is written until you pass --apply.
+    A dry run prints:
+      • how many rows would be rewritten (old path → canonical path), and
+      • a COLLISIONS report: distinct pre-canonicalization paths that would
+        converge to the same canonical value — i.e. histories that --apply
+        would MERGE. Inspect these before applying.
+
+    \b
+    Idempotent: re-running after --apply rewrites nothing. Each --apply run
+    records one audit row in the path_migrations table (visible to doctor).
+    """
+    storage = get_storage()
+    report = storage.recanonicalize_paths(apply=apply_changes, agent=agent)
+
+    if as_json:
+        click.echo(json.dumps(report, indent=2))
+        return
+
+    mode = "apply" if report["applied"] else "dry run"
+    console.print(f"\n[bold]Selvedge migrate-paths[/bold] [dim]({mode})[/dim]\n")
+
+    rewrites = report["rewrites"]
+    collisions = report["collisions"]
+
+    if not rewrites:
+        console.print(
+            f"[green]✓[/green] All {report['rows_scanned']} entity path(s) are "
+            "already canonical — nothing to migrate."
+        )
+        console.print()
+        return
+
+    # Planned / performed rewrites.
+    verb = "Rewrote" if report["applied"] else "Would rewrite"
+    console.print(
+        f"{verb} [bold]{len(rewrites)}[/bold] of {report['rows_scanned']} "
+        "row(s):\n"
+    )
+    table = Table(box=box.SIMPLE_HEAD, show_header=True, header_style="bold")
+    table.add_column("id", style="dim", no_wrap=True)
+    table.add_column("from")
+    table.add_column("→", no_wrap=True)
+    table.add_column("to", style="green")
+    _DISPLAY_CAP = 50
+    for rw in rewrites[:_DISPLAY_CAP]:
+        table.add_row(rw["id"][:8], rw["from"], "→", rw["to"])
+    console.print(table)
+    if len(rewrites) > _DISPLAY_CAP:
+        console.print(f"[dim]… and {len(rewrites) - _DISPLAY_CAP} more[/dim]")
+
+    # Collisions report — the safety surface.
+    if collisions:
+        console.print(
+            f"\n[yellow]! {len(collisions)} collision(s)[/yellow] — distinct "
+            "paths that converge to the same canonical value. Applying "
+            "[bold]merges[/bold] their histories:\n"
+        )
+        ctable = Table(box=box.SIMPLE_HEAD, show_header=True, header_style="bold")
+        ctable.add_column("canonical", style="bold")
+        ctable.add_column("merged from")
+        for c in collisions:
+            ctable.add_row(c["canonical"], "  +  ".join(c["paths"]))
+        console.print(ctable)
+
+    if report["applied"]:
+        console.print(
+            f"\n[green]✓[/green] Applied. Rewrote {report['rows_rewritten']} "
+            "row(s); audit row recorded in path_migrations."
+        )
+    else:
+        console.print(
+            "\n[dim]Dry run — pass [bold]--apply[/bold] to write these "
+            "changes.[/dim]"
+        )
+    console.print()
 
 
 # ---------------------------------------------------------------------------

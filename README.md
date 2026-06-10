@@ -16,6 +16,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
+<!-- mcp-name: io.github.masondelan/selvedge -->
+
 **Long-term memory for AI-coded codebases.**
 A `git blame` for AI agents — but for the *why*, not just which line which
 model touched. Captured live, by the agent, as the change happens.

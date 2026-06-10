@@ -69,3 +69,53 @@ jobs:
           files: dist/*
           draft: false
           prerelease: false
+
+  publish-mcp-registry:
+    runs-on: ubuntu-latest
+    # The registry's ownership check reads the README of the latest release
+    # on PyPI, so this must only run after the PyPI publish succeeds.
+    needs: publish
+    permissions:
+      contents: read
+      id-token: write  # OIDC login to the MCP Registry (io.github.masondelan/* namespace)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Belt-and-suspenders: server.json carries the version in two places
+      # (top-level and packages[0]). The version-bump checklist updates both,
+      # but sync them from the tag anyway so a missed bump can't publish a
+      # stale version.
+      - name: Sync server.json versions from tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.json.tmp
+          mv server.json.tmp server.json
+
+      # PyPI can take a little while to serve a freshly uploaded release, and
+      # the registry's ownership check reads pypi.org directly.
+      - name: Wait for PyPI to serve the new version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          for i in $(seq 1 30); do
+            SERVED=$(curl -s https://pypi.org/pypi/selvedge/json | jq -r .info.version)
+            if [ "$SERVED" = "$VERSION" ]; then
+              echo "PyPI is serving $VERSION"
+              exit 0
+            fi
+            echo "PyPI is serving $SERVED, waiting for $VERSION ($i/30)"
+            sleep 10
+          done
+          echo "Timed out waiting for PyPI to serve $VERSION" >&2
+          exit 1
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish

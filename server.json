@@ -1,48 +1,48 @@
 {
-  "namespace": "io.github.masondelan",
-  "name": "selvedge",
-  "description": "Long-term memory for AI-coded codebases. A local MCP server that captures the why behind every change agents make, then reads it back: with prior_attempts, the agent checks 'was this tried here before, and how did it turn out?' before it edits. git blame for semantic entities (DB columns, functions, env vars, deps). Local SQLite, no LLM calls.",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.masondelan/selvedge",
+  "title": "Selvedge",
+  "description": "Long-term memory for AI-coded codebases — agents log the why behind every change and read it back.",
   "version": "0.3.7",
-  "repository": "https://github.com/masondelan/selvedge",
-  "homepage": "https://selvedge.sh",
-  "license": "MIT",
+  "websiteUrl": "https://selvedge.sh",
+  "repository": {
+    "url": "https://github.com/masondelan/selvedge",
+    "source": "github",
+    "id": "1217601896"
+  },
   "packages": [
     {
-      "registry_name": "pypi",
-      "name": "selvedge",
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "selvedge",
       "version": "0.3.7",
-      "command": "selvedge-server",
-      "runtime_arguments": []
-    }
-  ],
-  "tools": [
-    {
-      "name": "log_change",
-      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), or the entity_path doesn't match the\nusual shape for its entity_type, the result includes a `warnings`\narray \u2014 the event is still stored.\n\nRenames: pass the new path in `entity_path`, set `change_type=\"rename\"`,\nand pass the old path in `rename_from`. Selvedge then writes two events \u2014\na `rename` on the old path and a `create` on the new path with\n`metadata.renamed_from` set \u2014 so the entity's history follows it. Example:\n\n    log_change(\n        entity_path=\"src/auth/session.py::login\",   # new path\n        change_type=\"rename\",\n        rename_from=\"src/auth.py::login\",            # old path\n        entity_type=\"function\",\n        reasoning=\"Split auth.py into an auth/ package; login moved.\",\n    )\n\nOn validation failure (invalid change_type, missing entity_path, or\n`rename_from` set without change_type='rename') the result is\n`{\"status\": \"error\", \"error\": \"...\"}` with no event written."
-    },
-    {
-      "name": "diff",
-      "description": "Get change history for a codebase entity, newest first.\n\nSupports prefix matching \u2014 e.g. 'users' returns all events for the users\ntable and any users.* column."
-    },
-    {
-      "name": "blame",
-      "description": "Most recent change to an entity \u2014 what changed, when, who, why.\n\nLike `git blame` but for semantic entities (DB columns, functions, env\nvars, dependencies) and AI agents. If no history exists for the entity,\nreturns `{\"error\": \"...\"}` with protocol-level `isError: false`."
-    },
-    {
-      "name": "history",
-      "description": "Filtered change history across all entities, newest first.\n\nCombine `since`, `entity_path`, `project`, and `changeset_id` to scope\nthe result. On unparseable `since` input the response is\n`[{\"error\": \"...\"}]` so the caller sees the problem."
-    },
-    {
-      "name": "changeset",
-      "description": "All events that share a `changeset_id`, oldest first.\n\nUse to reconstruct the full scope of a feature or task across multiple\nentities. If the changeset has no events, returns\n`[{\"error\": \"...\"}]` so the caller can distinguish \"unknown changeset\"\nfrom \"empty history.\""
-    },
-    {
-      "name": "search",
-      "description": "Full-text search across entity paths, diffs, reasoning, and agents.\n\nUseful for questions like 'what changes were made for the billing\nfeature?', 'which columns were added by cursor?', or 'show everything\nrelated to authentication'."
-    },
-    {
-      "name": "prior_attempts",
-      "description": "Prior change attempts on an entity, each with an inferred outcome.\n\nCall this BEFORE editing an entity. If the same change was tried before\nand reverted, you get the prior `reasoning` and `change_type` plus an\ninferred `outcome` \u2014 so you can change your plan instead of repeating a\nrejected approach.\n\nEach result is a change event with three extra fields:\n\n  - `outcome`           \u2014 \"reverted\" (a later remove/delete on the same\n                          path) or \"active\" (no later removal seen).\n  - `confidence`        \u2014 \"proximity_high\" or \"proximity_low\".\n  - `outcome_reasoning` \u2014 the reverting event's reasoning (WHY it was\n                          rejected), or \"\" while still active.\n\nOutcome is inferred from add->remove proximity \u2014 v0.3.7 has no explicit\nreject/revert change types yet (those arrive in v0.3.11). Output is\ntemplated, deterministic, and makes no LLM call. This is a pull-only\ntool: it never writes and never pushes; you decide when to ask.\n\nConservative by design \u2014 `min_confidence` defaults to \"proximity_high\",\nso an empty list (nothing clearly tried-and-rejected) is the normal,\npreferred answer over a speculative false positive. Pass\n`min_confidence=\"proximity_low\"` to widen recall."
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--from",
+          "value": "selvedge",
+          "isRequired": true,
+          "description": "The MCP server binary (selvedge-server) differs from the package name, so uvx needs --from."
+        },
+        {
+          "type": "positional",
+          "value": "selvedge-server",
+          "valueHint": "selvedge-server",
+          "isRequired": true,
+          "description": "Entry point that starts the MCP server over stdio. Plain `uvx selvedge` would launch the CLI instead."
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SELVEDGE_DB",
+          "description": "Override the SQLite path. Defaults to .selvedge/selvedge.db next to the codebase.",
+          "isRequired": false
+        }
+      ]
     }
   ]
 }

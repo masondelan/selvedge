@@ -26,6 +26,7 @@ from selvedge.server import (  # noqa: E402
     log_change,
     prior_attempts,
     search,
+    stale_decisions,
 )
 
 # ---------------------------------------------------------------------------
@@ -359,3 +360,117 @@ def test_prior_attempts_is_conservative_by_default():
 def test_prior_attempts_requires_an_argument():
     result = prior_attempts()
     assert result and "error" in result[0]
+
+
+# ---------------------------------------------------------------------------
+# revisit_after on log_change + stale_decisions (v0.3.8 active memory v1)
+# ---------------------------------------------------------------------------
+
+
+def test_log_change_stores_and_blame_surfaces_revisit_after():
+    result = log_change(
+        entity_path="users", change_type="add", entity_type="table",
+        reasoning="Created the users table for the auth rewrite.",
+        revisit_after="90d",
+    )
+    assert result["status"] == "logged"
+    b = blame(entity_path="users")
+    # BlameResult was extended with the two active-memory fields (always present).
+    assert b["revisit_after"] == "90d"
+    assert b["expires_when"] == ""
+
+
+def test_log_change_rejects_invalid_revisit_after():
+    result = log_change(
+        entity_path="users", change_type="add",
+        reasoning="A perfectly good reasoning string here.",
+        revisit_after="next week",
+    )
+    assert result["status"] == "error"
+    assert "revisit_after" in result["error"]
+
+
+def test_log_change_nudges_revisit_for_architectural_change():
+    result = log_change(
+        entity_path="deps/stripe", change_type="add", entity_type="dependency",
+        reasoning="Added Stripe SDK for the billing feature.",
+    )
+    assert result["status"] == "logged"
+    assert any("revisit_after" in w for w in result["warnings"])
+
+
+def test_log_change_no_revisit_nudge_for_leaf_change():
+    result = log_change(
+        entity_path="users.email", change_type="add", entity_type="column",
+        reasoning="Added email column for the new auth flow.",
+    )
+    assert result["status"] == "logged"
+    assert not any("revisit_after" in w for w in result["warnings"])
+
+
+def test_stale_decisions_empty_when_no_dated_decisions():
+    log_change(entity_path="users.email", change_type="add",
+               reasoning="Email for auth, no revisit date.")
+    assert stale_decisions() == []
+
+
+def test_stale_decisions_surfaces_due_and_active():
+    # Absolute past revisit date → due now; entity then queried = active use.
+    log_change(entity_path="users", change_type="add", entity_type="table",
+               reasoning="Created users table.", revisit_after="2020-01-01")
+    blame(entity_path="users")  # the active-use signal
+    rows = stale_decisions()
+    assert len(rows) == 1
+    assert rows[0]["entity_path"] == "users"
+    assert rows[0]["active_use_signals"] == ["queried"]
+    assert rows[0]["days_overdue"] >= 1
+
+
+def test_stale_decisions_pure_age_excluded():
+    log_change(entity_path="orders", change_type="add", entity_type="table",
+               reasoning="Created orders table.", revisit_after="2020-01-01")
+    # No blame/diff/prior_attempts on the entity → pure age, must not surface.
+    assert stale_decisions() == []
+
+
+def test_stale_decisions_pull_only_logs_no_event():
+    from selvedge.server import get_storage
+
+    log_change(entity_path="users", change_type="add", entity_type="table",
+               reasoning="Created users table.", revisit_after="2020-01-01")
+    before = get_storage().count()
+    stale_decisions()
+    assert get_storage().count() == before
+
+
+def test_stale_decisions_surfaces_via_changeset_activity():
+    """The OTHER active-use signal: a later sibling sharing the changeset_id,
+    with NO blame/diff query on the entity."""
+    log_change(entity_path="users", change_type="add", entity_type="table",
+               reasoning="Created users table.", revisit_after="2020-01-01",
+               changeset_id="auth-rewrite")
+    # A later sibling in the same changeset = continued activity (no query).
+    log_change(entity_path="sessions", change_type="add",
+               reasoning="Added sessions as part of the auth rewrite.",
+               changeset_id="auth-rewrite")
+    rows = stale_decisions()
+    assert len(rows) == 1
+    assert rows[0]["entity_path"] == "users"
+    assert rows[0]["active_use_signals"] == ["changeset_activity"]
+
+
+def test_stale_decisions_filters_by_project_and_agent():
+    """Filters wire through the tool boundary (server.py forwards them)."""
+    log_change(entity_path="users", change_type="add", entity_type="table",
+               reasoning="Users table.", revisit_after="2020-01-01",
+               project="api", agent="claude-code")
+    log_change(entity_path="orders", change_type="add", entity_type="table",
+               reasoning="Orders table.", revisit_after="2020-01-01",
+               project="web", agent="cursor")
+    blame(entity_path="users")
+    blame(entity_path="orders")
+
+    assert {r["entity_path"] for r in stale_decisions()} == {"users", "orders"}
+    assert {r["entity_path"] for r in stale_decisions(project="web")} == {"orders"}
+    assert {r["entity_path"] for r in stale_decisions(agent="claude-code")} == {"users"}
+    assert {r["entity_path"] for r in stale_decisions(entity_path="orders")} == {"orders"}

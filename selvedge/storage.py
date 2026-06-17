@@ -15,7 +15,7 @@ from typing import TypeVar
 
 from .migrations import apply_migrations
 from .models import ChangeEvent
-from .timeutil import normalize_timestamp, utc_now_iso
+from .timeutil import normalize_timestamp, resolve_revisit_due, utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,12 @@ CREATE TABLE IF NOT EXISTS events (
     git_commit   TEXT NOT NULL DEFAULT '',
     project      TEXT NOT NULL DEFAULT '',
     changeset_id TEXT NOT NULL DEFAULT '',
-    metadata     TEXT NOT NULL DEFAULT '{}'
+    metadata     TEXT NOT NULL DEFAULT '{}',
+    -- Active memory v1 (v0.3.8, migration v3). NULLABLE on purpose — pre-v3
+    -- rows read back as NULL; new writes store '' for "absent". `expires_when`
+    -- ships now but its evaluator is deferred to v0.3.11.
+    revisit_after TEXT,
+    expires_when  TEXT
 );
 """
 
@@ -180,6 +185,58 @@ def _parse_iso(ts: str) -> datetime:
 # it on the same path — the v0.3.7 add->remove proximity heuristic that stands
 # in until explicit ``reject``/``revert`` change_types ship in v0.3.11.
 _REMOVAL_CHANGE_TYPES: frozenset[str] = frozenset({"remove", "delete", "index_remove"})
+
+# Read tools whose calls count as "this entity is in active use" for the
+# v0.3.8 stale-decisions active-use weighting. A decision aging past its
+# revisit_after only surfaces if the entity has actually been looked at (or
+# its changeset kept moving) — pure age alone never surfaces. Recorded in the
+# local-only ``tool_calls`` telemetry by both the MCP tools and the CLI.
+_ACTIVE_USE_TOOLS: frozenset[str] = frozenset({"blame", "diff", "prior_attempts"})
+
+
+def _paths_related(a: str, b: str) -> bool:
+    """True if two entity paths are the same entity or a dotted-prefix pair.
+
+    Mirrors the storage prefix convention (``X`` covers ``X.col``) in both
+    directions, so a ``blame users`` tool-call counts as active use of a
+    ``users.email`` decision and vice versa. Boundary is the literal ``.`` so
+    ``users`` doesn't spuriously match ``users_audit``.
+    """
+    if a == b:
+        return True
+    return a.startswith(b + ".") or b.startswith(a + ".")
+
+
+def _stale_reason_text(signals: list[str]) -> str:
+    """Render the active-use signals into a one-line, deterministic summary.
+
+    Pure templated assembly — the human-readable half of the ``stale_decisions``
+    contract, with no LLM hop. Returns the empty string for no signals (which
+    never happens on a surfaced row, but keeps the field always-present).
+    """
+    phrases = {
+        "queried": "the entity was queried (blame/diff/prior_attempts) after the decision",
+        "changeset_activity": "its changeset kept moving with later sibling changes",
+    }
+    parts = [phrases[s] for s in signals if s in phrases]
+    if not parts:
+        return ""
+    return "past its revisit date and still active — " + "; ".join(parts) + "."
+
+
+def _coalesce_event_nullables(row: dict) -> dict:
+    """Coalesce the nullable active-memory columns (v0.3.8) to ``""`` in place.
+
+    ``revisit_after`` / ``expires_when`` are NULLABLE, so rows written before
+    migration v3 read back as ``NULL``. This keeps every read path on the
+    "every field always populated, never null" convention — so
+    diff / history / search / changeset / prior_attempts agree with
+    blame / stale_decisions instead of leaking ``null`` for a pre-v3 row.
+    """
+    for col in ("revisit_after", "expires_when"):
+        if row.get(col) is None:
+            row[col] = ""
+    return row
 
 
 def _is_locked_error(exc: BaseException) -> bool:
@@ -313,6 +370,21 @@ class SelvedgeStorage:
         # per-migration so a partial failure leaves the DB in a known state.
         with self._session() as conn:
             apply_migrations(conn)
+            # The revisit_after index is created here — AFTER migrations — so
+            # the column is guaranteed to exist on both fresh DBs (added by
+            # CREATE_TABLE_SQL) and upgraded ones (added by migration v3). It
+            # can't live in CREATE_INDEXES_SQL, which runs before migrations.
+            #
+            # PARTIAL on purpose: it indexes only rows that actually carry a
+            # revisit date, which is the exact predicate get_stale_decisions
+            # filters on. That keeps the index tiny AND makes building it
+            # instant on a freshly-migrated multi-million-event DB where every
+            # existing row is NULL (a full index would scan all N rows).
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_revisit_after "
+                "ON events(revisit_after) "
+                "WHERE revisit_after IS NOT NULL AND revisit_after != ''"
+            )
 
     # ------------------------------------------------------------------
     # Write — change events
@@ -342,7 +414,7 @@ class SelvedgeStorage:
             event.entity_path, event.change_type, event.diff,
             event.reasoning, event.agent, event.session_id,
             event.git_commit, event.project, event.changeset_id,
-            event.metadata,
+            event.metadata, event.revisit_after, event.expires_when,
         )
 
     @_retry_on_locked
@@ -355,8 +427,8 @@ class SelvedgeStorage:
                 INSERT INTO events
                     (id, timestamp, entity_type, entity_path, change_type,
                      diff, reasoning, agent, session_id, git_commit, project,
-                     changeset_id, metadata)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     changeset_id, metadata, revisit_after, expires_when)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 self._event_row(event),
             )
@@ -382,8 +454,8 @@ class SelvedgeStorage:
                 INSERT INTO events
                     (id, timestamp, entity_type, entity_path, change_type,
                      diff, reasoning, agent, session_id, git_commit, project,
-                     changeset_id, metadata)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     changeset_id, metadata, revisit_after, expires_when)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 rows,
             )
@@ -701,7 +773,7 @@ class SelvedgeStorage:
                 """,
                 (entity_path, prefix_pattern, limit),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [_coalesce_event_nullables(dict(r)) for r in rows]
 
     def get_blame(self, entity_path: str) -> dict | None:
         """Return the most recent event for an exact entity path."""
@@ -715,7 +787,7 @@ class SelvedgeStorage:
                 """,
                 (entity_path,),
             ).fetchone()
-        return dict(row) if row else None
+        return _coalesce_event_nullables(dict(row)) if row else None
 
     def get_history(
         self,
@@ -747,7 +819,7 @@ class SelvedgeStorage:
 
         with self._session() as conn:
             rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        return [_coalesce_event_nullables(dict(r)) for r in rows]
 
     def get_changeset(self, changeset_id: str) -> list[dict]:
         """
@@ -761,7 +833,7 @@ class SelvedgeStorage:
                 "SELECT * FROM events WHERE changeset_id = ? ORDER BY timestamp ASC",
                 (changeset_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [_coalesce_event_nullables(dict(r)) for r in rows]
 
     def list_changesets(self, project: str = "", since: str = "") -> list[dict]:
         """
@@ -813,7 +885,7 @@ class SelvedgeStorage:
                 """,
                 (pattern, pattern, pattern, pattern, pattern, limit),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [_coalesce_event_nullables(dict(r)) for r in rows]
 
     def count(self) -> int:
         """Total number of change events logged."""
@@ -952,7 +1024,7 @@ class SelvedgeStorage:
                     )
                     outcome = "reverted"
                     outcome_reasoning = closing["reasoning"]
-                annotated = dict(e)
+                annotated = _coalesce_event_nullables(dict(e))
                 annotated["outcome"] = outcome
                 annotated["confidence"] = confidence
                 annotated["outcome_reasoning"] = outcome_reasoning
@@ -963,6 +1035,141 @@ class SelvedgeStorage:
 
         # Newest-first, then cap.
         results.sort(key=lambda r: r["timestamp"], reverse=True)
+        return results[:limit]
+
+    def get_stale_decisions(
+        self,
+        *,
+        now: str = "",
+        entity_path: str = "",
+        project: str = "",
+        agent: str = "",
+        limit: int = 20,
+    ) -> list[dict]:
+        """Return decisions whose ``revisit_after`` has passed AND are in active use.
+
+        Storage layer for the v0.3.8 ``stale_decisions`` surface (date-based
+        active memory). A candidate is any event carrying a non-empty
+        ``revisit_after`` whose resolved due date (see
+        :func:`selvedge.timeutil.resolve_revisit_due`) is at or before ``now``
+        (defaults to the current UTC time).
+
+        **Active-use weighting — pure age does NOT surface.** A due decision is
+        returned only if there is an additional signal that the entity is still
+        live, exactly one of:
+
+          - ``queried`` — a ``blame`` / ``diff`` / ``prior_attempts`` tool-call
+            on the entity (exact or dotted-prefix, either direction) recorded
+            at or after the decision was logged; or
+          - ``changeset_activity`` — the decision carries a ``changeset_id`` and
+            a *later* sibling event shares it (the feature kept moving).
+
+        This is the noise defense: an old-but-correct decision nobody touches
+        never nags. Filterable by ``entity_path`` (exact + ``.`` prefix),
+        ``project``, and ``agent``. Output is templated and deterministic — no
+        LLM call. ``expires_when`` is ignored here; its evaluator lands in
+        v0.3.11.
+
+        Each result is the event dict (NULL columns coalesced to ``""``) plus
+        four always-present keys: ``revisit_due`` (canonical UTC ISO),
+        ``days_overdue`` (int, ``0`` on the due day), ``active_use_signals``
+        (list of the signal names above), and ``stale_reason`` (a one-line
+        human-readable summary). Most-overdue first, capped at ``limit``.
+        """
+        now_dt = (
+            _parse_iso(normalize_timestamp(now)) if now else datetime.now(timezone.utc)
+        )
+
+        clauses = ["revisit_after IS NOT NULL", "revisit_after != ''"]
+        params: list = []
+        if entity_path:
+            canonical = canonicalize_entity_path(entity_path)
+            clauses.append("(entity_path = ? OR entity_path LIKE ? ESCAPE '\\')")
+            params.extend([canonical, f"{_escape_like(canonical)}.%"])
+        if project:
+            clauses.append("project = ?")
+            params.append(project)
+        if agent:
+            clauses.append("agent = ?")
+            params.append(agent)
+        where = " AND ".join(clauses)
+
+        results: list[dict] = []
+        with self._session() as conn:
+            candidates = conn.execute(
+                f"SELECT * FROM events WHERE {where} ORDER BY timestamp ASC",
+                params,
+            ).fetchall()
+            if not candidates:
+                return []
+
+            # Active-use telemetry, fetched once: all entity-scoped read-tool
+            # calls. Small in practice; matched in Python so the dotted-prefix
+            # logic isn't tangled up in LIKE-escaping both directions.
+            placeholders = ",".join("?" for _ in _ACTIVE_USE_TOOLS)
+            tool_rows = conn.execute(
+                f"SELECT entity_path, timestamp FROM tool_calls "
+                f"WHERE tool_name IN ({placeholders}) AND entity_path != ''",
+                tuple(sorted(_ACTIVE_USE_TOOLS)),
+            ).fetchall()
+            # Pre-parse tool-call timestamps to aware datetimes so the
+            # at-or-after comparison is chronological, not lexicographic —
+            # mixed-precision strings ('...00Z' vs '...00.5Z') would sort
+            # wrong ('.' < 'Z'). Same posture as get_prior_attempts. The
+            # tool_calls table stores the RAW agent-supplied path (unlike the
+            # events table, which canonicalizes on write), so canonicalize it
+            # here too — otherwise a query of './users.email' would never match
+            # the canonical 'users.email' decision and the signal would be lost.
+            # Bad rows are skipped rather than crashing the query.
+            tool_calls: list[tuple[str, datetime]] = []
+            for r in tool_rows:
+                try:
+                    tool_calls.append(
+                        (canonicalize_entity_path(r["entity_path"]), _parse_iso(r["timestamp"]))
+                    )
+                except (ValueError, TypeError):
+                    continue
+
+            for row in candidates:
+                ev = dict(row)
+                try:
+                    due = resolve_revisit_due(ev["timestamp"], ev["revisit_after"])
+                except ValueError:
+                    # Unparseable revisit_after — skip rather than crash the query.
+                    continue
+                if due > now_dt:
+                    continue  # not due yet
+
+                ev_ts = _parse_iso(ev["timestamp"])
+                signals: list[str] = []
+                # Signal 1: the entity was queried at/after the decision.
+                if any(
+                    tc_dt >= ev_ts and _paths_related(tc_path, ev["entity_path"])
+                    for tc_path, tc_dt in tool_calls
+                ):
+                    signals.append("queried")
+                # Signal 2: a later sibling shares the decision's changeset.
+                if ev.get("changeset_id"):
+                    sibling = conn.execute(
+                        "SELECT 1 FROM events WHERE changeset_id = ? "
+                        "AND timestamp > ? AND id != ? LIMIT 1",
+                        (ev["changeset_id"], ev["timestamp"], ev["id"]),
+                    ).fetchone()
+                    if sibling is not None:
+                        signals.append("changeset_activity")
+
+                if not signals:
+                    continue  # pure age — active-use weighting drops it
+
+                annotated = {k: ("" if v is None else v) for k, v in ev.items()}
+                annotated["revisit_due"] = normalize_timestamp(due.isoformat())
+                annotated["days_overdue"] = max(0, (now_dt - due).days)
+                annotated["active_use_signals"] = signals
+                annotated["stale_reason"] = _stale_reason_text(signals)
+                results.append(annotated)
+
+        # Most overdue first (earliest due date), then cap.
+        results.sort(key=lambda r: r["revisit_due"])
         return results[:limit]
 
     def summarize(

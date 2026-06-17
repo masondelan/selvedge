@@ -109,6 +109,70 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.8
+
+**Active memory v1 (date-based).** Selvedge's append-only log learns to know
+when its own data is stale. A decision can now carry a revisit date, and the
+new **`stale_decisions`** tool surfaces decisions that have aged out — but only
+the ones whose entity is *still in active use*, so an old-but-correct decision
+nobody touches never nags. **Drop-in upgrade for anyone on 0.3.7.** This brings
+the MCP surface to **8 tools**.
+
+### `revisit_after` + `stale_decisions` — decisions with an expiry date
+
+Set `revisit_after` on an architectural `log_change` — an ISO date or a
+relative offset like `90d`:
+
+```jsonc
+log_change({
+  "entity_path": "deps/stripe", "change_type": "add", "entity_type": "dependency",
+  "reasoning": "Pinned Stripe SDK to v11 for the billing launch.",
+  "revisit_after": "180d"   // revisit this pin in ~6 months
+})
+```
+
+Later, `stale_decisions` returns the dated decisions that have come due — and
+filters out pure age:
+
+```jsonc
+stale_decisions({})
+// → only decisions past their revisit date whose entity is STILL in use:
+[
+  {
+    "entity_path": "deps/stripe", "change_type": "add",
+    "reasoning": "Pinned Stripe SDK to v11 for the billing launch.",
+    "revisit_due": "2026-...Z", "days_overdue": 12,
+    "active_use_signals": ["queried"],
+    "stale_reason": "past its revisit date and still active — the entity was queried (blame/diff/prior_attempts) after the decision."
+  }
+]
+```
+
+**Pure age never surfaces.** A decision only comes back if the entity is still
+live — recently queried (`blame` / `diff` / `prior_attempts`) or its changeset
+kept moving. That's the noise defense: a dated decision nobody has touched won't
+nag. Templated and deterministic — no LLM, ever. The pattern-based half
+(`expires_when` grammar, explicit `reject`/`revert` change types) lands in
+v0.3.11; the v0.3.8 migration adds the `expires_when` column now so that's a
+no-migration release.
+
+### CLI parity for the wedge + CLI-awareness
+
+`selvedge prior-attempts <entity>` lands — the v0.3.7 `prior_attempts` wedge
+was the only MCP tool without a CLI command. It's a thin presenter over the
+same store, so `--json` emits the identical list the tool returns. New
+`selvedge stale` mirrors `stale_decisions` (with `--json` for cron / Slack
+jobs). And the canonical agent-instructions block now names the CLI equivalents
+alongside the MCP tools, so a shell-having agent is never blocked when the MCP
+server isn't loaded. Selvedge stays **MCP-first**; the CLI is the additive
+second path.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the full list, the one-time migration-v3
+note (metadata-only `ADD COLUMN`, fast even on multi-million-event DBs), and the
+called-out test-budget overage from the bundled CLI + agent-block work.
+
+---
+
 ## What's new in v0.3.7
 
 The brand-defining release: **`prior_attempts`** — the tool that lets an
@@ -189,82 +253,6 @@ function, not a tool. See [`CHANGELOG.md`](CHANGELOG.md) for the full list,
 including the 47 new tests — a called-out overrun of the ≤30 per-phase budget
 (≤40 phase target) because the entity foundation and the wedge ship together
 and a review pass hardened the acceptance-criteria edges.
-
----
-
-## What's new in v0.3.6
-
-Two themes in one release as a one-time exception to the single-theme
-cadence: **stay-current** (background PyPI version check) and
-**retention basics** (`selvedge prune` for the `tool_calls` table).
-**Drop-in upgrade for anyone on 0.3.5.**
-
-### Stay-current
-
-**Background version check in `selvedge` (the CLI only — never the MCP
-server).** A daemon thread fetches the latest published version from
-PyPI's JSON endpoint, caches the result at
-`~/.selvedge/update_check.json` (user-global so you don't re-check per
-project), and on process exit prints to stderr:
-
-```
-selvedge: v0.3.7 available (you're on 0.3.6) — https://selvedge.sh/upgrade
-```
-
-The notice is printed via `atexit` so it appears *after* the command's
-output, never interleaved. Cache TTL is 24h, matching `gh` and `npm`.
-
-**Generous suppression.** The check is disabled when any of
-`SELVEDGE_NO_UPDATE_CHECK=1`, `SELVEDGE_QUIET=1`, or `CI` is set in
-the environment, when stderr isn't a TTY (piping, agent stdio,
-`--json` to a file), and on dev / editable installs. The TTY gate is
-re-checked at print time too — even a cached notice can't pollute
-redirected output. The 1.5s fetch timeout and the no-raise posture of
-every code path mean a network blip can't slow or break the CLI.
-
-**`selvedge-server` stays silent.** The check is wired into the CLI
-group callback only — the MCP server's stdio is the JSON-RPC channel
-and an inadvertent stderr write would surface in the calling agent's
-logs as noise.
-
-### Retention basics
-
-**`selvedge prune` — trim old `tool_calls` rows.** Default retention
-is 90 days; `--days N` overrides. The default is long enough that the
-previous month's agents are still in the data. Every run appends a
-tab-separated audit line to `.selvedge/prune.log` so the cadence is
-visible later — even empty prunes log, so you can tell the difference
-between "no prunes yet" and "nothing to prune."
-
-```
-selvedge prune                # 90-day default
-selvedge prune --days 30      # tighter window
-selvedge prune --json         # for cron / scripting
-```
-
-Only `tool_calls` is pruned in this release. The destructive
-events-table path waits for `.selvedge/config.toml` in v0.3.10 and
-will require both `SELVEDGE_DESTRUCTIVE=1` *and* an interactive
-confirmation — the cron / non-interactive `--yes` footgun is
-defended against by design.
-
-**Doctor — `Last prune` row + oversized-`tool_calls` WARN.** The
-doctor table now surfaces the tail of `.selvedge/prune.log` (most
-recent timestamp, rows pruned, day threshold) and WARNs when the
-`tool_calls` table exceeds 100k rows so users get a nudge to run
-`selvedge prune` before the noise table gets large.
-
-### Note on cadence
-
-This release combines two themes — a **one-time exception** to the
-single-theme-per-release discipline locked in on 2026-05-10. The
-retention work could have slipped to v0.3.7 (entity foundation +
-`prior_attempts` wedge), but combining here avoided a renumbering
-pass on the phase plan. Single-theme resumes at v0.3.7.
-
-See [`CHANGELOG.md`](CHANGELOG.md) for the full list including the
-new tests in `test_prune.py`, `test_update_check.py`, and the
-`test_doctor.py` extension.
 
 ---
 
@@ -504,6 +492,7 @@ When connected as an MCP server, Selvedge exposes:
 | `changeset` | All events grouped under a named feature/task slug |
 | `search` | Full-text search across all events |
 | `prior_attempts` | Prior change attempts on an entity + inferred outcome (was it tried and reverted?) — call it before editing |
+| `stale_decisions` | Dated decisions past their `revisit_after` that are still in active use (pure age never surfaces) |
 
 ---
 
@@ -525,6 +514,14 @@ selvedge changeset [CHANGESET_ID]         Show events in a changeset
                   [--project NAME]
                   [--since SINCE]
 selvedge search QUERY [--limit N]         Full-text search
+selvedge prior-attempts ENTITY            Prior attempts + inferred outcome
+                       [--description T]   (ENTITY xor --description)
+                       [--all]             widen recall to proximity_low
+                       [--window 7d]       proximity window
+selvedge stale [--entity ENTITY]          Dated decisions due for a revisit
+              [--project NAME]
+              [--agent NAME]
+              [--json]
 selvedge stats [--since SINCE]            Tool call coverage report (per-tool, per-agent)
 selvedge doctor [--json]                  Health check: DB path, schema, hook, MCP wiring
 selvedge install-hook [--path PATH]       Install git post-commit hook
@@ -546,6 +543,7 @@ selvedge log ENTITY CHANGE_TYPE           Manually log a change
              [--commit HASH]
              [--project NAME]
              [--changeset CS]
+             [--revisit-after WHEN]       ISO date or offset (e.g. 90d)
              [--rename-from OLD]          OLD path when CHANGE_TYPE is 'rename'
 selvedge migrate-paths                    Re-canonicalize stored entity paths
                       [--apply]           (dry-run by default; --apply writes)

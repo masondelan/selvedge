@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "selvedge",
   "display_name": "Selvedge",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Long-term memory for AI-coded codebases. A local MCP server that captures the why behind every change agents make, then reads it back: with prior_attempts, the agent checks 'was this tried here before, and how did it turn out?' before it edits. git blame for semantic entities (DB columns, functions, env vars, deps). Local SQLite, no LLM calls.",
   "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning \u2014 the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code \u2014 your data stays yours.",
   "author": {
@@ -113,6 +113,12 @@
             "default": "",
             "description": "Optional grouping ID for related changes that belong to the same feature or task. Use a short slug like 'add-stripe-billing'. All events sharing a changeset_id can be queried together via the `changeset` tool.",
             "title": "Changeset Id",
+            "type": "string"
+          },
+          "revisit_after": {
+            "default": "",
+            "description": "Optional revisit date for an architectural decision (table, schema, dependency, config). An ISO date OR a relative offset from this event's timestamp (e.g. '90d', '6mo'). `stale_decisions` surfaces it once it passes, if the entity is still in active use. Leave empty otherwise.",
+            "title": "Revisit After",
             "type": "string"
           },
           "rename_from": {
@@ -294,6 +300,14 @@
             "title": "Metadata",
             "type": "object"
           },
+          "revisit_after": {
+            "title": "Revisit After",
+            "type": "string"
+          },
+          "expires_when": {
+            "title": "Expires When",
+            "type": "string"
+          },
           "error": {
             "title": "Error",
             "type": "string"
@@ -313,6 +327,8 @@
           "project",
           "changeset_id",
           "metadata",
+          "revisit_after",
+          "expires_when",
           "error"
         ],
         "title": "BlameResult",
@@ -538,6 +554,65 @@
           "result"
         ],
         "title": "prior_attemptsOutput",
+        "type": "object"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "stale_decisions",
+      "title": "Stale decisions due for revisit",
+      "description": "Decisions whose `revisit_after` has passed AND that are still in active use.\n\nThe date-based half of active memory (v0.3.8). Returns events with a\n`revisit_after` now in the past \u2014 but ONLY when the entity is still live, so\nan old-but-correct decision nobody touches never nags. The required\nactive-use signal is one of: the entity was queried (`blame` / `diff` /\n`prior_attempts`) at or after the decision, or its `changeset_id` saw later\nactivity. Pure age alone does NOT surface.\n\nEach result is the change event plus four fields: `revisit_due` (UTC ISO),\n`days_overdue` (int, 0 on the due day), `active_use_signals` (list), and\n`stale_reason` (a one-line summary). Most-overdue first; filter by\n`entity_path`, `project`, or `agent`. Date-based only \u2014 `expires_when`\nevaluation lands in v0.3.11. Templated and deterministic; no LLM call.",
+      "inputSchema": {
+        "properties": {
+          "entity_path": {
+            "default": "",
+            "description": "Optional filter to a single entity or path prefix \u2014 'users' also covers 'users.email'. Empty = every entity.",
+            "title": "Entity Path",
+            "type": "string"
+          },
+          "project": {
+            "default": "",
+            "description": "Optional filter to a specific project/repository.",
+            "title": "Project",
+            "type": "string"
+          },
+          "agent": {
+            "default": "",
+            "description": "Optional filter to the agent that logged the decision.",
+            "title": "Agent",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Maximum number of results.",
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "stale_decisionsArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Result",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "stale_decisionsOutput",
         "type": "object"
       },
       "annotations": {

@@ -57,6 +57,29 @@ def test_block_regex_round_trips():
 
 
 # ---------------------------------------------------------------------------
+# CLI-awareness section (v0.3.8). Kept in lockstep with the "System prompt /
+# end-user agent instructions" section of docs/architecture.md — when you
+# change one, change the other.
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_block_is_mcp_first():
+    """The block still leads with the MCP tools — the CLI is additive."""
+    assert "MCP server: `selvedge`" in PROMPT_BLOCK
+    assert "selvedge.log_change" in PROMPT_BLOCK
+
+
+def test_prompt_block_mentions_cli_equivalents():
+    """The CLI-awareness section names the shell equivalents (v0.3.8)."""
+    assert "The same operations are on your shell." in PROMPT_BLOCK
+    # The two operations that matter, plus the v0.3.8 stale surface.
+    assert "selvedge prior-attempts <entity>" in PROMPT_BLOCK
+    assert "selvedge log <entity> <change_type>" in PROMPT_BLOCK
+    assert "selvedge stale" in PROMPT_BLOCK
+    assert "--json" in PROMPT_BLOCK
+
+
+# ---------------------------------------------------------------------------
 # install_to_file — happy paths
 # ---------------------------------------------------------------------------
 

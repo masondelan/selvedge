@@ -1,14 +1,15 @@
 """
 Selvedge MCP Server.
 
-Exposes 7 tools that AI coding agents call to track and query codebase changes:
-  - log_change     : record a change event (incl. dual-event renames)
-  - diff           : get change history for an entity
-  - blame          : get the most recent change + context for an entity
-  - history        : filtered history across all entities
-  - changeset      : retrieve all events in a named feature/task group
-  - search         : full-text search across all events
-  - prior_attempts : prior change attempts on an entity + inferred outcome
+Exposes 8 tools that AI coding agents call to track and query codebase changes:
+  - log_change      : record a change event (incl. dual-event renames)
+  - diff            : get change history for an entity
+  - blame           : get the most recent change + context for an entity
+  - history         : filtered history across all entities
+  - changeset       : retrieve all events in a named feature/task group
+  - search          : full-text search across all events
+  - prior_attempts  : prior change attempts on an entity + inferred outcome
+  - stale_decisions : decisions past their revisit_after that are still in use
 
 Convention notes for v0.3.3+:
   - All tool parameters use Annotated[T, Field(description=...)] so agents
@@ -41,8 +42,12 @@ from .config import get_db_path
 from .logging_config import configure_logging
 from .models import ChangeEvent
 from .storage import SelvedgeStorage
-from .timeutil import parse_time_string
-from .validation import check_entity_path_shape, check_reasoning_quality
+from .timeutil import normalize_revisit_after, parse_time_string
+from .validation import (
+    check_entity_path_shape,
+    check_reasoning_quality,
+    check_revisit_nudge,
+)
 
 mcp = FastMCP(
     "selvedge",
@@ -71,13 +76,20 @@ mcp = FastMCP(
         "change was tried before and reverted, you'll see why and can change "
         "your plan instead of repeating a rejected approach.\n"
         "\n"
+        "REVISIT DATES: when you make an architectural change (a table, schema, "
+        "dependency, or config) that should be reconsidered later, set "
+        "revisit_after on log_change — an ISO date or a relative offset like "
+        "'90d'. stale_decisions surfaces those once they age out AND the entity "
+        "is still in active use.\n"
+        "\n"
         "WHEN TO READ:\n"
-        "  - prior_attempts — 'was this entity tried-and-rejected before? why?'\n"
-        "  - blame          — 'who/why for THIS entity, most recent change'\n"
-        "  - diff           — 'full history for THIS entity, newest first'\n"
-        "  - history        — 'everything in the last N days/across a project'\n"
-        "  - changeset      — 'all changes that belong to THIS feature'\n"
-        "  - search         — 'anything mentioning these words'\n"
+        "  - prior_attempts  — 'was this entity tried-and-rejected before? why?'\n"
+        "  - blame           — 'who/why for THIS entity, most recent change'\n"
+        "  - diff            — 'full history for THIS entity, newest first'\n"
+        "  - history         — 'everything in the last N days/across a project'\n"
+        "  - changeset       — 'all changes that belong to THIS feature'\n"
+        "  - search          — 'anything mentioning these words'\n"
+        "  - stale_decisions — 'which dated decisions are now due for a revisit?'\n"
     ),
 )
 
@@ -140,6 +152,8 @@ class BlameResult(TypedDict):
     project: str
     changeset_id: str
     metadata: dict
+    revisit_after: str
+    expires_when: str
     error: str
 
 
@@ -157,6 +171,8 @@ _EMPTY_BLAME: BlameResult = {
     "project": "",
     "changeset_id": "",
     "metadata": {},
+    "revisit_after": "",
+    "expires_when": "",
     "error": "",
 }
 
@@ -306,6 +322,19 @@ def log_change(
             ),
         ),
     ] = "",
+    revisit_after: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "Optional revisit date for an architectural decision (table, "
+                "schema, dependency, config). An ISO date OR a relative offset "
+                "from this event's timestamp (e.g. '90d', '6mo'). "
+                "`stale_decisions` surfaces it once it passes, if the entity is "
+                "still in active use. Leave empty otherwise."
+            ),
+        ),
+    ] = "",
     rename_from: Annotated[
         str,
         Field(
@@ -360,6 +389,20 @@ def log_change(
             "warnings": [],
         }
 
+    # Normalize revisit_after with the same grammar as `--since` (relative
+    # offsets are preserved, absolute dates canonicalized). A bad value is a
+    # validation error, not a silent drop.
+    try:
+        normalized_revisit = normalize_revisit_after(revisit_after)
+    except ValueError as e:
+        return {
+            "id": "",
+            "timestamp": "",
+            "status": "error",
+            "error": str(e),
+            "warnings": [],
+        }
+
     try:
         if rename_from:
             # Dual-event rename: rename(old) + create(new, metadata.renamed_from).
@@ -390,6 +433,7 @@ def log_change(
                 git_commit=git_commit,
                 project=project,
                 changeset_id=changeset_id,
+                revisit_after=normalized_revisit,
             )
             stored = storage.log_event(event)
     except ValueError as e:
@@ -403,6 +447,9 @@ def log_change(
 
     warnings = check_reasoning_quality(reasoning)
     warnings += check_entity_path_shape(stored.entity_path, stored.entity_type)
+    warnings += check_revisit_nudge(
+        stored.change_type, stored.entity_type, stored.revisit_after
+    )
     return {
         "id": stored.id,
         "timestamp": stored.timestamp,
@@ -484,6 +531,11 @@ def blame(
             populated["metadata"] = json.loads(md) if md else {}
         except json.JSONDecodeError:
             populated["metadata"] = {}
+    # revisit_after / expires_when are NULLABLE columns (v0.3.8) — pre-v3 rows
+    # read back as NULL. Coalesce to "" so the schema's "string" contract holds.
+    for nullable in ("revisit_after", "expires_when"):
+        if populated.get(nullable) is None:
+            populated[nullable] = ""
     populated["error"] = ""
     return populated  # type: ignore[return-value]
 
@@ -708,6 +760,59 @@ def prior_attempts(
         query=description,
         min_confidence=min_confidence,
         window_minutes=window_minutes,
+        limit=limit,
+    )
+
+
+@mcp.tool(
+    title="Stale decisions due for revisit",
+    annotations=_READ_ANNOTATIONS,
+)
+def stale_decisions(
+    entity_path: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "Optional filter to a single entity or path prefix — 'users' also "
+                "covers 'users.email'. Empty = every entity."
+            ),
+        ),
+    ] = "",
+    project: Annotated[
+        str,
+        Field(default="", description="Optional filter to a specific project/repository."),
+    ] = "",
+    agent: Annotated[
+        str,
+        Field(default="", description="Optional filter to the agent that logged the decision."),
+    ] = "",
+    limit: Annotated[
+        int,
+        Field(default=20, ge=1, description="Maximum number of results."),
+    ] = 20,
+) -> list[dict]:
+    """Decisions whose `revisit_after` has passed AND that are still in active use.
+
+    The date-based half of active memory (v0.3.8). Returns events with a
+    `revisit_after` now in the past — but ONLY when the entity is still live, so
+    an old-but-correct decision nobody touches never nags. The required
+    active-use signal is one of: the entity was queried (`blame` / `diff` /
+    `prior_attempts`) at or after the decision, or its `changeset_id` saw later
+    activity. Pure age alone does NOT surface.
+
+    Each result is the change event plus four fields: `revisit_due` (UTC ISO),
+    `days_overdue` (int, 0 on the due day), `active_use_signals` (list), and
+    `stale_reason` (a one-line summary). Most-overdue first; filter by
+    `entity_path`, `project`, or `agent`. Date-based only — `expires_when`
+    evaluation lands in v0.3.11. Templated and deterministic; no LLM call.
+    """
+    storage = get_storage()
+    storage.record_tool_call("stale_decisions", entity_path=entity_path)
+    return storage.get_stale_decisions(
+        entity_path=entity_path,
+        project=project,
+        agent=agent,
         limit=limit,
     )
 

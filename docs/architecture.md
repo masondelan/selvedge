@@ -170,6 +170,9 @@ Full-text substring search across `entity_path`, `diff`, `reasoning`, `agent`.
 ### `prior_attempts`
 Given an `entity_path` or a free-text `description`, return prior change attempts on that entity, each annotated with an inferred `outcome` (`reverted` / `active`), a `confidence` (`proximity_high` / `proximity_low`), and `outcome_reasoning` (why a reverted attempt was rejected). Outcome is inferred from add→remove proximity within a configurable window (explicit `reject`/`revert` change types arrive in v0.3.11). Conservative-recall: `min_confidence` defaults to `proximity_high`, so an empty list is the preferred answer over a false positive. Templated, no LLM, pull-only.
 
+### `stale_decisions`
+Return events whose `revisit_after` has passed AND whose entity is still in active use (v0.3.8). The required active-use signal is one of: the entity was queried (`blame` / `diff` / `prior_attempts`) at or after the decision was logged, or the decision's `changeset_id` saw later sibling activity — **pure age alone never surfaces**, which is the noise defense against old-but-correct decisions. Filterable by `entity_path`, `project`, `agent`. Each result is the event plus `revisit_due`, `days_overdue`, `active_use_signals`, and a templated `stale_reason`. Date-based only in v0.3.8; `expires_when` evaluation arrives in v0.3.11. Templated, no LLM.
+
 ---
 
 ## CLI commands
@@ -185,7 +188,12 @@ selvedge history --since 7d                # last 7 days
 selvedge history --entity users --since 30d
 selvedge history --project my-api
 selvedge search "billing"                  # full-text search
+selvedge prior-attempts users.auth_token   # prior attempts + inferred outcome (CLI parity, v0.3.8)
+selvedge prior-attempts -d "sso token" --all  # free-text mode, widened recall
+selvedge stale                             # dated decisions now due for a revisit (v0.3.8)
+selvedge stale --json                      # cron / Slack-friendly
 selvedge log users.phone add --reasoning "2FA" --agent me  # manual entry
+selvedge log users table add --revisit-after 90d --reasoning "..."  # dated decision (v0.3.8)
 selvedge log new.path rename --rename-from old.path        # dual-event rename
 selvedge migrate-paths                     # dry-run re-canonicalization + collisions report
 selvedge migrate-paths --apply             # write canonical entity_paths (backfill)
@@ -276,7 +284,23 @@ Rules:
   rejected, and can change your plan instead of repeating a rejected approach.
 - Then call selvedge.diff or selvedge.blame for the entity's broader history before
   conflicting with past decisions.
+
+The same operations are on your shell. Selvedge is MCP-first, but the identical
+local store is also a CLI (selvedge is on your PATH after install). When the MCP
+server isn't loaded, you're in a shell-only subagent, or you just want to keep
+context light, use the equivalents:
+- Check an entity first: selvedge prior-attempts <entity>, then selvedge blame /
+  selvedge diff for its broader history.
+- Log a change: selvedge log <entity> <change_type> --reasoning "<why>"
+  (for a rename add --rename-from <old>).
+- Find things: selvedge search "<query>", selvedge history --since 7d,
+  selvedge stale (decisions now due for a revisit).
+Add --json to any read command; selvedge <command> --help gives detail on demand.
 ```
+
+> Kept in lockstep with `selvedge/prompt.py`'s `PROMPT_BLOCK` (the canonical
+> block `selvedge prompt` / `selvedge setup` install). Change one, change the
+> other — `tests/test_prompt.py` asserts the CLI section is present.
 
 ---
 
@@ -756,7 +780,7 @@ github.com).
 > migration avoids a second migration two releases later. Theme:
 > *decisions can carry an expiry date.*
 
-- [ ] **Schema migration v3** — adds two nullable TEXT columns to
+- [x] **Schema migration v3** — adds two nullable TEXT columns to
       `events`: `revisit_after` (ISO-8601 date or relative offset
       from `timestamp`, e.g. `90d`) and `expires_when` (closed
       grammar, evaluator deferred to v0.3.11). Existing events get
@@ -764,7 +788,7 @@ github.com).
       against synthetic DBs at 10k, 100k, and 1M events with bounded
       time gates. Release notes call out the one-time migration
       cost on multi-million-event installs.
-- [ ] **`stale_decisions` MCP tool** — returns events whose
+- [x] **`stale_decisions` MCP tool** — returns events whose
       `revisit_after` has passed. **Active-use weighting**: pure age
       does not surface as stale; an additional signal is required
       (recent `blame`/`diff` query of the entity OR sibling
@@ -772,25 +796,28 @@ github.com).
       by `entity_path`, `project`, `agent`. Date-based only in
       v0.3.8; `expires_when` evaluation lands in v0.3.11. Templated
       output, no LLM calls.
-- [ ] **`selvedge stale` CLI command** — same data surface,
+- [x] **`selvedge stale` CLI command** — same data surface,
       terminal-formatted, `--json` for cron / Slack jobs. Composes
       with `selvedge digest` (v0.3.9) so the morning report can
       include "decisions that aged out yesterday."
-- [ ] **Reasoning-quality validator nudge** — when `change_type` is
+- [x] **Reasoning-quality validator nudge** — when `change_type` is
       in `{add, modify, create, migrate}` and `entity_type` looks
       architectural (table, schema, dependency, config), the
       validator suggests setting `revisit_after`. Soft warning only,
       doesn't block writes.
-- [ ] **Doctor — signal-to-noise pass + stale-decisions check**.
+- [x] **Doctor — signal-to-noise pass + stale-decisions check**.
       Curation pass deferred from earlier phases lands here: review
       every existing doctor row, demote ones that no longer fire
       usefully to INFO, retire any that have become wallpaper. Net
       warning count should not monotonically grow.
-- [ ] **Tests** — `test_active_memory.py` for schema migration v3
-      backfill and stale-decision query semantics (~12),
-      `test_migrations_perf.py` for the v3 perf gates (~4),
+- [x] **Tests** — `test_active_memory.py` for schema migration v3
+      backfill and stale-decision query semantics (~20),
+      `test_migrations_perf.py` for the v3 perf gates (4),
       `test_public_api.py` update for the new `ChangeEvent` fields
-      (~2). Soft budget: ≤25 new tests.
+      (+2). Soft budget: ≤25 new tests — **exceeded** this release, see
+      below. The active-memory core lands within budget; the overage is
+      the two bundled items (the `prior-attempts` CLI parity command and
+      the CLI-awareness agent-block, each with its own tests).
 
 #### Risks acknowledged & mitigations
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selvedge"
-version = "0.3.7"
+version = "0.3.8"
 description = "Change tracking for AI-era codebases"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,6 +36,9 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.10.0",
     "hatchling",
+    # Dev-only (NOT a runtime dependency): gives scripts/schema_tax.py the real
+    # tokenizer so the CI MCP-footprint gate matches the published figure.
+    "tiktoken>=0.7.0",
 ]
 
 [project.scripts]
@@ -53,13 +56,19 @@ Changelog = "https://github.com/masondelan/selvedge/blob/main/CHANGELOG.md"
 packages = ["selvedge"]
 
 [tool.hatch.build.targets.sdist]
+# Ship only what an end user of the PyPI package needs. The previous blanket
+# `docs/` + `CLAUDE.md` over-shipped the website HTML, brand PNGs (~1.5 MB),
+# sitemap/robots, marketing-templates, and the agent-instructions file to PyPI.
+# Website artifacts belong to masondelan/selvedge-site, not the wheel/sdist.
 include = [
     "selvedge/",
-    "tests/",
-    "docs/",
     "README.md",
-    "CLAUDE.md",
+    "LICENSE",
     "pyproject.toml",
+    # End-user docs only — explicitly enumerated so new internal docs can't
+    # silently ride along into the package.
+    "docs/getting-started.md",
+    "docs/coding-agents.md",
 ]
 exclude = [
     ".selvedge/",

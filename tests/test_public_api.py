@@ -103,3 +103,26 @@ def test_check_reasoning_quality_export_is_callable():
 def test_version_is_string():
     assert isinstance(selvedge.__version__, str)
     assert selvedge.__version__.count(".") >= 1
+
+
+# ---------------------------------------------------------------------------
+# ChangeEvent field surface — guards the active-memory v1 columns (v0.3.8)
+# ---------------------------------------------------------------------------
+
+
+def test_change_event_has_active_memory_fields():
+    """ChangeEvent gained revisit_after + expires_when in v0.3.8 — pin them so
+    they can't be dropped without an intentional change + CHANGELOG note."""
+    import dataclasses
+
+    field_names = {f.name for f in dataclasses.fields(selvedge.ChangeEvent)}
+    assert "revisit_after" in field_names
+    assert "expires_when" in field_names
+
+
+def test_change_event_to_dict_includes_active_memory_fields():
+    """to_dict() (the MCP serialization surface) carries both new fields,
+    always populated (empty string when absent), never null."""
+    d = selvedge.ChangeEvent(entity_path="users", change_type="add").to_dict()
+    assert d["revisit_after"] == ""
+    assert d["expires_when"] == ""

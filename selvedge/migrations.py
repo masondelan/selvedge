@@ -87,6 +87,25 @@ MIGRATIONS: tuple[Migration, ...] = (
         # re-running the ALTER (which would error).
         bootstrap_check=lambda conn: _column_exists(conn, "tool_calls", "agent"),
     ),
+    Migration(
+        version=3,
+        name="add_revisit_columns_to_events",
+        # Active memory v1 (v0.3.8, Phase 2.14). Two NULLABLE TEXT columns —
+        # no NOT NULL / no DEFAULT — so existing rows read back as NULL and the
+        # ALTER is a metadata-only schema edit (SQLite does NOT rewrite the
+        # table for a nullable, default-less ADD COLUMN). That's why the v3
+        # migration stays fast even on multi-million-event installs;
+        # test_migrations_perf.py locks the bound in at 10k / 100k / 1M events.
+        # `expires_when` is added now but unused until the v0.3.11 evaluator —
+        # adding both columns in one migration avoids a second migration later.
+        statements=(
+            "ALTER TABLE events ADD COLUMN revisit_after TEXT",
+            "ALTER TABLE events ADD COLUMN expires_when TEXT",
+        ),
+        # Fresh 0.3.8+ databases get both columns from CREATE_TABLE_SQL; the
+        # bootstrap path records v3 as applied without re-running the ALTERs.
+        bootstrap_check=lambda conn: _column_exists(conn, "events", "revisit_after"),
+    ),
 )
 
 

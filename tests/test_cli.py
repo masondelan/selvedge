@@ -698,3 +698,226 @@ def test_log_changeset_stored(runner):
     result = runner.invoke(cli, ["diff", "payments.amount", "--json"])
     data = json.loads(result.output)
     assert data[0]["changeset_id"] == "my-feature"
+
+
+# ---------------------------------------------------------------------------
+# prior-attempts (CLI parity for the prior_attempts MCP tool — v0.3.8)
+# ---------------------------------------------------------------------------
+
+
+def _seed_revert(path="users.token", *, gap_days=1, attempt_reason="Tried a token column.",
+                 revert_reason="Reverted: moved to JWTs."):
+    """Seed an add→remove pair on ``path`` ``gap_days`` apart (deterministic)."""
+    from selvedge.config import get_db_path
+    storage = SelvedgeStorage(get_db_path())
+    storage.log_event(ChangeEvent(
+        entity_path=path, change_type="add",
+        timestamp="2026-01-01T00:00:00Z", reasoning=attempt_reason,
+    ))
+    storage.log_event(ChangeEvent(
+        entity_path=path, change_type="remove",
+        timestamp=f"2026-01-{1 + gap_days:02d}T00:00:00Z", reasoning=revert_reason,
+    ))
+
+
+def test_prior_attempts_cli_renders_reverted(runner):
+    _seed_revert()
+    result = runner.invoke(cli, ["prior-attempts", "users.token"])
+    assert result.exit_code == 0
+    assert "users.token" in result.output
+    assert "reverted" in result.output
+    assert "moved to JWTs" in result.output
+
+
+def test_prior_attempts_cli_empty_exits_zero(runner):
+    """An entity with no tried-and-reverted history exits 0 calmly."""
+    result = runner.invoke(cli, ["prior-attempts", "nonexistent.entity"])
+    assert result.exit_code == 0
+    assert "No prior attempts" in result.output
+    assert "--all" in result.output  # suggests widening recall
+
+
+def test_prior_attempts_cli_json_shape(runner):
+    import json
+    _seed_revert()
+    result = runner.invoke(cli, ["prior-attempts", "users.token", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+    assert len(data) == 1
+    row = data[0]
+    # Identical shape to the MCP tool: event + the three extra fields.
+    assert row["outcome"] == "reverted"
+    assert row["confidence"] == "proximity_high"
+    assert row["outcome_reasoning"] == "Reverted: moved to JWTs."
+
+
+def test_prior_attempts_cli_requires_entity_or_description(runner):
+    result = runner.invoke(cli, ["prior-attempts"])
+    assert result.exit_code == 2
+
+
+def test_prior_attempts_cli_all_widens_recall(runner):
+    """A still-active attempt is hidden by default, shown with --all."""
+    from selvedge.config import get_db_path
+    SelvedgeStorage(get_db_path()).log_event(ChangeEvent(
+        entity_path="users.email", change_type="add",
+        timestamp="2026-01-01T00:00:00Z", reasoning="Email for auth, still in use.",
+    ))
+    default = runner.invoke(cli, ["prior-attempts", "users.email"])
+    assert default.exit_code == 0
+    assert "No prior attempts" in default.output
+
+    widened = runner.invoke(cli, ["prior-attempts", "users.email", "--all", "--json"])
+    import json
+    data = json.loads(widened.output)
+    assert len(data) == 1
+    assert data[0]["outcome"] == "active"
+
+
+# ---------------------------------------------------------------------------
+# stale (dated decisions due for a revisit — v0.3.8)
+# ---------------------------------------------------------------------------
+
+
+def _seed_due_decision(path="users", *, entity_type="table"):
+    """A decision whose revisit date is long past, with an active-use signal."""
+    from selvedge.config import get_db_path
+    storage = SelvedgeStorage(get_db_path())
+    storage.log_event(ChangeEvent(
+        entity_path=path, change_type="add", entity_type=entity_type,
+        timestamp="2020-01-01T00:00:00Z", revisit_after="2020-06-01",
+        reasoning="Architectural decision worth revisiting.",
+    ))
+    # An active-use signal: the entity was queried (recorded now > the decision).
+    storage.record_tool_call("blame", entity_path=path)
+
+
+def test_stale_cli_empty_exits_zero(runner):
+    result = runner.invoke(cli, ["stale"])
+    assert result.exit_code == 0
+    assert "No decisions are due" in result.output
+
+
+def test_stale_cli_renders_due_decision(runner):
+    import re
+    _seed_due_decision()
+    result = runner.invoke(cli, ["stale"])
+    assert result.exit_code == 0
+    assert "users" in result.output
+    # The overdue column renders the actual "<N>d" token (not just any "d").
+    # (The stale_reason text wraps in the table; it's asserted via --json below.)
+    assert re.search(r"\d+d", result.output), result.output
+
+
+def test_stale_cli_json_shape(runner):
+    import json
+    _seed_due_decision()
+    result = runner.invoke(cli, ["stale", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 1
+    row = data[0]
+    assert row["entity_path"] == "users"
+    assert row["active_use_signals"] == ["queried"]
+    # Due date resolves from the seeded 2020-06-01 absolute revisit date,
+    # and the overdue count is the real elapsed days (well over 2000 by now).
+    assert row["revisit_due"] == "2020-06-01T00:00:00Z"
+    assert row["days_overdue"] > 2000
+    assert row["stale_reason"]
+
+
+def test_stale_cli_pure_age_not_shown(runner):
+    """A dated decision nobody touched is NOT surfaced (active-use weighting)."""
+    from selvedge.config import get_db_path
+    SelvedgeStorage(get_db_path()).log_event(ChangeEvent(
+        entity_path="orders", change_type="add", entity_type="table",
+        timestamp="2020-01-01T00:00:00Z", revisit_after="2020-06-01",
+        reasoning="Old decision, untouched.",
+    ))
+    result = runner.invoke(cli, ["stale"])
+    assert result.exit_code == 0
+    assert "No decisions are due" in result.output
+
+
+def test_stale_cli_filters_narrow_the_result(runner):
+    """--entity / --project / --agent narrow correctly through the CLI boundary
+    (pins the --entity → entity_path rename)."""
+    import json
+
+    from selvedge.config import get_db_path
+    storage = SelvedgeStorage(get_db_path())
+    for path, project, agent in [("users", "api", "claude-code"),
+                                 ("orders", "web", "cursor")]:
+        storage.log_event(ChangeEvent(
+            entity_path=path, change_type="add", entity_type="table",
+            timestamp="2020-01-01T00:00:00Z", revisit_after="2020-06-01",
+            project=project, agent=agent, reasoning="Decision worth revisiting.",
+        ))
+        storage.record_tool_call("blame", entity_path=path)
+
+    def paths(args):
+        r = runner.invoke(cli, ["stale", *args, "--json"])
+        assert r.exit_code == 0
+        return {row["entity_path"] for row in json.loads(r.output)}
+
+    assert paths([]) == {"users", "orders"}
+    assert paths(["--entity", "users"]) == {"users"}
+    assert paths(["--project", "web"]) == {"orders"}
+    assert paths(["--agent", "claude-code"]) == {"users"}
+
+
+def test_cli_blame_records_active_use_signal(runner):
+    """`selvedge blame` (CLI) records a tool_call, so it counts as active use
+    for stale-decisions weighting — same contract as the MCP tools."""
+    import json
+
+    from selvedge.config import get_db_path
+    SelvedgeStorage(get_db_path()).log_event(ChangeEvent(
+        entity_path="users", change_type="add", entity_type="table",
+        timestamp="2020-01-01T00:00:00Z", revisit_after="2020-06-01",
+        reasoning="Decision worth revisiting.",
+    ))
+    # Before any read, pure age does not surface.
+    before = runner.invoke(cli, ["stale", "--json"])
+    assert json.loads(before.output) == []
+    # A CLI blame is the active-use signal.
+    assert runner.invoke(cli, ["blame", "users"]).exit_code == 0
+    after = json.loads(runner.invoke(cli, ["stale", "--json"]).output)
+    assert len(after) == 1
+    assert after[0]["active_use_signals"] == ["queried"]
+
+
+# ---------------------------------------------------------------------------
+# log --revisit-after (v0.3.8)
+# ---------------------------------------------------------------------------
+
+
+def test_log_revisit_after_stored(runner):
+    result = runner.invoke(cli, [
+        "log", "users", "add", "--entity-type", "table",
+        "--reasoning", "Created the users table for the auth rewrite.",
+        "--revisit-after", "90d",
+    ])
+    assert result.exit_code == 0
+    from selvedge.config import get_db_path
+    blame = SelvedgeStorage(get_db_path()).get_blame("users")
+    assert blame is not None
+    assert blame["revisit_after"] == "90d"
+
+
+def test_log_revisit_after_invalid_exits_2(runner):
+    result = runner.invoke(cli, [
+        "log", "users", "add", "--revisit-after", "next week",
+    ])
+    assert result.exit_code == 2
+
+
+def test_log_architectural_change_nudges_revisit_after(runner):
+    """An architectural add with no revisit date gets the soft nudge."""
+    result = runner.invoke(cli, [
+        "log", "users", "add", "--entity-type", "table",
+        "--reasoning", "Created the users table for the auth rewrite.",
+    ])
+    assert result.exit_code == 0
+    assert "revisit_after" in result.output

@@ -73,6 +73,23 @@ You have access to Selvedge (MCP server: `selvedge`) for change tracking.
   repeating a rejected approach.
 - Then call `selvedge.diff` or `selvedge.blame` for the entity's broader
   history before conflicting with past decisions.
+
+**The same operations are on your shell.** Selvedge is MCP-first, but the
+identical local store is also a CLI (`selvedge` is on your PATH after
+install). When the MCP server isn't loaded, you're in a shell-only subagent,
+or you just want to keep context light, use the equivalents:
+
+- Check an entity first: `selvedge prior-attempts <entity>` (was it tried and
+  reverted before?), then `selvedge blame <entity>` / `selvedge diff <entity>`
+  for its broader history.
+- Log a change: `selvedge log <entity> <change_type> --reasoning "<why>"`
+  (change_type: add, remove, modify, rename, retype, create, delete,
+  index_add, index_remove, migrate; for a rename add `--rename-from <old>`).
+- Find things: `selvedge search "<query>"`, `selvedge history --since 7d`,
+  `selvedge stale` (decisions now due for a revisit).
+
+Add `--json` to any read command; `selvedge <command> --help` gives detail on
+demand.
 """
 
 

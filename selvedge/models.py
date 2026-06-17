@@ -83,6 +83,19 @@ class ChangeEvent:
     changeset_id: str = ""  # Groups related changes (e.g. all events from one feature)
     metadata: str = "{}"  # JSON string for extensibility
 
+    # Active memory v1 (v0.3.8, Phase 2.14). Both default to "" (absent) and
+    # follow the "every field always populated, never null" convention. The
+    # underlying SQLite columns are nullable so pre-v3 rows read back as NULL;
+    # new writes store "" rather than NULL.
+    #   - revisit_after: an ISO-8601 date OR a relative offset from `timestamp`
+    #     (e.g. "90d"), normalized at the write path the way `--since` is.
+    #     Consumed by the `stale_decisions` surface.
+    #   - expires_when: a closed-grammar predicate. The COLUMN ships in v0.3.8
+    #     but the evaluator is deferred to v0.3.11 — populated by no write path
+    #     yet, carried on the dataclass so the field exists from day one.
+    revisit_after: str = ""
+    expires_when: str = ""
+
     def __post_init__(self) -> None:
         # entity_path: must be non-empty
         if not isinstance(self.entity_path, str) or not self.entity_path.strip():
@@ -126,4 +139,6 @@ class ChangeEvent:
             "project": self.project,
             "changeset_id": self.changeset_id,
             "metadata": self.metadata,
+            "revisit_after": self.revisit_after,
+            "expires_when": self.expires_when,
         }

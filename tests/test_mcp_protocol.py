@@ -30,6 +30,7 @@ _EXPECTED_TOOL_NAMES = frozenset({
     "changeset",
     "search",
     "prior_attempts",
+    "stale_decisions",
 })
 
 
@@ -86,7 +87,7 @@ def _payload(result):
 
 
 @pytest.mark.asyncio
-async def test_server_initializes_and_lists_seven_tools(server_params):
+async def test_server_initializes_and_lists_eight_tools(server_params):
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             init = await session.initialize()
@@ -283,6 +284,40 @@ async def test_prior_attempts_round_trip(server_params):
             assert payload[0]["outcome"] == "reverted"
             assert payload[0]["confidence"] == "proximity_high"
             assert "JWTs" in payload[0]["outcome_reasoning"]
+
+
+@pytest.mark.asyncio
+async def test_stale_decisions_round_trip(server_params):
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            # A dated architectural decision whose revisit date is already past.
+            await session.call_tool("log_change", arguments={
+                "entity_path": "users",
+                "change_type": "add",
+                "entity_type": "table",
+                "reasoning": "Created the users table for the auth rewrite.",
+                "revisit_after": "2020-01-01",
+            })
+            # Pure age must NOT surface — no active-use signal yet.
+            empty = _payload(
+                await session.call_tool("stale_decisions", arguments={})
+            )
+            assert empty == []
+
+            # A blame query on the entity is the active-use signal.
+            await session.call_tool("blame", arguments={"entity_path": "users"})
+            payload = _payload(
+                await session.call_tool("stale_decisions", arguments={})
+            )
+            assert isinstance(payload, list)
+            assert len(payload) == 1
+            row = payload[0]
+            assert row["entity_path"] == "users"
+            assert row["active_use_signals"] == ["queried"]
+            assert row["revisit_due"].startswith("2020-01-01")
+            assert row["days_overdue"] >= 1
+            assert "active" in row["stale_reason"]
 
 
 @pytest.mark.asyncio

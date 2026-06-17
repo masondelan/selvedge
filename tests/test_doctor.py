@@ -428,3 +428,54 @@ def test_doctor_case_collision_and_path_migration_rows(tmp_path, monkeypatch):
     mig_row = next(c for c in checks if c["label"] == "Path migration")
     assert mig_row["status"] == "INFO"
     assert "rewritten" in mig_row["detail"]
+
+
+# ---------------------------------------------------------------------------
+# v0.3.8 — stale-decisions row (INFO-tier; net warning count must not grow)
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_stale_decisions_info_when_none(tmp_path):
+    """No dated decisions → INFO row, never a warning."""
+    from selvedge.config import get_db_path
+    SelvedgeStorage(get_db_path())
+    checks = _doctor_checks()
+    row = next(c for c in checks if c["label"] == "Stale decisions")
+    assert row["status"] == "INFO"
+    assert "none due" in row["detail"].lower()
+
+
+def test_doctor_stale_decisions_info_when_due(tmp_path):
+    """A due-and-active decision surfaces as INFO (a nudge, not a fault)."""
+    from selvedge.config import get_db_path
+    from selvedge.models import ChangeEvent
+
+    storage = SelvedgeStorage(get_db_path())
+    storage.log_event(ChangeEvent(
+        entity_path="users", change_type="add", entity_type="table",
+        timestamp="2020-01-01T00:00:00Z", revisit_after="2020-06-01",
+        reasoning="Architectural decision worth revisiting.",
+    ))
+    storage.record_tool_call("blame", entity_path="users")
+
+    checks = _doctor_checks()
+    row = next(c for c in checks if c["label"] == "Stale decisions")
+    assert row["status"] == "INFO"
+    assert "users" in row["detail"]
+    assert "selvedge stale" in row["detail"]
+    # The new row never escalates to WARN/FAIL — warning count stays flat.
+    assert not any(c["status"] == "FAIL" for c in checks)
+
+
+def test_doctor_stale_decisions_in_json_labels(runner, tmp_path):
+    """The row is part of the JSON contract callers can rely on, and the
+    INFO-tier-never-FAIL discipline holds on the machine-readable surface."""
+    result = runner.invoke(cli, ["doctor", "--json"])
+    payload = json.loads(result.output)
+    rows = {c["label"]: c for c in payload["checks"]}
+    assert "Stale decisions" in rows
+    # INFO-tier on purpose — never WARN/FAIL — so it can't flip doctor's exit
+    # code or grow the warning count (the net-warning-count discipline).
+    assert rows["Stale decisions"]["status"] == "INFO"
+    assert rows["Stale decisions"]["detail"]
+    assert result.exit_code == 0

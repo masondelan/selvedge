@@ -12,6 +12,8 @@ Commands:
   selvedge blame <entity>     Most recent change + context for an entity
   selvedge history            Filtered history across all entities
   selvedge search <query>     Full-text search across all events
+  selvedge prior-attempts     Prior attempts on an entity + inferred outcome
+  selvedge stale              Dated decisions now due for a revisit
   selvedge log                Manually log a change event
   selvedge migrate-paths      Re-canonicalize stored entity paths (backfill)
   selvedge stats              Tool-call coverage report
@@ -43,8 +45,12 @@ from .logging_config import LOG_LEVEL_ENV, configure_logging
 from .migrations import MIGRATIONS, get_applied_versions, latest_version
 from .models import ChangeEvent, ChangeType
 from .storage import SelvedgeStorage
-from .timeutil import parse_time_string
-from .validation import check_entity_path_shape, check_reasoning_quality
+from .timeutil import normalize_revisit_after, parse_time_string, parse_window_minutes
+from .validation import (
+    check_entity_path_shape,
+    check_reasoning_quality,
+    check_revisit_nudge,
+)
 
 console = Console()
 err_console = Console(stderr=True)
@@ -652,6 +658,35 @@ def _doctor_checks() -> list[dict]:
     else:
         checks.append(_check("Path migration", "INFO", "no DB yet"))
 
+    # 13. Stale decisions (v0.3.8) — dated decisions now due for a revisit that
+    # are still in active use. Deliberately INFO-tier, NOT WARN: a decision
+    # aging out is a nudge, not a fault. Part of this release's signal-to-noise
+    # curation pass — keeping the new row out of the WARN count is how the net
+    # warning total stays flat (the existing WARN rows were each reviewed and
+    # still fire usefully, so none were demoted to compensate).
+    if db_exists:
+        try:
+            stale = SelvedgeStorage(resolved.path).get_stale_decisions(limit=100)
+        except sqlite3.Error as e:
+            checks.append(_check("Stale decisions", "FAIL", f"sqlite error: {e}"))
+        else:
+            if stale:
+                sample = ", ".join(s["entity_path"] for s in stale[:3])
+                more = f" (+{len(stale) - 3} more)" if len(stale) > 3 else ""
+                checks.append(_check(
+                    "Stale decisions", "INFO",
+                    f"{len(stale)} decision(s) due for revisit: {sample}{more} — "
+                    f"run `selvedge stale` to review"
+                ))
+            else:
+                checks.append(_check(
+                    "Stale decisions", "INFO",
+                    "none due for revisit (a decision surfaces here once its "
+                    "revisit_after passes and the entity is still in active use)"
+                ))
+    else:
+        checks.append(_check("Stale decisions", "INFO", "no DB yet"))
+
     return checks
 
 
@@ -674,6 +709,7 @@ def doctor(as_json):
         exist AND the events table has ≥10k rows)
       • last prune from .selvedge/prune.log (timestamp, rows pruned, threshold)
       • tool_calls table size (WARN above 100k rows — run `selvedge prune`)
+      • stale decisions due for a revisit (INFO — run `selvedge stale`)
 
     \b
     Exit codes:
@@ -934,7 +970,12 @@ def diff(entity_path, limit, as_json):
       selvedge diff users.email
       selvedge diff src/auth.py::login
     """
-    rows = get_storage().get_entity_history(entity_path, limit)
+    storage = get_storage()
+    # Record on the shared coverage counter so `selvedge stats` and the
+    # stale-decisions active-use signal see CLI reads too, mirroring the MCP
+    # `diff` tool and the `prior-attempts` CLI command.
+    storage.record_tool_call("diff", entity_path=entity_path, agent="cli")
+    rows = storage.get_entity_history(entity_path, limit)
 
     if as_json:
         click.echo(json.dumps(rows, indent=2))
@@ -983,7 +1024,11 @@ def blame(entity_path, as_json):
       selvedge blame users.email
       selvedge blame api/v1/payments
     """
-    row = get_storage().get_blame(entity_path)
+    storage = get_storage()
+    # Record on the shared coverage counter (see the `diff` command) so a CLI
+    # blame counts as active use of the entity for stale-decisions weighting.
+    storage.record_tool_call("blame", entity_path=entity_path, agent="cli")
+    row = storage.get_blame(entity_path)
 
     if not row:
         console.print(f"[yellow]No history found for '{entity_path}'[/yellow]")
@@ -1176,6 +1221,189 @@ def search(query, limit, as_json):
 
 
 # ---------------------------------------------------------------------------
+# prior-attempts (CLI parity for the prior_attempts MCP tool)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("prior-attempts")
+@click.argument("entity", required=False, default="")
+@click.option(
+    "--description",
+    "-d",
+    default="",
+    help="Free-text description to match instead of an exact ENTITY.",
+)
+@click.option(
+    "--all",
+    "show_all",
+    is_flag=True,
+    help="Widen recall to proximity_low (include still-active and far-apart reverts).",
+)
+@click.option(
+    "--window",
+    default="7d",
+    show_default=True,
+    help="Proximity window for the add→remove revert heuristic (e.g. 7d, 60m, or "
+    "a plain integer of minutes).",
+)
+@click.option("--limit", "-n", default=20, show_default=True, help="Number of results")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
+    """Show prior change attempts on an entity, each with an inferred outcome.
+
+    \b
+    A thin presenter over the same store the `prior_attempts` MCP tool reads,
+    so the two surfaces can't diverge — `--json` emits the identical list the
+    tool returns. Pass an ENTITY (exact, with `.`-prefix matching) OR
+    --description for free-text mode; ENTITY wins if both are given.
+
+    \b
+    Conservative by default: only the clear "tried, then reverted within the
+    window" signal shows. An empty result is the normal, good answer (exit 0) —
+    pass --all to widen recall.
+
+    \b
+    Examples:
+      selvedge prior-attempts users.auth_token
+      selvedge prior-attempts --description "sso token" --all
+      selvedge prior-attempts src/auth.py::login --window 30d --json
+    """
+    if not entity and not description:
+        err_console.print(
+            "[red]error:[/red] provide an ENTITY or --description"
+        )
+        sys.exit(2)
+
+    try:
+        window_minutes = parse_window_minutes(window)
+    except ValueError as e:
+        err_console.print(f"[red]error:[/red] {e}")
+        sys.exit(2)
+
+    min_confidence = "proximity_low" if show_all else "proximity_high"
+
+    storage = get_storage()
+    # Record on the same coverage counter as the MCP tool so `selvedge stats`
+    # reflects both surfaces. A prior_attempts lookup also counts as active-use
+    # of the entity for the stale-decisions weighting.
+    storage.record_tool_call("prior_attempts", entity_path=entity, agent="cli")
+    rows = storage.get_prior_attempts(
+        entity_path=entity,
+        query=description,
+        min_confidence=min_confidence,
+        window_minutes=window_minutes,
+        limit=limit,
+    )
+
+    if as_json:
+        click.echo(json.dumps(rows, indent=2))
+        return
+
+    if not rows:
+        target = entity or f'"{description}"'
+        console.print(f"[green]No prior attempts found for {target}.[/green]")
+        if not show_all:
+            console.print(
+                "[dim]Nothing clearly tried-and-reverted — pass [bold]--all[/bold] "
+                "to widen recall.[/dim]"
+            )
+        return  # empty is the normal, good answer — exit 0
+
+    label = entity or f'"{description}"'
+    console.print(f"\n[bold]Prior attempts[/bold]  [dim]{label}[/dim]\n")
+    for r in rows:
+        outcome = r.get("outcome", "")
+        confidence = r.get("confidence", "")
+        outcome_style = "red" if outcome == "reverted" else "yellow"
+        console.print(
+            f"  [dim]{fmt_ts(r.get('timestamp', ''))}[/dim]  "
+            f"[cyan]{r.get('entity_path', '')}[/cyan]  "
+            f"[green]{r.get('change_type', '')}[/green]  "
+            f"[{outcome_style}]{outcome}[/{outcome_style}]  "
+            f"[dim]({confidence})[/dim]"
+        )
+        if r.get("reasoning"):
+            console.print(f"    [dim]attempt:[/dim]  {r['reasoning']}")
+        if outcome == "reverted" and r.get("outcome_reasoning"):
+            console.print(f"    [dim]reverted:[/dim] {r['outcome_reasoning']}")
+        console.print()
+
+
+# ---------------------------------------------------------------------------
+# stale (dated decisions due for a revisit — v0.3.8)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("stale")
+@click.option("--entity", "-e", default="", help="Filter to an entity or path prefix")
+@click.option("--project", "-p", default="", help="Filter by project name")
+@click.option(
+    "--agent",
+    "-a",
+    default="",
+    help="Filter to the agent that logged the decision",
+)
+@click.option("--limit", "-n", default=20, show_default=True, help="Number of results")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def stale_cmd(entity, project, agent, limit, as_json):
+    """Show dated decisions now due for a revisit (and still in active use).
+
+    \b
+    The date-based half of active memory (v0.3.8): decisions whose
+    `revisit_after` has passed AND whose entity is still live (recently
+    queried, or its changeset kept moving). Pure age never surfaces here, so
+    an old-but-correct decision nobody touches won't nag. `--json` is built
+    for cron / Slack / digest jobs.
+
+    \b
+    Examples:
+      selvedge stale
+      selvedge stale --entity users --json
+      selvedge stale --project my-api --agent claude-code
+    """
+    storage = get_storage()
+    rows = storage.get_stale_decisions(
+        entity_path=entity, project=project, agent=agent, limit=limit
+    )
+
+    if as_json:
+        click.echo(json.dumps(rows, indent=2))
+        return
+
+    if not rows:
+        console.print("[green]No decisions are due for a revisit.[/green]")
+        console.print(
+            "[dim]Decisions surface here once their [bold]revisit_after[/bold] "
+            "passes and the entity is still in active use.[/dim]"
+        )
+        return
+
+    table = Table(
+        title="Decisions due for revisit",
+        box=box.SIMPLE_HEAD,
+        show_lines=False,
+        header_style="bold",
+    )
+    table.add_column("Entity", style="bold cyan")
+    table.add_column("Change", style="green")
+    table.add_column("Logged", style="dim", no_wrap=True)
+    table.add_column("Due", style="dim", no_wrap=True)
+    table.add_column("Overdue", justify="right")
+    table.add_column("Why", overflow="fold")
+    for r in rows:
+        table.add_row(
+            r.get("entity_path", ""),
+            r.get("change_type", ""),
+            fmt_ts(r.get("timestamp", "")),
+            fmt_ts(r.get("revisit_due", "")),
+            f"{r.get('days_overdue', 0)}d",
+            r.get("stale_reason", ""),
+        )
+    console.print(table)
+    console.print()
+
+
+# ---------------------------------------------------------------------------
 # stats (tool-call coverage)
 # ---------------------------------------------------------------------------
 
@@ -1314,12 +1542,18 @@ _CHANGE_TYPE_CHOICES = [ct.value for ct in ChangeType]
 @click.option("--project", default="", help="Project name")
 @click.option("--changeset", "-c", default="", help="Changeset ID to group related changes")
 @click.option(
+    "--revisit-after",
+    default="",
+    help="Revisit date for an architectural decision: an ISO date or a relative "
+    "offset from now (e.g. '90d', '6mo'). Surfaced later by `selvedge stale`.",
+)
+@click.option(
     "--rename-from",
     default="",
     help="Old path when CHANGE_TYPE is 'rename'; ENTITY_PATH is the new path. "
     "Records the dual-event rename pattern (rename on old + create on new).",
 )
-def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, commit, project, changeset, rename_from):
+def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, commit, project, changeset, revisit_after, rename_from):
     """Manually log a change event.
 
     \b
@@ -1332,12 +1566,21 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
       selvedge log users.email add --reasoning "Added for auth"
       selvedge log src/auth.py modify --diff "Updated login logic" --agent "me"
       selvedge log payments.amount add --changeset add-stripe-billing
+      selvedge log users table add --revisit-after 90d --reasoning "..."
       selvedge log src/auth/session.py::login rename --rename-from src/auth.py::login
     """
     if rename_from and change_type != "rename":
         err_console.print(
             "[red]error:[/red] --rename-from is only valid with CHANGE_TYPE 'rename'"
         )
+        sys.exit(2)
+
+    # Normalize --revisit-after with the same grammar as --since (relative
+    # offsets preserved, absolute dates canonicalized) before it reaches storage.
+    try:
+        normalized_revisit = normalize_revisit_after(revisit_after)
+    except ValueError as e:
+        err_console.print(f"[red]error:[/red] {e}")
         sys.exit(2)
 
     storage = get_storage()
@@ -1366,6 +1609,7 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
                 git_commit=commit,
                 project=project,
                 changeset_id=changeset,
+                revisit_after=normalized_revisit,
             )
             stored = storage.log_event(event)
     except ValueError as e:
@@ -1384,10 +1628,13 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
             f"[dim]{stored.id[:8]}[/dim]{suffix}"
         )
 
-    # Surface reasoning-quality + entity-path-shape warnings so manual entries
-    # get the same nudges that agent-driven log_change calls do.
+    # Surface reasoning-quality + entity-path-shape + revisit-date warnings so
+    # manual entries get the same nudges that agent-driven log_change calls do.
     warnings = check_reasoning_quality(reasoning)
     warnings += check_entity_path_shape(stored.entity_path, stored.entity_type)
+    warnings += check_revisit_nudge(
+        stored.change_type, stored.entity_type, stored.revisit_after
+    )
     for warning in warnings:
         err_console.print(f"[yellow]warning:[/yellow] {warning}")
 

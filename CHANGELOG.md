@@ -6,6 +6,127 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.8] — 2026-06-16
+
+**Active memory v1 (date-based).** Selvedge's append-only log learns to know
+when its own data is stale. A decision can now carry a revisit date
+(`revisit_after`), and a new **`stale_decisions`** tool surfaces decisions that
+have aged out — but only the ones whose entity is *still in active use*, so an
+old-but-correct decision nobody touches never nags. This is the date-based half
+of the active-memory arc; the pattern-based half (`expires_when` grammar,
+explicit `reject`/`revert` change types) lands in v0.3.11. **Drop-in upgrade
+for anyone on 0.3.7.** Brings the MCP surface to **8 tools**.
+
+This release also bundles two adjacent items: CLI parity for the v0.3.7 wedge
+(`selvedge prior-attempts`, previously the only MCP tool with no CLI command)
+and a CLI-awareness section in the agent-instructions block, so a shell-having
+agent knows the same operations exist as `selvedge` commands.
+
+**No-LLM guard.** `stale_decisions` is templated, deterministic assembly over
+the reasoning and telemetry Selvedge already stores — no model hop anywhere in
+core, by design.
+
+**One-time migration cost (multi-million-event installs).** Schema migration
+v3 adds two **nullable, default-less** TEXT columns (`revisit_after`,
+`expires_when`) via `ALTER TABLE ADD COLUMN`. In SQLite that's a metadata-only
+edit — the table is **not** rewritten — so even a multi-million-event database
+migrates in well under a second on the next connection. `test_migrations_perf.py`
+gates this at 10k / 100k / 1M events. (`expires_when` is added now but unused
+until the v0.3.11 evaluator — both columns ship in one migration to avoid a
+second migration two releases later.)
+
+**Test-budget overage (called out).** Phase 2.14's soft budget is ≤25 new
+tests; this release exceeds it. Two drivers, neither scope creep in the core
+feature: (1) the two bundled items — the `prior-attempts` CLI command and the
+CLI-awareness block, each with its own tests (incl. the lockstep test); and
+(2) an adversarial multi-agent review pass that hardened edge cases the first
+draft under-covered — NULL-coalescing on the pre-v3 read paths, the
+most-overdue-first ordering and `limit` contracts, filter wiring at the
+tool/CLI boundary, the `changeset_activity` active-use signal, and a
+version-independent `PRAGMA page_count` structural guard on the v3 migration.
+
+### Added
+
+- **`stale_decisions` MCP tool — the 8th tool.** Returns events whose
+  `revisit_after` has passed AND whose entity is still in active use. The
+  required active-use signal is one of: the entity was queried
+  (`blame` / `diff` / `prior_attempts`) at or after the decision was logged, or
+  the decision's `changeset_id` saw later sibling activity. **Pure age alone
+  never surfaces** — that's the noise defense against old-but-correct decisions.
+  Each result carries `revisit_due`, `days_overdue`, `active_use_signals`, and a
+  templated `stale_reason`. Filterable by `entity_path`, `project`, `agent`.
+  No LLM.
+- **`revisit_after` on `log_change` (MCP) and `selvedge log` (CLI).** An
+  ISO-8601 date OR a relative offset from the event's timestamp (e.g. `90d`,
+  `6mo`), normalized with the same grammar as `--since`. Stored on the event
+  and consumed by `stale_decisions` / `selvedge stale`.
+- **`selvedge stale` CLI command.** The same data surface as `stale_decisions`,
+  Rich-formatted, with `--json` for cron / Slack / digest jobs. Filters by
+  `--entity`, `--project`, `--agent`.
+- **`selvedge prior-attempts` CLI command.** CLI parity for the v0.3.7
+  `prior_attempts` wedge — a thin presenter over the same `get_prior_attempts`
+  store, so `--json` emits the identical list the MCP tool returns and the two
+  surfaces can't diverge. ENTITY (positional) xor `--description`; `--all`
+  widens recall to `proximity_low`; `--window` (e.g. `7d`, `60m`) maps onto the
+  proximity window. An empty result is the normal, good answer (exit 0). Records
+  on the same coverage counter as the tool so `selvedge stats` reflects both
+  surfaces.
+- **CLI-awareness in the agent-instructions block.** `selvedge/prompt.py`'s
+  `PROMPT_BLOCK` gains a short, MCP-first-preserving section telling a
+  shell-having agent the same operations exist as `selvedge` commands — for when
+  the MCP server isn't loaded, in a shell-only subagent, or to keep context
+  light. Kept in lockstep with `docs/architecture.md`'s "System prompt /
+  end-user agent instructions" section (asserted by a test).
+- **Reasoning-quality revisit-date nudge.** When an architectural change
+  (`add` / `modify` / `create` / `migrate` on a `table` / `schema` /
+  `dependency` / `config`) is logged without a `revisit_after`, the validator
+  soft-warns suggesting one. Advisory only — never blocks the write, same
+  posture as the reasoning-quality and entity-path-shape validators.
+- **`doctor` — stale-decisions row (INFO).** Surfaces how many dated decisions
+  are due for a revisit, pointing at `selvedge stale`. Deliberately INFO-tier:
+  a decision aging out is a nudge, not a fault.
+- **`scripts/schema_tax.py` wired into CI.** The lint job now runs
+  `schema_tax.py --max 3200`, failing the build if the MCP tool definitions'
+  at-init context footprint balloons (today ~3.1k core for 8 tools). `tiktoken`
+  was added as a **dev-only** dependency so the gate uses the real tokenizer
+  that matches the figures Selvedge publishes.
+- **`docs/coding-agents.md`** — end-user doc on the MCP-first / CLI-second
+  story (when an agent reaches for which). Shipped in the sdist.
+
+### Changed
+
+- **Schema migration v3** adds `revisit_after` and `expires_when` to `events`
+  (both nullable; existing rows backfill to NULL, new writes store `""`). The
+  `revisit_after` index is created post-migration so it exists on both fresh and
+  upgraded databases.
+- **`BlameResult` extended** with `revisit_after` and `expires_when` (every
+  field still always present, NULL coalesced to `""`) rather than introducing a
+  new result shape — per the type-discipline convention.
+- **`doctor` signal-to-noise pass.** Reviewed every existing check as the new
+  row landed; the stale-decisions row is INFO-tier on purpose so the net WARN
+  count does not grow with this release (the existing WARN rows each still fire
+  usefully, so none were demoted to compensate).
+- **CLI `diff` and `blame` now record on the coverage counter** (`agent="cli"`),
+  matching the MCP tools and the `prior-attempts` CLI command. They now appear
+  in `selvedge stats`, and a CLI review of an entity counts as active use for
+  the stale-decisions weighting (closing a documented-contract gap).
+- **PyPI sdist tightened.** `[tool.hatch.build.targets.sdist]` previously
+  shipped all of `docs/` and `CLAUDE.md`, so website HTML, `og-image.png`
+  (~697 KB), `icon.png` (~873 KB), `sitemap.xml`/`robots.txt`,
+  `marketing-templates.md`, and the agent-instructions file all rode along to
+  PyPI. Now ships only `selvedge/`, `README.md`, `LICENSE`, `pyproject.toml`,
+  and two end-user docs (`getting-started.md`, `coding-agents.md`).
+
+### Fixed
+
+- **`docs/marketing-templates.md` was tracked** — public on GitHub and shipped
+  in the sdist. Untracked (`git rm --cached`) and added to `.gitignore`'s
+  Internal section. A new `tests/test_repo_hygiene.py` guard fails the build if
+  any known-internal artifact (marketing-templates, strategy, dashboard,
+  teardown, ideas-backlog, top-priority, …) is ever tracked again. (History
+  caveat: the file remains reachable via old commits; a history rewrite is
+  out of scope for this release.)
+
 ## [0.3.7] — 2026-06-08
 
 The brand-defining release: the **`prior_attempts`** MCP tool — an agent

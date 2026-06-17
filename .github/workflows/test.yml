@@ -26,6 +26,13 @@ jobs:
       - name: Mypy
         run: mypy selvedge
 
+      # Drift guard: fail if the MCP tool definitions balloon the agent's
+      # at-init context footprint. Budget is a bit above today's ~3.1k core
+      # (8 tools). tiktoken is a dev dependency so this uses the real
+      # tokenizer that matches the figures Selvedge publishes.
+      - name: MCP schema-tax budget
+        run: python scripts/schema_tax.py --max 3200
+
   test:
     runs-on: ubuntu-latest
     strategy:

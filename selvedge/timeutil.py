@@ -16,6 +16,23 @@ from datetime import datetime, timedelta, timezone
 _RELATIVE_RE = re.compile(r"(\d+)(mo|mon|h|d|m|y)$", re.IGNORECASE)
 
 
+def _relative_delta(n: int, unit: str) -> timedelta:
+    """Map a relative-shorthand (count, unit) pair to a ``timedelta``.
+
+    Shared by :func:`parse_time_string` (which subtracts it from *now*) and
+    :func:`resolve_revisit_due` (which adds it to an event's timestamp), so the
+    two surfaces can't drift on what ``90d`` or ``5mo`` means.
+    """
+    return {
+        "h": timedelta(hours=n),
+        "d": timedelta(days=n),
+        "m": timedelta(minutes=n),
+        "y": timedelta(days=n * 365),
+        "mo": timedelta(days=n * 30),
+        "mon": timedelta(days=n * 30),
+    }[unit]
+
+
 def normalize_timestamp(ts: str) -> str:
     """
     Normalize an ISO 8601 timestamp string to canonical UTC form.
@@ -69,15 +86,7 @@ def parse_time_string(since: str) -> str:
     m = _RELATIVE_RE.fullmatch(s)
     if m:
         n, unit = int(m.group(1)), m.group(2).lower()
-        delta_map = {
-            "h": timedelta(hours=n),
-            "d": timedelta(days=n),
-            "m": timedelta(minutes=n),
-            "y": timedelta(days=n * 365),
-            "mo": timedelta(days=n * 30),
-            "mon": timedelta(days=n * 30),
-        }
-        cutoff = datetime.now(timezone.utc) - delta_map[unit]
+        cutoff = datetime.now(timezone.utc) - _relative_delta(n, unit)
         return normalize_timestamp(cutoff.isoformat())
 
     # Try as an absolute ISO 8601 timestamp.
@@ -88,3 +97,86 @@ def parse_time_string(since: str) -> str:
             f"could not parse {since!r} as a relative time "
             "(e.g. '7d', '24h', '15m', '5mo', '1y') or ISO 8601 timestamp"
         ) from e
+
+
+def parse_window_minutes(value: str) -> int:
+    """Parse a duration window into whole minutes (v0.3.8 CLI ``--window``).
+
+    Accepts the same relative grammar as ``--since`` (``7d``, ``60m``, ``24h``,
+    ``6mo``, ``1y``) and bare integers (treated as minutes, so ``--window 90``
+    means 90 minutes). Powers ``selvedge prior-attempts --window`` mapping onto
+    the storage layer's ``window_minutes``. Raises ``ValueError`` otherwise.
+    """
+    s = value.strip()
+    if not s:
+        raise ValueError("window is empty")
+    if s.isdigit():
+        return int(s)
+    m = _RELATIVE_RE.fullmatch(s)
+    if not m:
+        raise ValueError(
+            f"could not parse window {value!r} as a duration "
+            "(e.g. '7d', '60m', '24h') or a plain integer of minutes"
+        )
+    n, unit = int(m.group(1)), m.group(2).lower()
+    return int(_relative_delta(n, unit).total_seconds() // 60)
+
+
+def normalize_revisit_after(value: str) -> str:
+    """Validate and canonicalize a ``revisit_after`` value for storage (v0.3.8).
+
+    ``revisit_after`` carries *either* an absolute ISO-8601 date/datetime *or*
+    a relative offset from the event's own ``timestamp`` (e.g. ``90d``). Unlike
+    :func:`parse_time_string` — which resolves relative shorthand against *now*
+    and into the past — this preserves a relative offset verbatim (lowercased)
+    so the stored intent stays "revisit 90 days after this change," resolvable
+    later by :func:`resolve_revisit_due`. It uses the SAME grammar as ``--since``
+    so the two surfaces validate identically.
+
+    Returns ``""`` for empty input. Absolute values are normalized to canonical
+    UTC. Raises ``ValueError`` on anything that is neither a relative offset nor
+    a parseable ISO timestamp — the write path surfaces that as a friendly
+    error rather than silently storing garbage.
+    """
+    s = value.strip()
+    if not s:
+        return ""
+    if _RELATIVE_RE.fullmatch(s):
+        return s.lower()
+    try:
+        return normalize_timestamp(s)
+    except ValueError as e:
+        raise ValueError(
+            f"could not parse revisit_after {value!r} as a relative offset "
+            "(e.g. '90d', '6mo', '1y') or an ISO 8601 date"
+        ) from e
+
+
+def resolve_revisit_due(timestamp: str, revisit_after: str) -> datetime:
+    """Resolve when a decision's ``revisit_after`` falls due, as an aware UTC datetime.
+
+    ``revisit_after`` is interpreted relative to ``timestamp`` (the event time)
+    when it's a relative offset (``90d`` → 90 days after the change), or taken
+    as an absolute moment when it's an ISO date/datetime. Inverse pairing with
+    :func:`normalize_revisit_after`, which is what produced the stored value.
+
+    Raises ``ValueError`` if ``revisit_after`` is empty or unparseable.
+    """
+    s = revisit_after.strip()
+    if not s:
+        raise ValueError("revisit_after is empty")
+    m = _RELATIVE_RE.fullmatch(s)
+    if m:
+        n, unit = int(m.group(1)), m.group(2).lower()
+        base = _parse_aware(normalize_timestamp(timestamp))
+        return base + _relative_delta(n, unit)
+    return _parse_aware(normalize_timestamp(s))
+
+
+def _parse_aware(ts: str) -> datetime:
+    """Parse a canonical UTC ISO string (``...Z``) into an aware datetime."""
+    s = ts[:-1] + "+00:00" if ts.endswith(("Z", "z")) else ts
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt

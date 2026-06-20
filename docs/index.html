@@ -524,35 +524,6 @@
     </section>
 
     <!-- ============================================================== -->
-    <!--  CAPTURED LIVE  —  the animated terminal-demo embed (iframe)    -->
-    <!-- ============================================================== -->
-    <section class="mb-28 md:mb-36">
-      <p class="eyebrow mb-4">— captured live</p>
-      <h2 class="h-section text-4xl md:text-6xl mb-10 lowercase">the reveal,<br>in motion</h2>
-
-      <!-- Self-contained demo (fonts + runtime inlined). Lazy-loaded so it
-           never blocks first paint. The demo is a fluid min-height:100vh page,
-           so a fixed aspect-ratio would clip its reasoning box; the script near
-           </body> auto-fits the iframe to the demo's real content height
-           (same-origin) at any width. 640px is just the pre-load fallback. -->
-      <div class="rounded-xl overflow-hidden border border-indigo/15">
-        <iframe
-          id="terminal-demo-frame"
-          src="terminal-demo.html"
-          title="Animated selvedge blame demo — the reasoning behind a change, revealed live in the terminal"
-          loading="lazy"
-          class="w-full block"
-          style="border: 0; height: 640px;"></iframe>
-      </div>
-
-      <p class="mt-8 max-w-prose font-sans text-inkwell leading-relaxed">
-        The same <code class="inline">selvedge blame</code> output, drawn
-        live in the terminal — the reasoning was written by the agent in the
-        moment the change was made, then read straight back out of the store.
-      </p>
-    </section>
-
-    <!-- ============================================================== -->
     <!--  BENTO  —  The six tools                                       -->
     <!-- ============================================================== -->
     <section class="mb-28 md:mb-36">
@@ -837,68 +808,6 @@
     </footer>
 
   </main>
-
-  <!-- Auto-fit the terminal-demo iframe to its real content height (same-origin)
-       so the reasoning box is never clipped at any viewport width. The demo
-       unpacks asynchronously after the iframe 'load' event, so a ResizeObserver
-       re-fits as the reveal grows. JS is required for the demo to render at all,
-       so this always runs; 640px is only the pre-load fallback. -->
-  <script>
-    (function () {
-      var frame = document.getElementById('terminal-demo-frame');
-      if (!frame) return;
-
-      function fit() {
-        try {
-          var doc = frame.contentWindow.document;
-          var h = doc && doc.body ? doc.body.scrollHeight : 0;
-          if (h && Math.abs(h - frame.clientHeight) > 2) frame.style.height = h + 'px';
-        } catch (e) { /* cross-origin or not ready — keep the CSS fallback height */ }
-      }
-      // The reasoning box reveals ~9s into the animation, so poll fit() briefly
-      // (every 250ms for ~12s) — a one-shot observer can miss that late growth.
-      function pollFit() {
-        var n = 0, iv = setInterval(function () { fit(); if (++n > 48) clearInterval(iv); }, 250);
-      }
-      // Replay the reveal via the demo's exposed restart hook (same-origin).
-      function replay() {
-        try {
-          var w = frame.contentWindow;
-          if (w && typeof w.selvedgeReplay === 'function') { w.selvedgeReplay(); pollFit(); }
-        } catch (e) {}
-      }
-
-      frame.addEventListener('load', function () {
-        fit();
-        try { new ResizeObserver(fit).observe(frame.contentWindow.document.body); } catch (e) {}
-        pollFit();
-      });
-      var t;
-      window.addEventListener('resize', function () {
-        clearTimeout(t);
-        frame.style.height = '200px'; // allow shrink on rotate, then re-grow to fit
-        t = setTimeout(fit, 120);
-      });
-
-      // Replay the animation each time the demo scrolls into view. It plays once
-      // on first load (the demo's own mount), then replays on every re-entry.
-      // The first appearance is skipped so it doesn't double up with that play.
-      if ('IntersectionObserver' in window) {
-        var visible = false, seen = false;
-        new IntersectionObserver(function (entries) {
-          entries.forEach(function (e) {
-            if (e.isIntersecting && !visible) {
-              visible = true;
-              if (seen) replay();
-              seen = true;
-            } else if (!e.isIntersecting) {
-              visible = false;
-            }
-          });
-        }, { threshold: 0.3 }).observe(frame);
-      }
-    })();
-  </script>
 
 </body>
 </html>

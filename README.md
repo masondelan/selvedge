@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/readme-hero.png" alt="selvedge — git blame for the why behind AI-written code" width="880">
+  <img src="docs/wordmark.svg" alt="selvedge" width="480">
 </p>
 
 <p align="center">
@@ -54,36 +54,14 @@ the diff afterward by a second LLM. Not a hand-typed commit message.
 
 ---
 
-## Demo
-
-<p align="center">
-  <img src="docs/terminal-demo-still.png" alt="selvedge blame — the reasoning behind a change, captured live by the agent" width="640">
-</p>
-
-<p align="center">
-  <em>A <code>selvedge blame</code> reveal — the <strong>why</strong> behind a change, read straight back out of the store.<br>
-  ▶ <a href="https://selvedge.sh/terminal-demo.html"><strong>Watch the animated version</strong></a> · GitHub READMEs can't run the demo's JavaScript, so the still is shown here.</em>
-</p>
-
-<!-- TO ANIMATE THIS IN THE README (optional — draft recipe, not yet run):
-     GitHub READMEs can't execute the demo's JS, so showing motion inline
-     means committing a GIF at docs/terminal-demo.gif and swapping the <img>
-     above to point at it. Two ways to produce one:
-
-     A. Capture the HTML animation (docs/terminal-demo.html) directly.
-        Open it in a browser sized ~663x540 and screen-record the reveal,
-        then encode the frames (e.g. `brew install gifski`):
-            gifski --fps 24 -o docs/terminal-demo.gif frames/*.png
-
-     B. Record a live terminal session instead — what scripts/record-demo.sh
-        already does (it renders docs/demo.gif from scripts/demo.tape via
-        `vhs` against a seeded demo DB; prereqs: `brew install vhs`). To
-        target docs/terminal-demo.gif, point the tape's `Output` directive at
-        docs/terminal-demo.gif and run:
-            scripts/record-demo.sh
-
-     Then replace the still <img> above with:
-            <img src="docs/terminal-demo.gif" alt="selvedge blame demo" width="640">
+<!-- DEMO GIF
+     Record a 30–45 second terminal session showing:
+     1. `selvedge status`  →  shows N total events
+     2. `selvedge blame payments.amount`  →  full output with reasoning
+     3. `selvedge diff users --since 30d`  →  table of recent changes
+     4. `selvedge search "stripe"`  →  filtered results
+     Use `vhs` (https://github.com/charmbracelet/vhs) or Asciinema.
+     Replace this comment block with: ![Selvedge demo](docs/demo.gif)
 -->
 
 ---

@@ -857,9 +857,10 @@
       frame.addEventListener('load', function () {
         fit();
         try { new ResizeObserver(fit).observe(frame.contentWindow.document.body); } catch (e) {}
-        // The demo unpacks + animates asynchronously after 'load'; re-fit a few
-        // times so the final reveal height is captured even if the observer is late.
-        [200, 700, 1500, 3000].forEach(function (ms) { setTimeout(fit, ms); });
+        // The demo's reasoning box reveals ~8-9s into the one-shot animation;
+        // poll briefly so the final height is always captured even if the
+        // ResizeObserver misses that late growth.
+        var n = 0, iv = setInterval(function () { fit(); if (++n > 48) clearInterval(iv); }, 250);
       });
       var t;
       window.addEventListener('resize', function () {

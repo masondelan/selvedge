@@ -78,3 +78,10 @@ usegitai-competitive-teardown.docx
 # its own apply guide). Belongs in masondelan/selvedge-site, not the code
 # repo; kept here locally only.
 _selvedge-site-seo-patch/
+
+# Internal — brand-kit assets (pitch deck, comparison one-pager, dashboard
+# concept + implementation brief). Local only, same convention as launch/
+# and assets/. The brand-kit's PUBLIC assets (readme-hero.png, social-card.png,
+# terminal-demo.html, terminal-demo-still.png, brand-assets.html) live under
+# docs/ and commit normally — only the internal/ folder is ignored.
+internal/

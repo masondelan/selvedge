@@ -1,0 +1,43 @@
+name: notion-sync
+
+# Mirror the repo source-of-truth into the Notion internal hub.
+# Plus-compatible replacement for Notion Workers (Business/Enterprise only).
+# Deliberately a SEPARATE workflow from the PyPI publish flow — the publish
+# workflow filename is pinned to the PyPI trusted-publisher config, so it must
+# not be touched. This job can never affect a release.
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - CHANGELOG.md
+      - docs/architecture.md
+  workflow_dispatch: {}
+  schedule:
+    # daily at 08:00 UTC — backstop in case a push/release event is missed
+    - cron: "0 8 * * *"
+
+# Avoid overlapping runs racing on the same Notion rows.
+concurrency:
+  group: notion-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync Releases + Roadmap to Notion
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          RELEASES_DB_ID: ${{ secrets.RELEASES_DB_ID }}
+          ROADMAP_DB_ID: ${{ secrets.ROADMAP_DB_ID }}
+        run: python scripts/notion_sync.py

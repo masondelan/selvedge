@@ -17,7 +17,6 @@ Usage:
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -28,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from selvedge.config import get_db_path
 from selvedge.storage import SelvedgeStorage
-
 
 # ---------------------------------------------------------------------------
 # Helpers

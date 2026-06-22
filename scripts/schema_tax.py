@@ -162,8 +162,8 @@ def render(result: dict) -> str:
         "-" * 42,
         f"{'TOTAL':<18}{result['core_total']:>12}{result['full_total']:>12}",
         "",
-        f"core  = name + description + inputSchema (universally loaded)",
-        f"full  = core + outputSchema + annotations + title (some clients)",
+        "core  = name + description + inputSchema (universally loaded)",
+        "full  = core + outputSchema + annotations + title (some clients)",
         f"core is {result['core_pct_window']}% of a {WINDOW:,}-token window;"
         f" full is {result['full_pct_window']}%",
     ]

@@ -17,12 +17,12 @@
 </p>
 
 <p align="center">
-  <a href="cursor://anysphere.cursor-deeplink/mcp/install?name=selvedge&amp;config=eyJjb21tYW5kIjoic2VsdmVkZ2Utc2VydmVyIn0="><img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Add selvedge to Cursor" height="32"></a>
+  <a href="cursor://anysphere.cursor-deeplink/mcp/install?name=selvedge&amp;config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyItLWZyb20iLCJzZWx2ZWRnZSIsInNlbHZlZGdlLXNlcnZlciJdfQ=="><img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Add selvedge to Cursor" height="32"></a>
   &nbsp;
-  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=selvedge&amp;config=%7B%22command%22%3A%22selvedge-server%22%7D"><img src="https://img.shields.io/badge/Install_in_VS_Code-0098FF?style=for-the-badge&amp;logo=visualstudiocode&amp;logoColor=white" alt="Install selvedge in VS Code" height="32"></a>
+  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=selvedge&amp;config=%7B%22name%22%3A%22selvedge%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22--from%22%2C%22selvedge%22%2C%22selvedge-server%22%5D%7D"><img src="https://img.shields.io/badge/Install_in_VS_Code-0098FF?style=for-the-badge&amp;logo=visualstudiocode&amp;logoColor=white" alt="Install selvedge in VS Code" height="32"></a>
 </p>
 
-<p align="center"><sub>One click adds the <code>selvedge-server</code> MCP server to your editor. <code>pip install selvedge</code> first so the command is on your PATH.</sub></p>
+<p align="center"><sub>One click adds the <code>selvedge</code> MCP server to your editor. It runs via <a href="https://docs.astral.sh/uv/"><code>uvx</code></a>, so you only need <code>uv</code> installed — or <code>pip install selvedge</code> and use the <code>selvedge-server</code> command.</sub></p>
 
 <!-- mcp-name: io.github.masondelan/selvedge -->
 

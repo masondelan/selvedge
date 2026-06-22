@@ -1869,23 +1869,36 @@ def backfill_commit(commit_hash, window, quiet):
 
 
 @cli.command()
-@click.option("--format", "fmt", type=click.Choice(["json", "csv"]), default="json",
+@click.option("--format", "fmt",
+              type=click.Choice(["json", "csv", "agent-trace"]), default="json",
               show_default=True, help="Output format")
 @click.option("--since", "-s", default="", help=_SINCE_HELP)
 @click.option("--entity", "-e", default="", help="Filter to entity path prefix")
 @click.option("--project", "-p", default="", help="Filter by project name")
 @click.option("--limit", "-n", default=0, help="Max rows (0 = all)")
+@click.option("--ndjson", is_flag=True,
+              help="agent-trace only: one trace record per line (NDJSON)")
+@click.option("--collapse-by-session", "collapse", is_flag=True,
+              help="agent-trace only: merge events sharing a session_id into one record")
 @click.option("--output", "-o", default="-",
               help="Output file path (default: stdout)")
-def export(fmt, since, entity, project, limit, output):
-    """Export change history to JSON or CSV.
+def export(fmt, since, entity, project, limit, ndjson, collapse, output):
+    """Export change history to JSON, CSV, or Agent Trace.
 
     \b
     Examples:
       selvedge export                            # all events as JSON to stdout
       selvedge export --format csv -o out.csv   # CSV file
       selvedge export --since 30d --entity users
-      selvedge export --format json -o history.json
+      selvedge export --format agent-trace -o trace.json
+      selvedge export --format agent-trace --ndjson -o trace.ndjson
+      selvedge export --format agent-trace --collapse-by-session -o trace.json
+
+    \b
+    The agent-trace format emits Agent Trace v0.1.0 records
+    (https://github.com/cursor/agent-trace) — one per change event by default.
+    Selvedge is a compatible producer; reasoning and entity-level provenance
+    travel in each record's metadata under the "dev.selvedge" namespace.
     """
     import csv as csv_mod
     import io
@@ -1899,7 +1912,20 @@ def export(fmt, since, entity, project, limit, output):
         limit=effective_limit,
     )
 
-    if fmt == "json":
+    if fmt == "agent-trace":
+        from .exporters.agent_trace import (
+            SELVEDGE_NS,
+            events_to_trace_records,
+            export_preamble,
+        )
+
+        records = events_to_trace_records(rows, collapse_by_session=collapse)
+        if ndjson:
+            content = "\n".join(json.dumps(r) for r in records)
+        else:
+            header = export_preamble()[SELVEDGE_NS]
+            content = json.dumps({**header, "records": records}, indent=2)
+    elif fmt == "json":
         content = json.dumps(rows, indent=2)
     else:
         buf = io.StringIO()
@@ -1927,18 +1953,21 @@ def export(fmt, since, entity, project, limit, output):
 @cli.command("import")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--format", "fmt",
-              type=click.Choice(["auto", "sql", "alembic"]),
+              type=click.Choice(["auto", "sql", "alembic", "agent-trace"]),
               default="auto", show_default=True,
-              help="Migration format (auto-detects by default)")
+              help="Input format (auto-detects migrations by default)")
 @click.option("--project", "-p", default="", help="Project name to tag events with")
 @click.option("--dry-run", is_flag=True, help="Preview what would be imported, don't write")
 @click.option("--json", "as_json", is_flag=True, help="Output events as JSON (implies --dry-run)")
 def import_migrations(path, fmt, project, dry_run, as_json):
-    """Import migration files to backfill schema change history.
+    """Import migration files or an Agent Trace file to backfill history.
 
     \b
     PATH can be a single migration file or a directory of migration files.
-    Supports raw SQL DDL files and Alembic Python migration files.
+    Supports raw SQL DDL files and Alembic Python migration files. With
+    --format agent-trace, PATH is an Agent Trace JSON/NDJSON file (round-trips
+    a `selvedge export --format agent-trace`; foreign producers import
+    best-effort with change_type="modify" and empty reasoning).
 
     \b
     Examples:
@@ -1946,14 +1975,38 @@ def import_migrations(path, fmt, project, dry_run, as_json):
       selvedge import migrations/ --project my-api
       selvedge import migrations/0023_add_payments.py --dry-run
       selvedge import schema.sql --format sql
+      selvedge import trace.json --format agent-trace
     """
-    from .importers import import_path
-
     target = Path(path)
-    events = import_path(target, fmt=fmt, project=project)
+
+    if fmt == "agent-trace":
+        from .exporters.agent_trace import load_trace_records, trace_record_to_events
+        from .models import ChangeEvent
+
+        records = load_trace_records(target.read_text())
+        events = []
+        seen_ids: set[str] = set()
+        for record in records:
+            for event_dict in trace_record_to_events(record):
+                try:
+                    event = ChangeEvent(**event_dict)
+                except (ValueError, TypeError):
+                    continue
+                # Dedupe within the batch so a re-derived id can't abort the
+                # single-transaction insert on a PRIMARY KEY collision.
+                if event.id in seen_ids:
+                    continue
+                seen_ids.add(event.id)
+                if project:
+                    event.project = project
+                events.append(event)
+    else:
+        from .importers import import_path
+
+        events = import_path(target, fmt=fmt, project=project)
 
     if not events:
-        console.print("[yellow]No importable schema changes found.[/yellow]")
+        console.print("[yellow]No importable changes found.[/yellow]")
         return
 
     if as_json:

@@ -6,6 +6,59 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.9] — 2026-06-22
+
+**Agent Trace export — Selvedge is a compatible producer.** New
+`selvedge export --format agent-trace` emits
+[Agent Trace](https://github.com/cursor/agent-trace) **v0.1.0** records (the
+open AI code-attribution wire format from Cursor + Cognition AI), so Selvedge's
+captured history travels to any tool that reads the standard. Selvedge's
+reasoning and entity-level provenance ride along in each record's `metadata`
+under the reverse-domain `dev.selvedge` namespace — Agent Trace is the wire
+format, Selvedge is the live capture + query layer that emits it.
+
+**Pulled forward, deliberately.** The export was planned for v0.4.0 (Phase 3).
+It ships now, in the 0.3.x line, as an **opt-in, additive** interop format —
+nothing about the native model, MCP surface, or SQLite storage changes.
+Postgres and the HTTP layer remain the v0.4.0 markers; only the exporter moved
+up. **Drop-in upgrade for anyone on 0.3.8.**
+
+### Added
+
+- **`selvedge export --format agent-trace`** — one Agent Trace v0.1.0 record per
+  change event. `--ndjson` streams one record per line for large histories;
+  `--collapse-by-session` merges events sharing a `session_id` into a single
+  record. The default JSON form is a self-describing bundle
+  (`{agent_trace_version, producer, note, records: [...]}`).
+- **`selvedge import --format agent-trace`** — round-trips a Selvedge export
+  losslessly (entity, change type, and reasoning survive in `dev.selvedge`
+  metadata) and ingests foreign producers best-effort (`change_type="modify"`,
+  empty reasoning).
+- **`selvedge.exporters.agent_trace`** — the pure, dependency-free, no-LLM
+  converter behind both CLI directions (`event_to_trace_record`,
+  `trace_record_to_event`, `extract_line_ranges`, `events_to_trace_records`,
+  `validate_trace_record`). Plus a vendored v0.1.0 JSON Schema
+  (`selvedge/exporters/agent_trace_schema.json`) for reference.
+
+### Notes
+
+- **Conforms to the real v0.1.0 spec.** Records use
+  `files[].conversations[].ranges[]`, a `contributor` of type `ai`/`unknown`
+  (no `model_id` is fabricated — Selvedge stores the agent name, not a
+  models.dev id), `tool = {name: "selvedge", ...}`, and `vcs` from `git_commit`.
+- **Honest fidelity.** Entity-level events (DB column, env var, dependency) and
+  migration-imported events have no line range, so they carry
+  `metadata.dev.selvedge.range_unknown: true` and an empty `files[]` rather than
+  a fabricated `[1, 1]` placeholder. The export bundle's preamble explains this
+  to consumers up front.
+- **Test budget.** Adds `tests/test_agent_trace_export.py` (25 tests: round-trip,
+  non-file entity preservation, line-range extraction, collapse-by-session,
+  reasoning-quality passthrough, schema validation, and CLI integration). The
+  `docs/agent-trace-interop.md` mapping was corrected to the real v0.1.0 shape
+  (the earlier draft predated the published spec).
+
+---
+
 ## [0.3.8] — 2026-06-16
 
 **Active memory v1 (date-based).** Selvedge's append-only log learns to know

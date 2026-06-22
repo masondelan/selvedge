@@ -117,6 +117,33 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.9
+
+**Agent Trace export — Selvedge is a compatible producer.**
+`selvedge export --format agent-trace` emits
+[Agent Trace](https://github.com/cursor/agent-trace) **v0.1.0** records — the
+open AI code-attribution wire format from Cursor + Cognition AI — so your
+captured history travels to any tool that reads the standard. Selvedge's
+reasoning and entity-level provenance ride along in each record's `metadata`
+under the `dev.selvedge` namespace. **Drop-in upgrade for anyone on 0.3.8.**
+
+```bash
+selvedge export --format agent-trace -o trace.json            # one record per event
+selvedge export --format agent-trace --ndjson -o trace.ndjson # stream, one per line
+selvedge export --format agent-trace --collapse-by-session    # merge a session into one record
+selvedge import trace.json --format agent-trace               # round-trip back in
+```
+
+It's **opt-in and additive** — nothing about the native model, the 8 MCP tools,
+or local SQLite changes. Entity-level events (a column, an env var, a
+dependency) have no line range, so Selvedge marks them
+`metadata.dev.selvedge.range_unknown: true` rather than fabricating one — an
+honest fidelity signal. This was planned for v0.4.0; only the exporter moved
+forward (Postgres + the HTTP layer remain the v0.4.0 markers). Full mapping in
+[`docs/agent-trace-interop.md`](docs/agent-trace-interop.md).
+
+---
+
 ## What's new in v0.3.8
 
 **Active memory v1 (date-based).** Selvedge's append-only log learns to know
@@ -181,89 +208,6 @@ called-out test-budget overage from the bundled CLI + agent-block work.
 
 ---
 
-## What's new in v0.3.7
-
-The brand-defining release: **`prior_attempts`** — the tool that lets an
-agent ask "was this tried before, and how did it turn out?" *before* it
-starts — plus the **entity-canonicalization foundation** it sits on.
-**Drop-in upgrade for anyone on 0.3.6.**
-
-### `prior_attempts` — the wedge
-
-Given an entity (or a free-text description), `prior_attempts` returns the
-prior change attempts on it, each annotated with an **inferred outcome**
-(`reverted` / `active`), a **confidence** tier, and — for reverted attempts —
-the reasoning explaining *why it was rejected*. Outcome is inferred from
-add→remove proximity (no LLM, ever — it's a templated query over reasoning
-the agents wrote live).
-
-Worked example — an agent about to re-add a column it doesn't know was
-already pulled:
-
-```jsonc
-// The agent is asked to keep mobile users signed in across restarts. Its
-// instinct is to add a persistent token column. It checks FIRST:
-prior_attempts({ "entity_path": "users.auth_token" })
-
-// → one high-confidence hit: this was tried and reverted.
-[
-  {
-    "entity_path": "users.auth_token",
-    "change_type": "add",
-    "reasoning": "Store a per-user auth token so the app stays signed in.",
-    "outcome": "reverted",
-    "confidence": "proximity_high",
-    "outcome_reasoning": "Reverted: DB tokens couldn't be revoked without a write; moved to short-lived JWTs."
-  }
-]
-```
-
-The agent reads the rejection reason and **changes its plan** — a
-refresh-token endpoint on the stateless-JWT path, instead of re-introducing
-the column the team already pulled. Full
-[demo transcript](docs/demos/prior-attempts.md).
-
-**Conservative by design.** `min_confidence` defaults to `proximity_high`,
-so `prior_attempts` only returns the clear "tried, then reverted" signal —
-an empty list is the trustworthy "nothing to worry about" answer, not noise.
-Pass `min_confidence="proximity_low"` to widen recall. Pull-only: the agent
-decides when to ask. This is the
-["alternatives tried, rejected paths"](docs/comparison.html) capability the
-line-attribution tools don't have.
-
-### Entity foundation (lands first)
-
-`prior_attempts` is only as good as the entity matching under it, so v0.3.7
-fixes the silent history-split problem first:
-
-- **Canonicalization on write.** `src/auth.py::login` and
-  `./src/auth.py::login` used to resolve to *different* entities. Now every
-  write goes through one chokepoint that strips `./`, collapses `//`,
-  normalizes separators, and trims — **preserving case on purpose**
-  (filesystems differ; silently lowercasing would collapse genuinely distinct
-  entities on case-sensitive Linux). `selvedge doctor` warns on sibling paths
-  that differ only by case instead of merging them.
-- **`selvedge migrate-paths`** backfills existing rows. **Dry-run is the
-  default** — it prints a collisions report (pre-canonicalization paths that
-  would merge) so you inspect before committing; pass `--apply` to write.
-  Idempotent, with an audit row per run.
-- **Renames, folded into `log_change`.** Pass `rename_from` with
-  `change_type="rename"` and Selvedge records the dual-event pattern (a
-  rename on the old path, a create on the new path with
-  `metadata.renamed_from`) so history follows the entity. No new tool.
-- **Soft entity-path shape warnings** — a `function` path without `::`, a
-  `column` without `.`, a `file` without a separator or extension get a
-  nudge, never a rejection.
-
-`prior_attempts` is the **7th** MCP tool (the only one this release adds);
-the grouped-digest helper ships as a `selvedge.aggregates.summary()` library
-function, not a tool. See [`CHANGELOG.md`](CHANGELOG.md) for the full list,
-including the 47 new tests — a called-out overrun of the ≤30 per-phase budget
-(≤40 phase target) because the entity foundation and the wedge ship together
-and a review pass hardened the acceptance-criteria edges.
-
----
-
 ## Where Selvedge fits
 
 <p align="center">
@@ -321,8 +265,10 @@ broken into eight smaller ones over a month.
 (Cursor + Cognition AI, RFC Jan 2026, backed by Cloudflare, Vercel, Google
 Jules, Amp, OpenCode, and git-ai) is an emerging *open standard* for AI
 code attribution traces. Selvedge isn't a competitor to it — it's a
-compatible producer. The design for `selvedge export --format agent-trace`
-is at [`docs/agent-trace-interop.md`](docs/agent-trace-interop.md). Agent
+compatible producer. As of **v0.3.9**, `selvedge export --format agent-trace`
+emits Agent Trace v0.1.0 records (and `selvedge import --format agent-trace`
+reads them back); the mapping is in
+[`docs/agent-trace-interop.md`](docs/agent-trace-interop.md). Agent
 Trace is the wire format. Selvedge is the live capture + query layer that
 emits it.
 
@@ -540,13 +486,17 @@ selvedge install-hook [--path PATH]       Install git post-commit hook
                      [--window MIN]       (default 60 minutes)
 selvedge backfill-commit --hash HASH      Backfill git_commit on recent events
                         [--window MIN]    (default 60 minutes)
-selvedge import PATH                      Import migration files (SQL / Alembic)
-              [--format auto|sql|alembic]
+selvedge import PATH                      Import migrations (SQL / Alembic) or
+              [--format auto|sql|         an Agent Trace file (agent-trace)
+                 alembic|agent-trace]
               [--project NAME]
               [--dry-run]
-selvedge export [--format json|csv]       Export history to JSON or CSV
+selvedge export [--format json|csv|       Export history (agent-trace =
+                 agent-trace]              Agent Trace v0.1.0 records)
               [--since SINCE]
               [--entity ENTITY]
+              [--ndjson]                  agent-trace: one record per line
+              [--collapse-by-session]     agent-trace: merge a session into one
               [--output FILE]
 selvedge log ENTITY CHANGE_TYPE           Manually log a change
              [--diff TEXT]                CHANGE_TYPE: add, remove, modify,

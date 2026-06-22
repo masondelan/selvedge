@@ -1,11 +1,17 @@
 # Selvedge ↔ Agent Trace interop — design doc
 
-**Status:** Design.  Target version: **v0.4.0** (Phase 3, alongside the
-PostgreSQL backend).  Owner: maintainer.
+**Status:** Shipped in **v0.3.9** — pulled forward from the v0.4.0 plan as an
+opt-in interop format (Postgres + HTTP remain the v0.4.0 markers).  Owner:
+maintainer.
 
-> *This is a design proposal, not shipped functionality. The flag described
-> below does not exist yet — see "Implementation plan" at the bottom for
-> the work needed to land it.*
+> *`selvedge export --format agent-trace` and `selvedge import --format
+> agent-trace` exist as of v0.3.9. The shipped implementation conforms to the
+> **real** Agent Trace v0.1.0 record shape
+> (`files[].conversations[].ranges[]`, a `tool`/`vcs`/`metadata` envelope, and
+> Selvedge data under the reverse-domain `metadata["dev.selvedge"]` namespace).
+> That differs from this doc's **original draft mapping** below — the draft
+> predated the published spec. `selvedge/exporters/agent_trace.py` is the
+> source of truth; the corrected wire format and mapping table follow.*
 
 ## Why interop with Agent Trace at all
 
@@ -48,52 +54,55 @@ is purely an export format.
 ## Mapping: ChangeEvent → Agent Trace
 
 Per the [v0.1.0 Agent Trace spec](https://github.com/cursor/agent-trace),
-a trace record is JSON with:
+a trace record is JSON with this shape (line ranges live *inside* a file's
+`conversations[]`, and vendor data lives in `metadata` under reverse-domain
+keys — there is no top-level `contributors[]` or `extensions`):
 
 ```json
 {
   "version": "0.1.0",
   "id": "<uuid>",
-  "timestamp": "<iso8601>",
+  "timestamp": "<rfc3339>",
   "vcs": { "type": "git", "revision": "<sha>" },
-  "tool": { "name": "<name>", "version": "<v>" },
+  "tool": { "name": "selvedge", "version": "<v>" },
   "files": [
     {
       "path": "<repo-relative path>",
-      "ranges": [
+      "conversations": [
         {
-          "lines": "[start, end]",
-          "contributor": "<id from contributors[]>",
-          "conversation": "<id>",
-          "contentHash": "<optional sha256 of the line range>"
+          "url": "<uri>",
+          "contributor": { "type": "ai", "model_id": "<optional models.dev id>" },
+          "ranges": [ { "start_line": 42, "end_line": 67, "content_hash": "<optional>" } ],
+          "related": [ { "type": "<kind>", "url": "<uri>" } ]
         }
       ]
     }
   ],
-  "contributors": [
-    { "id": "<id>", "type": "ai|human|mixed|unknown", "model": "<model>" }
-  ],
-  "extensions": {}
+  "metadata": { "dev.selvedge": { } }
 }
 ```
 
-The mapping from a `ChangeEvent`:
+The shipped mapping from a `ChangeEvent`:
 
 | ChangeEvent field | Agent Trace target |
 |---|---|
-| `id` | top-level `id` (one trace record per event) |
+| `id` | top-level `id` (already a UUID; one record per event) |
 | `timestamp` | top-level `timestamp` |
-| `git_commit` | `vcs.revision` |
-| `agent` | `contributors[0].id` and a `model` lookup table; `type: "ai"` if known |
-| `entity_path` *(file-typed)* | `files[].path` |
-| `entity_path` *(non-file: column, env, dep, route)* | `extensions.selvedge.entity` (no native Agent Trace concept) |
-| `change_type` | `extensions.selvedge.change_type` |
-| `diff` | `files[].ranges[].contentHash` (sha256 of the affected text) + `extensions.selvedge.diff` (raw) |
-| `reasoning` | `extensions.selvedge.reasoning` |
-| `session_id` | `extensions.selvedge.session_id` |
-| `changeset_id` | `extensions.selvedge.changeset_id` |
-| `project` | `extensions.selvedge.project` |
-| `metadata` | merged into `extensions.selvedge.metadata` |
+| `git_commit` | `vcs.revision` (`vcs.type = "git"`); omitted when empty |
+| *(producer identity)* | `tool = { name: "selvedge", version }` |
+| `agent` | `files[].conversations[].contributor.type` (`ai` if present, else `unknown`); the agent *name* → `metadata["dev.selvedge"].agent`. `model_id` is **not** fabricated — Selvedge stores an agent name, not a models.dev id |
+| `entity_path` *(file-typed: file/function/class)* | `files[].path` (a `path::symbol` is stripped to the file) |
+| `diff` | `files[].conversations[].ranges[]` via unified-diff hunk extraction |
+| `entity_path` *(non-file: column, env, dep, route)* | `metadata["dev.selvedge"].entity` only; `files[]` is empty (no native Agent Trace concept) |
+| `change_type` | `metadata["dev.selvedge"].change_type` |
+| `reasoning` | `metadata["dev.selvedge"].reasoning` |
+| `session_id` | `metadata["dev.selvedge"].session_id` (also the `conversations[].url` urn) |
+| `changeset_id` | `metadata["dev.selvedge"].changeset_id` (also a `conversations[].related[]` urn) |
+| `project` | `metadata["dev.selvedge"].project` |
+| `metadata` | merged into `metadata["dev.selvedge"].metadata` |
+
+> The prose further down this doc that says `extensions.selvedge.*` reflects the
+> original draft; in the shipped format read it as `metadata["dev.selvedge"].*`.
 
 ### Handling non-file entities
 
@@ -197,21 +206,22 @@ A new `tests/test_agent_trace_export.py`:
    `extensions.selvedge.reasoning` unmodified, with the same warning the
    validator currently emits at log time.
 
-## Implementation plan
+## Implementation status — shipped in v0.3.9
 
-Estimated 1–1.5 days of work, broken into incremental PRs:
+All of the originally-planned work landed together in v0.3.9:
 
-1. **PR 1 (0.5 day)** — Add `selvedge.exporters.agent_trace` module with
-   pure conversion: `ChangeEvent → dict (AT v0.1.0)` and the inverse.
-   Unit tests on the mapping table only — no CLI yet, no file I/O.
-2. **PR 2 (0.5 day)** — Wire `--format agent-trace` and `--ndjson` into
-   `selvedge export`. Wire `--format agent-trace` into `selvedge import`
-   (round-trip test gates the merge).
-3. **PR 3 (0.5 day)** — Diff-to-line-range extractor for unified diffs;
-   `--collapse-by-session` flag; vendored AT v0.1.0 JSON schema +
-   schema-validation test.
+1. **`selvedge.exporters.agent_trace`** — pure, dependency-free, no-LLM
+   conversion both ways (`event_to_trace_record` / `trace_record_to_event`),
+   plus `extract_line_ranges`, `events_to_trace_records`, `load_trace_records`,
+   and a hand-rolled `validate_trace_record` (no `jsonschema` dependency).
+2. **CLI** — `selvedge export --format agent-trace` with `--ndjson` and
+   `--collapse-by-session`; `selvedge import --format agent-trace` (round-trip
+   gated by tests).
+3. **Diff-to-line-range extractor** for unified diffs; vendored AT v0.1.0 JSON
+   Schema at `selvedge/exporters/agent_trace_schema.json`;
+   `tests/test_agent_trace_export.py` (25 tests).
 
-Lands in v0.4.0 alongside the PostgreSQL backend (Phase 3 in `CLAUDE.md`).
+Pulled forward from the v0.4.0 plan; Postgres + HTTP remain the v0.4.0 markers.
 
 ## Open questions
 

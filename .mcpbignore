@@ -35,6 +35,7 @@ htmlcov/
 .github/
 .gitignore
 .dockerignore
+action.yml
 
 # Internal docs that shouldn't ship to end users
 CLAUDE.md

@@ -1,0 +1,80 @@
+name: 'Selvedge Coverage Check'
+description: 'Report what fraction of your git commits have Selvedge change-event coverage — and optionally fail the build below a threshold.'
+author: 'masondelan'
+
+branding:
+  icon: 'git-commit'
+  color: 'blue'
+
+inputs:
+  since:
+    description: 'How far back to analyse (e.g. 30d, 7d, 1y).'
+    required: false
+    default: '30d'
+  window:
+    description: 'Match window in minutes around each commit.'
+    required: false
+    default: '10'
+  limit:
+    description: 'Maximum number of commits to analyse.'
+    required: false
+    default: '100'
+  fail-under:
+    description: 'Fail the job if the coverage ratio (0-1) is below this value. Leave empty to report only.'
+    required: false
+    default: ''
+  selvedge-version:
+    description: 'pip version specifier to install, e.g. "==0.3.8". Empty installs the latest release.'
+    required: false
+    default: ''
+  python-version:
+    description: 'Python version to set up for the run.'
+    required: false
+    default: '3.x'
+  working-directory:
+    description: 'Directory to run in — where the git repo and .selvedge/ database live.'
+    required: false
+    default: '.'
+  db-path:
+    description: 'Explicit path to the Selvedge database (sets SELVEDGE_DB). Optional.'
+    required: false
+    default: ''
+
+outputs:
+  coverage-ratio:
+    description: 'Fraction of analysed commits that have Selvedge coverage (0-1).'
+    value: ${{ steps.run.outputs.coverage-ratio }}
+  covered:
+    description: 'Number of commits with at least one nearby Selvedge event.'
+    value: ${{ steps.run.outputs.covered }}
+  total:
+    description: 'Number of commits analysed.'
+    value: ${{ steps.run.outputs.total }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Selvedge
+      shell: bash
+      run: pip install "selvedge${{ inputs.selvedge-version }}"
+
+    - name: Run coverage check
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -n "${{ inputs.db-path }}" ]; then
+          export SELVEDGE_DB="${{ inputs.db-path }}"
+        fi
+        python "${{ github.action_path }}/scripts/coverage_check.py" \
+          --since "${{ inputs.since }}" \
+          --window "${{ inputs.window }}" \
+          --limit "${{ inputs.limit }}" \
+          --json | tee selvedge-coverage.json
+        python "${{ github.action_path }}/scripts/coverage_gate.py" \
+          selvedge-coverage.json "${{ inputs.fail-under }}"

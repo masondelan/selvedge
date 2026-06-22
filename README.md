@@ -603,6 +603,37 @@ The coverage script compares your git log against Selvedge events and shows
 which commits have associated change events. Low coverage usually means the
 system prompt needs strengthening — see `docs/fallbacks.md` for guidance.
 
+### In CI (GitHub Action)
+
+The same check ships as the **Selvedge Coverage Check** composite Action, so
+you can track agent coverage on every push — and optionally fail the build
+when it drops:
+
+```yaml
+# .github/workflows/selvedge-coverage.yml
+name: Selvedge coverage
+on: [push, pull_request]
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # full history so commits can be matched
+      - uses: masondelan/selvedge@main   # or pin to a release tag, e.g. @v0.3.9
+        with:
+          since: 30d
+          fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only
+```
+
+It writes a coverage summary to the job summary and exposes `coverage-ratio`,
+`covered`, and `total` as step outputs. The action cross-references your git
+history against the Selvedge event log, so the runner needs the project's
+`.selvedge/selvedge.db` (commit it, or restore it before this step) and full
+git history (`fetch-depth: 0`). Inputs: `since`, `window`, `limit`,
+`fail-under`, `selvedge-version`, `python-version`, `working-directory`,
+`db-path`.
+
 ---
 
 ## Contributing

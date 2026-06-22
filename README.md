@@ -433,6 +433,10 @@ anything else in the file. Or pipe it:
 selvedge prompt | tee -a CLAUDE.md
 ```
 
+Prefer to copy-paste? The same block is one click away on the website:
+**[selvedge.sh/prompt-block](https://selvedge.sh/prompt-block)** — with a
+copy button and notes on what your agent does with it.
+
 **4. Install the post-commit hook**
 
 ```bash

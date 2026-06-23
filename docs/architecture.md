@@ -605,7 +605,9 @@ github.com).
 > the positioning artifacts (demo, comparison page, README) because
 > shipping the tool without making the wedge visible wastes the
 > cycle. Supporting CLI surface (`audit` / `digest` / `pr-comment`)
-> ships separately in v0.3.9. Theme: *make the wedge legible — and
+> ships separately in v0.3.16 (deferred from v0.3.9, which was
+> reassigned to the Agent Trace exporter). Theme: *make the wedge
+> legible — and
 > the entity matching it relies on canonical.*
 
 #### Entity foundation (lands first within the release)
@@ -677,7 +679,7 @@ github.com).
       The grouped-digest logic (changesets touched, agents
       involved, top entities by activity) lands in
       `selvedge.aggregates.summary()` as a pure Python function
-      that v0.3.9's `selvedge audit` and `selvedge digest`
+      that v0.3.16's `selvedge audit` and `selvedge digest`
       consume directly. **Tool-surface discipline call**: an
       MCP `summary` tool would be a genuinely new shape (aggregate
       vs. event-list), but the agent-facing use case is thin —
@@ -686,7 +688,7 @@ github.com).
       to MCP later only if usage telemetry shows agents actually
       reach for an aggregate primitive. Schema-versioned via
       `summary_version` in the dataclass so the shape can be
-      lifted to MCP without breaking the v0.3.9 CLI consumers.
+      lifted to MCP without breaking the v0.3.16 CLI consumers.
 - [x] **Positioning artifacts (release-blocker, not optional polish):**
     * `docs/comparison.html` update naming `prior_attempts` as the
       "alternatives tried, rejected paths" capability the
@@ -751,7 +753,7 @@ github.com).
   want an aggregate MCP primitive**: defended by the
   `summary_version` field on the dataclass — schema-versioned
   from day one so lifting it to MCP later doesn't break the
-  v0.3.9 CLI consumers. Promotion criterion is telemetry signal,
+  v0.3.16 CLI consumers. Promotion criterion is telemetry signal,
   not a roadmap commitment.
 - **Keep-separate decision for `prior_attempts` (and v0.3.8's
   `stale_decisions`) deserves to be documented, not just
@@ -798,7 +800,7 @@ github.com).
       output, no LLM calls.
 - [x] **`selvedge stale` CLI command** — same data surface,
       terminal-formatted, `--json` for cron / Slack jobs. Composes
-      with `selvedge digest` (v0.3.9) so the morning report can
+      with `selvedge digest` (v0.3.16) so the morning report can
       include "decisions that aged out yesterday."
 - [x] **Reasoning-quality validator nudge** — when `change_type` is
       in `{add, modify, create, migrate}` and `entity_type` looks
@@ -833,50 +835,67 @@ github.com).
   column add is in v0.3.8 so v0.3.11's evaluator landing doesn't
   require a second migration. Documented in v0.3.8's release notes.
 
-### Phase 2.15 — Developer ergonomics (v0.3.9)
-> The CLI surface that moves Selvedge into the developer's existing
-> review and reporting workflow. None of these are wedges — they're
-> the supporting cast that turns `prior_attempts` + `summary` into
-> a usable everyday surface. Theme: *make captured intent visible
-> in the developer's existing review loop.*
+### Phase 2.15 — Agent Trace export interop (v0.3.9)
+> Selvedge becomes a compatible **producer** of [Agent Trace](https://github.com/cursor/agent-trace),
+> the open RFC (Cursor + Cognition AI, Jan 2026) for AI code
+> attribution traces. **Pulled forward from Phase 3.2 (v0.4.2).** The
+> exporter was originally scheduled for the post-backend window, but the
+> standard gained backing (Cloudflare, Vercel, Google Jules, Amp,
+> OpenCode, git-ai) and shipping the producer early is a distribution
+> wedge worth more than the wait. Non-breaking, opt-in, additive — the
+> native model, the 8-tool MCP surface, and SQLite storage are untouched.
+> **The originally-planned developer-ergonomics CLI surface (`audit` /
+> `digest` / `pr-comment`) was displaced by this pull-forward and now
+> lands in Phase 2.22 (v0.3.16).** Full mapping in
+> `docs/agent-trace-interop.md`. Theme: *compatible producer, not
+> competitor — shipped early.*
 
-- [ ] **`selvedge audit` command** — PR-review-ready quality report
-      for a given branch or commit range. Lists every entity touched
-      in the range, flags missing/short reasoning, surfaces unstamped
-      commits, renders a table grouped by changeset. `--format
-      markdown` for PR-comment use.
-- [ ] **`selvedge digest` CLI command** — terminal rendering of the
-      `summary` MCP tool's templated output. Default `--since 24h`,
-      designed for cron / Slack / email jobs. Shares the
-      digest/aggregate helper from v0.3.7's `summary` work.
-- [ ] **`selvedge pr-comment --pr 123`** — formats `audit` output for
-      `gh pr comment`. No GitHub API calls in core (keeps the dep
-      footprint small). **Format versioned from day one**: every
-      generated comment wrapped in
-      `<!-- selvedge:pr-comment v1 -->` /
-      `<!-- selvedge:pr-comment-end -->` sentinels so future format
-      changes can ship without breaking downstream parsers. v1 schema
-      documented in new `docs/pr-comment-format.md`.
-- [ ] **Setup detection version contract** — `selvedge setup` and
-      `selvedge doctor` learn a "supported agent versions" table
-      that surfaces the agent-config locations the wizard knows
-      about (Claude Code, Cursor, Copilot) plus the format version
-      detected on the user's machine. When upstream changes a config
-      path (already happened with Cursor between minor versions),
-      doctor flags the mismatch as WARN with a remediation hint.
-      Treats detection paths as a versioned contract.
-- [ ] **Tests** — `test_cli.py` extensions for `audit`, `digest`,
-      `pr-comment` (~18), `test_setup_version_contract.py` (~6).
-      Soft budget: ≤30 new tests.
+- [x] **`selvedge export --format agent-trace`** — emits Agent Trace
+      **v0.1.0** records from the local event store, one per change
+      event. Honors `--since` / `--entity` / `--project` filters; adds
+      `--ndjson` (one record per line for large histories) and
+      `--collapse-by-session` (merge events sharing a `session_id` into
+      one record). Default JSON form is a self-describing bundle
+      (`{agent_trace_version, producer, note, records: [...]}`).
+- [x] **Conforms to the real v0.1.0 spec.** Line ranges live in
+      `files[].conversations[].ranges[]`; `contributor` is typed
+      `ai` / `unknown` (no `model_id` fabricated — Selvedge stores an
+      agent name, not a models.dev id); `tool = {name: "selvedge", ...}`;
+      `vcs` from `git_commit`. **All Selvedge-specific data lands under
+      the reverse-domain `metadata["dev.selvedge"]` namespace** — NOT the
+      `extensions.selvedge.*` shape the earlier draft assumed, which
+      predated the published spec.
+- [x] **`selvedge import --format agent-trace`** — lossless round-trip of
+      a Selvedge export (entity, change_type, reasoning survive in
+      `dev.selvedge` metadata); best-effort ingest of foreign producers
+      (`change_type="modify"`, empty reasoning, validator warns).
+- [x] **`range_unknown` honesty preamble** — entity-level events (DB
+      column, env var, dependency) and migration-imported events have no
+      line range, so they carry `metadata["dev.selvedge"].range_unknown:
+      true` and an empty `files[]` rather than a fabricated `[1, 1]`
+      placeholder. The export bundle's preamble explains the fidelity
+      profile to consumers up front.
+- [x] **`selvedge.exporters.agent_trace`** — the pure, dependency-free,
+      no-LLM converter behind both directions (`event_to_trace_record`,
+      `trace_record_to_event`, `extract_line_ranges`,
+      `events_to_trace_records`, `validate_trace_record`) plus a vendored
+      v0.1.0 JSON Schema (`selvedge/exporters/agent_trace_schema.json`).
+- [x] **Tests** — `test_agent_trace_export.py` (25): round-trip, non-file
+      entity preservation, line-range extraction, collapse-by-session,
+      reasoning-quality passthrough, schema validation, CLI integration.
+      Over the ≤20 Phase 3.2 budget by 5 — called out in the CHANGELOG.
 
 #### Risks acknowledged & mitigations
 
-- **PR comment markdown calcification**: format versioned from v1
-  with sentinel markers and a documented schema, so format
-  evolution doesn't break parsers downstream.
-- **Setup detection brittleness**: surfaced through the new
-  doctor row, treating third-party config paths as a versioned
-  contract.
+- **AT export low-fidelity perception (`range_unknown`)**: preamble
+  language explains the source of the flag; the interop doc and compare
+  page document the fidelity profile so consumers aren't surprised.
+- **AT spec movement**: shipped against the published v0.1.0 shape (not
+  the pre-spec draft); `docs/agent-trace-interop.md` documents the
+  mapping per version, and further drift is handled additively.
+- **Pulling Phase 3.2 forward**: kept strictly non-breaking and opt-in,
+  so it carries none of the v0.4.x backend/rename risk. The displaced
+  developer-ergonomics surface is re-homed in Phase 2.22, not dropped.
 
 ### Phase 2.16 — Config + advanced retention (v0.3.10)
 > First-class `.selvedge/config.toml` lands here, paired with the
@@ -1219,6 +1238,59 @@ github.com).
 
 
 
+### Phase 2.22 — Developer ergonomics (v0.3.16)
+> The CLI surface that moves Selvedge into the developer's existing
+> review and reporting workflow. None of these are wedges — they're the
+> supporting cast that turns `prior_attempts` + `summary` into a usable
+> everyday surface. **Deferred from v0.3.9 (Phase 2.15)** when the Agent
+> Trace exporter was pulled forward from Phase 3.2; re-homed here as the
+> last 0.3.x feature release, immediately before the v0.4.0
+> tool-consolidation review that decides whether `digest` / `audit`
+> become pure CLI views of `summary`. Theme: *make captured intent
+> visible in the developer's existing review loop.*
+
+- [ ] **`selvedge audit` command** — PR-review-ready quality report
+      for a given branch or commit range. Lists every entity touched
+      in the range, flags missing/short reasoning, surfaces unstamped
+      commits, renders a table grouped by changeset. `--format
+      markdown` for PR-comment use.
+- [ ] **`selvedge digest` CLI command** — terminal rendering of the
+      `summary` helper's templated output. Default `--since 24h`,
+      designed for cron / Slack / email jobs. Shares the
+      digest/aggregate helper from v0.3.7's `summary` work.
+- [ ] **`selvedge pr-comment --pr 123`** — formats `audit` output for
+      `gh pr comment`. No GitHub API calls in core (keeps the dep
+      footprint small). **Format versioned from day one**: every
+      generated comment wrapped in
+      `<!-- selvedge:pr-comment v1 -->` /
+      `<!-- selvedge:pr-comment-end -->` sentinels so future format
+      changes can ship without breaking downstream parsers. v1 schema
+      documented in new `docs/pr-comment-format.md`.
+- [ ] **Setup detection version contract** — `selvedge setup` and
+      `selvedge doctor` learn a "supported agent versions" table
+      that surfaces the agent-config locations the wizard knows
+      about (Claude Code, Cursor, Copilot) plus the format version
+      detected on the user's machine. When upstream changes a config
+      path (already happened with Cursor between minor versions),
+      doctor flags the mismatch as WARN with a remediation hint.
+      Treats detection paths as a versioned contract.
+- [ ] **Tests** — `test_cli.py` extensions for `audit`, `digest`,
+      `pr-comment` (~18), `test_setup_version_contract.py` (~6).
+      Soft budget: ≤30 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **PR comment markdown calcification**: format versioned from v1
+  with sentinel markers and a documented schema, so format
+  evolution doesn't break parsers downstream.
+- **Setup detection brittleness**: surfaced through the new
+  doctor row, treating third-party config paths as a versioned
+  contract.
+- **`audit` / `digest` overlap with the v0.4.0 consolidation review**:
+  intentionally landed right before it, so the review settles their
+  final relationship to the `summary` MCP tool with the CLI surface
+  already in hand.
+
 ### Phase 3 — Backend rewrite + tool rename (v0.4.0)
 > First release in the breaking-changes window. Bundles the storage
 > backend abstraction and the deferred MCP tool-name rename so users
@@ -1323,51 +1395,44 @@ github.com).
   documented in `selvedge.server` module docstring and asserted
   by a test that hits MCP without credentials and expects success.
 
-### Phase 3.2 — Agent Trace interop (v0.4.2)
-> Selvedge becomes a compatible producer of [Agent Trace](https://github.com/cursor/agent-trace),
-> the open RFC (Cursor + Cognition AI, Jan 2026) for AI code
-> attribution traces. Non-breaking — purely additive export/import
-> formats. Ships after v0.4.1 because the AT spec may move during
-> the v0.4.0 / v0.4.1 window and we'd rather lock against a
-> settled version. Full design in `docs/agent-trace-interop.md`.
-> Theme: *compatible producer, not competitor.*
+### Phase 3.2 — Agent Trace interop (v0.4.2) — ✅ DELIVERED EARLY in v0.3.9
+> **Shipped ahead of schedule in v0.3.9 (Phase 2.15).** This phase was
+> the original home for `selvedge export/import --format agent-trace`;
+> the exporter was pulled forward into the 0.3.x line once the standard
+> gained backing, so the v0.4.2 slot is already satisfied. Kept here for
+> the historical record and the cross-reference — the live mapping and
+> delivered scope are in Phase 2.15 and `docs/agent-trace-interop.md`.
+> **Correction:** the shipped records use the reverse-domain
+> `metadata["dev.selvedge"]` namespace conforming to the published
+> v0.1.0 spec — NOT the `extensions.selvedge.*` shape this section
+> originally assumed (that draft predated the spec). Theme: *compatible
+> producer, not competitor.*
 
-- [ ] **`selvedge export --format agent-trace --output trace.json`**
-      — emits AT v0.1.0 records from the local event store.
-      Supports existing `--since` / `--entity` / `--project`
-      filters plus a new `--ndjson` mode for large histories.
-      Selvedge stays entity-centric internally; AT is purely a
-      wire format. Reasoning, change_type, entity_path for
-      non-file entities, changeset_id, and project all land in
-      `extensions.selvedge.*`.
-- [ ] **`selvedge import trace.json --format agent-trace`** —
-      best-effort round-trip. Other tools' AT output won't populate
-      `extensions.selvedge.*`, so Selvedge fills defaults
-      (`entity_path = files[].path`, `change_type = "modify"`,
-      `reasoning = ""` — validator warns at log time).
-- [ ] **`range_unknown` preamble** — every Selvedge AT export
-      emits a preamble explaining the fidelity profile. Events
-      imported from migration files genuinely don't have line
-      ranges; DB columns / env vars / dependencies don't either.
-      Selvedge emits `extensions.selvedge.range_unknown: true`
-      rather than fabricating `[1, 1]` placeholders.
-- [ ] **Tests** — `test_agent_trace_export.py` covering round-trip,
-      spec validation, non-file entity preservation, multi-event
-      session, reasoning quality pass-through (~15). Soft budget:
-      ≤20 new tests.
+- [x] **`selvedge export --format agent-trace`** — shipped in v0.3.9.
+      Emits AT v0.1.0 records with `--since` / `--entity` / `--project`
+      filters, `--ndjson`, and `--collapse-by-session`; wrapped in a
+      self-describing bundle. See Phase 2.15 for the delivered scope.
+- [x] **`selvedge import --format agent-trace`** — shipped in v0.3.9.
+      Lossless Selvedge round-trip; best-effort foreign-producer ingest
+      (`change_type = "modify"`, empty reasoning — validator warns).
+- [x] **`range_unknown` preamble** — shipped in v0.3.9. Entity-level and
+      migration-imported events carry
+      `metadata["dev.selvedge"].range_unknown: true` and an empty
+      `files[]` rather than fabricating `[1, 1]` placeholders.
+- [x] **Tests** — `test_agent_trace_export.py` (25) shipped in v0.3.9.
 
 #### Risks acknowledged & mitigations
 
-- **AT export low-fidelity perception (`range_unknown`)**:
-  preamble language explains the source of the flag, plus README
-  guidance so consumers understand the fidelity profile.
-- **AT spec movement during the v0.4.x window**: pin to the spec
-  version current at v0.4.2 ship; document mapping per version in
-  `docs/agent-trace-interop.md`.
-- **`extensions.selvedge.*` namespace squat**: AT spec recommends
-  reverse-domain notation; we use `selvedge.*` because flat
-  namespaces are in the wild and we don't want to gate on
-  registering `dev.selvedge`. Reversible later if it matters.
+- **AT export low-fidelity perception (`range_unknown`)**: resolved —
+  preamble language explains the source of the flag, plus interop-doc
+  and compare-page guidance so consumers understand the fidelity profile.
+- **AT spec movement**: resolved — shipped against the published v0.1.0
+  shape, with `docs/agent-trace-interop.md` documenting the mapping per
+  version; further drift handled additively.
+- **Namespace choice (resolved)**: the shipped exporter uses the
+  reverse-domain `metadata["dev.selvedge"]` namespace the AT spec
+  recommends — not the flat `selvedge.*` this section originally
+  proposed. Settled at ship time in v0.3.9.
 
 
 ### Phase 4 — Platform (hosted business)
@@ -1442,16 +1507,17 @@ release-scope restructure (2026-05-10) replaced 4 broad phases with
 | 2.12 | v0.3.6  | ≤ 15 new tests |
 | 2.13 | v0.3.7  | ≤ 40 new tests (entity foundation + wedge share the release) |
 | 2.14 | v0.3.8  | ≤ 25 new tests |
-| 2.15 | v0.3.9  | ≤ 30 new tests |
+| 2.15 | v0.3.9  | ≤ 20 new tests (Agent Trace export, pulled forward from 3.2; actual 25) |
 | 2.16 | v0.3.10 | ≤ 25 new tests |
 | 2.17 | v0.3.11 | ≤ 25 new tests |
 | 2.18 | v0.3.12 | ≤ 20 new tests |
 | 2.19 | v0.3.13 | ≤ 30 new tests |
 | 2.20 | v0.3.14 | ≤ 25 new tests |
 | 2.21 | v0.3.15 | ≤ 15 new tests (conditional ship) |
+| 2.22 | v0.3.16 | ≤ 30 new tests (developer ergonomics, deferred from v0.3.9) |
 | 3    | v0.4.0  | ≤ 50 new tests |
 | 3.1  | v0.4.1  | ≤ 30 new tests |
-| 3.2  | v0.4.2  | ≤ 20 new tests |
+| 3.2  | v0.4.2  | — (delivered early in v0.3.9 / Phase 2.15) |
 
 When a phase exceeds its budget, the release notes call out *why* —
 typically a perf-regression suite (test_migrations_perf,

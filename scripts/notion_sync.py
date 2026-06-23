@@ -56,7 +56,9 @@ CHANGELOG_URL = "https://github.com/masondelan/selvedge/blob/main/CHANGELOG.md"
 
 # A version at or below this is treated as shipped; at or above the next patch
 # it is planned. Kept in lockstep with the §7 status mapping in the build spec.
-LATEST_SHIPPED = (0, 3, 8)
+# BUMP THIS ON EVERY RELEASE — it is part of the version-bump checklist; a stale
+# value silently marks a shipped phase as "Planned" in the Notion Roadmap mirror.
+LATEST_SHIPPED = (0, 3, 9)
 CONDITIONAL_VERSIONS = {"v0.3.15"}
 
 

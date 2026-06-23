@@ -1395,7 +1395,7 @@ github.com).
   documented in `selvedge.server` module docstring and asserted
   by a test that hits MCP without credentials and expects success.
 
-### Phase 3.2 — Agent Trace interop (v0.4.2) — ✅ DELIVERED EARLY in v0.3.9
+### Phase 3.2 — Agent Trace interop (v0.4.2 — DONE, shipped early in v0.3.9)
 > **Shipped ahead of schedule in v0.3.9 (Phase 2.15).** This phase was
 > the original home for `selvedge export/import --format agent-trace`;
 > the exporter was pulled forward into the 0.3.x line once the standard

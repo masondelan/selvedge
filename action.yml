@@ -1,5 +1,5 @@
 name: 'Selvedge Coverage Check'
-description: 'Report what fraction of your git commits have Selvedge change-event coverage — and optionally fail the build below a threshold.'
+description: 'Report the fraction of git commits with Selvedge change-event coverage, and optionally fail the build below a threshold.'
 author: 'masondelan'
 
 branding:

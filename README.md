@@ -570,7 +570,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@main   # or pin to a release tag, e.g. @v0.3.9
+      - uses: masondelan/selvedge@v0.3.9   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only

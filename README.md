@@ -139,7 +139,8 @@ or local SQLite changes. Entity-level events (a column, an env var, a
 dependency) have no line range, so Selvedge marks them
 `metadata.dev.selvedge.range_unknown: true` rather than fabricating one — an
 honest fidelity signal. This was planned for v0.4.0; only the exporter moved
-forward (Postgres + the HTTP layer remain the v0.4.0 markers). Full mapping in
+forward (Postgres + the tool rename remain the v0.4.0 markers; HTTP + auth ships
+in v0.4.1). Full mapping in
 [`docs/agent-trace-interop.md`](docs/agent-trace-interop.md).
 
 ---

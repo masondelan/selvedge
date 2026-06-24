@@ -20,8 +20,8 @@ format, Selvedge is the live capture + query layer that emits it.
 **Pulled forward, deliberately.** The export was planned for v0.4.0 (Phase 3).
 It ships now, in the 0.3.x line, as an **opt-in, additive** interop format —
 nothing about the native model, MCP surface, or SQLite storage changes.
-Postgres and the HTTP layer remain the v0.4.0 markers; only the exporter moved
-up. **Drop-in upgrade for anyone on 0.3.8.**
+Postgres and the tool rename remain the v0.4.0 markers (HTTP + auth ships in
+v0.4.1); only the exporter moved up. **Drop-in upgrade for anyone on 0.3.8.**
 
 ### Added
 

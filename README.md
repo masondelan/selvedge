@@ -16,6 +16,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
+<p align="center"><sub><b>One-click install:</b> <a href="https://selvedge.sh/mcp/cursor/">Add to Cursor</a> &nbsp;·&nbsp; <a href="https://selvedge.sh/mcp/vscode/">Install in VS Code</a> — the deeplink buttons live on the site, where they resolve in your browser (a raw <code>cursor://</code> link can't open from GitHub's web README).</sub></p>
+
 <!-- mcp-name: io.github.masondelan/selvedge -->
 
 **Long-term memory for AI-coded codebases.**

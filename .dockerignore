@@ -1,0 +1,19 @@
+# Keep the Docker MCP Catalog image lean — pip builds the wheel from pyproject
+# (the selvedge/ package only), so none of this needs to land in the build
+# context. Excluding .git in particular keeps the whole history out of the image.
+.git
+.github
+tests
+launch
+docs
+demos
+*.pyc
+__pycache__
+.venv
+.mypy_cache
+.ruff_cache
+.pytest_cache
+htmlcov
+dist
+build
+*.egg-info

@@ -58,7 +58,7 @@ CHANGELOG_URL = "https://github.com/masondelan/selvedge/blob/main/CHANGELOG.md"
 # it is planned. Kept in lockstep with the §7 status mapping in the build spec.
 # BUMP THIS ON EVERY RELEASE — it is part of the version-bump checklist; a stale
 # value silently marks a shipped phase as "Planned" in the Notion Roadmap mirror.
-LATEST_SHIPPED = (0, 3, 9)
+LATEST_SHIPPED = (0, 3, 9, 1)
 CONDITIONAL_VERSIONS = {"v0.3.15"}
 
 
@@ -145,8 +145,12 @@ def _plain(prop: dict | None) -> str:
 # --------------------------------------------------------------------------- #
 # Parsers (repo -> records)                                                    #
 # --------------------------------------------------------------------------- #
-_SHIPPED_RE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] [—-] (\d{4}-\d{2}-\d{2})")
-_PLANNED_RE = re.compile(r"^### \[(\d+\.\d+\.\d+)\] [—-] planned", re.IGNORECASE)
+# Version group accepts an optional fourth segment so four-part patch
+# versions (e.g. 0.3.9.1, PEP 440) aren't silently skipped — the header
+# would otherwise never match and the release would vanish from the Notion
+# mirror despite a green sync run.
+_SHIPPED_RE = re.compile(r"^## \[(\d+\.\d+\.\d+(?:\.\d+)?)\] [—-] (\d{4}-\d{2}-\d{2})")
+_PLANNED_RE = re.compile(r"^### \[(\d+\.\d+\.\d+(?:\.\d+)?)\] [—-] planned", re.IGNORECASE)
 _BULLET_RE = re.compile(r"^\s*-\s+(.*)")
 
 
@@ -226,7 +230,7 @@ def _first_summary(
 
 
 _PHASE_RE = re.compile(r"^### (Phase [^\n(]+?)(?:\s*\(([^)]*)\))?\s*$")
-_VERSION_IN_PAREN = re.compile(r"v(\d+\.\d+\.\d+)")
+_VERSION_IN_PAREN = re.compile(r"v(\d+\.\d+\.\d+(?:\.\d+)?)")
 
 
 def parse_roadmap(path: Path, ship_dates: dict[str, str]) -> list[Phase]:

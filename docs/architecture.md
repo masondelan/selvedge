@@ -1128,6 +1128,19 @@ github.com).
       those — widening the match without giving up determinism. This is the
       boundary called out in `selvedge import --from-git` help and
       `gitimport.py`'s "Honest limits".
+
+      **Deeper alternative — key on reason, not name (v0.4.0 design question,
+      not this cluster).** Prior art: cowork-os
+      (github.com/yempik-ai/cowork-os) keys its markdown decision records on
+      the *reason*, not the entity, so a `card_token → payment_token` rename
+      never breaks the match. Selvedge keys on `entity_path` because
+      blame/diff/prior_attempts pivot on it — but v0.3.9.1 already ships two
+      overlays that attack the same rename problem: the dual-event rename
+      pattern (`rename_from` links old→new) and `prior_attempts --fuzzy`
+      (semantic match on the reasoning text — the entity-keyed store's answer
+      to reason-keying, as an overlay rather than a foundation). Whether the
+      *primary* key should move toward the reason is a v0.4.0 conversation,
+      not a point-release change; captured here so the convergence isn't lost.
 - [ ] **Capture-layer miss-rate.** With live capture running alongside git
       import, every explicit revert lands in both slices; diffing them
       yields a *measured* miss-rate for the live-capture layer — the one

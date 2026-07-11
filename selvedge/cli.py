@@ -20,7 +20,7 @@ Commands:
   selvedge stats              Tool-call coverage report
   selvedge install-hook       Install git post-commit hook
   selvedge backfill-commit    Stamp git_commit on recent events
-  selvedge import             Import migration files
+  selvedge import             Import migration files / git-history reverts
   selvedge export             Export history as JSON or CSV
   selvedge prune              Trim old tool_calls rows (90-day retention)
 """
@@ -1643,7 +1643,7 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
     \b
     CHANGE_TYPE must be one of:
       add, remove, modify, rename, retype, create, delete,
-      index_add, index_remove, migrate, supersede
+      index_add, index_remove, migrate, revert, supersede
 
     \b
     Examples:
@@ -2159,16 +2159,23 @@ def export(fmt, since, entity, project, limit, ndjson, collapse, output):
 
 
 @cli.command("import")
-@click.argument("path", type=click.Path(exists=True))
+@click.argument("path", type=click.Path(), required=False, default=None)
 @click.option("--format", "fmt",
               type=click.Choice(["auto", "sql", "alembic", "agent-trace"]),
               default="auto", show_default=True,
               help="Input format (auto-detects migrations by default)")
+@click.option("--from-git", "from_git", is_flag=True,
+              help="Import reverts from git history instead of migration files. "
+              "PATH becomes the repository root (default: current directory).")
+@click.option("--since", "since", default="",
+              help="--from-git only: limit history to commits after a git REF "
+              "(exclusive, REF..HEAD) or a date git understands (e.g. "
+              "'2025-01-01', '6 months ago').")
 @click.option("--project", "-p", default="", help="Project name to tag events with")
 @click.option("--dry-run", is_flag=True, help="Preview what would be imported, don't write")
 @click.option("--json", "as_json", is_flag=True, help="Output events as JSON (implies --dry-run)")
-def import_migrations(path, fmt, project, dry_run, as_json):
-    """Import migration files or an Agent Trace file to backfill history.
+def import_migrations(path, fmt, from_git, since, project, dry_run, as_json):
+    """Import migration files, an Agent Trace file, or git-history reverts.
 
     \b
     PATH can be a single migration file or a directory of migration files.
@@ -2178,14 +2185,102 @@ def import_migrations(path, fmt, project, dry_run, as_json):
     best-effort with change_type="modify" and empty reasoning).
 
     \b
+    With --from-git, PATH is a git repository root (default: `.`) and the
+    import walks history for reverts that predate Selvedge: commits whose
+    message mentions "revert" plus commits that deleted files. Each becomes
+    a change_type="revert" event (agent="git-import", reasoning = commit
+    subject+body) so prior_attempts and the enforcement hook see them.
+    Idempotent — re-running skips (commit, entity) pairs already imported.
+    Honest limit: reverts folded into unrelated commits are missed.
+
+    \b
     Examples:
       selvedge import migrations/
       selvedge import migrations/ --project my-api
       selvedge import migrations/0023_add_payments.py --dry-run
       selvedge import schema.sql --format sql
       selvedge import trace.json --format agent-trace
+      selvedge import --from-git
+      selvedge import --from-git --since v1.4.0 --dry-run
+      selvedge import ../other-repo --from-git --since "6 months ago"
     """
+    if from_git:
+        from .gitimport import GIT_IMPORT_AGENT, GitImportError, collect_revert_events
+
+        repo = Path(path) if path else Path(".")
+        if not repo.is_dir():
+            err_console.print(f"[red]error:[/red] {repo} is not a directory")
+            sys.exit(2)
+        try:
+            events = collect_revert_events(repo, since=since, project=project)
+        except GitImportError as e:
+            err_console.print(f"[red]error:[/red] {e}")
+            sys.exit(2)
+
+        storage = get_storage()
+        existing = storage.get_agent_event_keys(GIT_IMPORT_AGENT)
+        from .storage import canonicalize_entity_path
+
+        fresh = [
+            ev for ev in events
+            if (ev.git_commit, canonicalize_entity_path(ev.entity_path)) not in existing
+        ]
+        skipped = len(events) - len(fresh)
+
+        if as_json:
+            click.echo(json.dumps([ev.to_dict() for ev in fresh], indent=2))
+            return
+        if not fresh:
+            if skipped:
+                console.print(
+                    f"[green]✓[/green] Nothing new to import — all {skipped} "
+                    "revert event(s) already present (idempotent re-run)."
+                )
+            else:
+                console.print("[yellow]No revert history found to import.[/yellow]")
+            return
+        if dry_run:
+            table = Table(
+                title=f"Dry run — {len(fresh)} revert events from git history",
+                box=box.SIMPLE_HEAD,
+                show_lines=False,
+                header_style="bold",
+            )
+            table.add_column("Commit", style="yellow", no_wrap=True)
+            table.add_column("Entity", style="cyan")
+            table.add_column("Reasoning")
+            for ev in fresh:
+                table.add_row(
+                    ev.git_commit[:8], ev.entity_path, ev.reasoning.splitlines()[0][:60]
+                )
+            console.print(table)
+            if skipped:
+                console.print(f"  [dim]{skipped} already-imported event(s) skipped.[/dim]")
+            console.print(
+                f"  [dim]Run without --dry-run to import these {len(fresh)} events.[/dim]"
+            )
+            return
+
+        storage.log_event_batch(fresh)
+        msg = (
+            f"[green]✓[/green] Imported [bold]{len(fresh)}[/bold] revert "
+            f"event(s) from git history"
+        )
+        if skipped:
+            msg += f"  [dim]({skipped} already present, skipped)[/dim]"
+        console.print(msg)
+        return
+
+    if path is None:
+        err_console.print("[red]error:[/red] PATH is required (or pass --from-git)")
+        sys.exit(2)
+    if since:
+        err_console.print("[red]error:[/red] --since is only valid with --from-git")
+        sys.exit(2)
     target = Path(path)
+    if not target.exists():
+        err_console.print(f"[red]error:[/red] path does not exist: {target}")
+        sys.exit(2)
 
     if fmt == "agent-trace":
         from .exporters.agent_trace import load_trace_records, trace_record_to_events
@@ -2231,8 +2326,8 @@ def import_migrations(path, fmt, project, dry_run, as_json):
         table.add_column("Entity", style="cyan")
         table.add_column("Change", style="green")
         table.add_column("Diff")
-        for e in events:
-            table.add_row(e.entity_path, e.change_type, (e.diff or "")[:60])
+        for ev in events:
+            table.add_row(ev.entity_path, ev.change_type, (ev.diff or "")[:60])
         console.print(table)
         console.print(f"  [dim]Run without --dry-run to import these {len(events)} events.[/dim]")
         return

@@ -259,7 +259,10 @@ def log_change(
         Field(
             description=(
                 "What kind of change. One of: add, remove, modify, rename, retype, "
-                "create, delete, index_add, index_remove, migrate. "
+                "create, delete, index_add, index_remove, migrate, revert, "
+                "supersede. Use 'revert' for 'we tried this and rolled it back' "
+                "(clearer than a plain remove); 'supersede' re-opens a reverted "
+                "decision (see the supersedes parameter). "
                 "Invalid values are rejected — pick the closest match."
             ),
         ),

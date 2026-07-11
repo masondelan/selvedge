@@ -23,6 +23,11 @@ class ChangeType(str, Enum):
     # It links back to the event it overrides via ChangeEvent.supersedes —
     # the record stays append-only; "re-opened" is a new fact, not an edit.
     SUPERSEDE = "supersede"
+    # An explicit "we tried this and rolled it back" (v0.3.9.1) — pulled
+    # forward from the v0.3.11 plan for the git-history importer, which
+    # seeds pre-Selvedge reverts from commit history. Counts as a removal
+    # for outcome inference, so a revert closes prior attempts on the path.
+    REVERT = "revert"
 
 
 class EntityType(str, Enum):

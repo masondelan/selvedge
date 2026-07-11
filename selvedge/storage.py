@@ -188,9 +188,12 @@ def _parse_iso(ts: str) -> datetime:
 
 # Change types that represent the removal/teardown of an entity. An "attempt"
 # (any non-removal event) is inferred as *reverted* when one of these follows
-# it on the same path — the v0.3.7 add->remove proximity heuristic that stands
-# in until explicit ``reject``/``revert`` change_types ship in v0.3.11.
-_REMOVAL_CHANGE_TYPES: frozenset[str] = frozenset({"remove", "delete", "index_remove"})
+# it on the same path — the v0.3.7 add->remove proximity heuristic. The
+# explicit ``revert`` type (v0.3.9.1, pulled forward from the v0.3.11 plan
+# for the git-history importer) is a removal by definition.
+_REMOVAL_CHANGE_TYPES: frozenset[str] = frozenset(
+    {"remove", "delete", "index_remove", "revert"}
+)
 
 # Words too generic to count toward a stale_when keyword match. Only tokens of
 # 4+ characters are considered at all, so the list only needs 4+ char glue
@@ -778,6 +781,20 @@ class SelvedgeStorage:
             # Telemetry must never crash the tool that called it. Log so the
             # failure is visible if SELVEDGE_LOG_LEVEL=DEBUG, but swallow.
             logger.exception("selvedge.storage: failed to record tool call %r", tool_name)
+
+    def get_agent_event_keys(self, agent: str) -> set[tuple[str, str]]:
+        """Return the ``(git_commit, entity_path)`` pairs stored for ``agent``.
+
+        The idempotency index for importers that key on commit + entity
+        (v0.3.9.1 ``selvedge import --from-git``): re-running an import
+        skips any pair already present instead of duplicating events.
+        """
+        with self._session() as conn:
+            rows = conn.execute(
+                "SELECT git_commit, entity_path FROM events WHERE agent = ?",
+                (agent,),
+            ).fetchall()
+        return {(r["git_commit"], r["entity_path"]) for r in rows}
 
     def get_tool_query_paths(self, tool_name: str, since: str = "") -> list[str]:
         """Canonicalized entity paths passed to ``tool_name`` calls since ``since``.

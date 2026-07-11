@@ -40,6 +40,7 @@ from rich.table import Table
 
 from . import backup as backup_mod
 from . import prune as prune_mod
+from . import telemetry as telemetry_mod
 from . import update_check as update_check_mod
 from . import verify as verify_mod
 from .config import get_db_path, init_project, resolve_db_path
@@ -224,6 +225,13 @@ def cli():
     # docstring in selvedge/update_check.py.
     update_check_mod.check_for_update_async()
     update_check_mod.register_atexit_notice()
+
+    # Opt-in anonymous heartbeat (off by default; `selvedge telemetry enable`).
+    # Same no-raise posture as the update check; unlike it, telemetry never
+    # writes to stdout/stderr, so the server fires it too. All gating —
+    # consent, kill switches, CI, dev installs, the 24h interval — happens
+    # inside the daemon thread. See selvedge/telemetry.py + docs/telemetry.md.
+    telemetry_mod.ping_async("cli")
 
 
 # ---------------------------------------------------------------------------
@@ -2830,3 +2838,82 @@ def watch_cmd(since, entity, project, agent, interval, as_json):
         err_console.print(f"[red]error:[/red] {e}")
         sys.exit(2)
     sys.exit(exit_code)
+
+
+# ---------------------------------------------------------------------------
+# telemetry
+# ---------------------------------------------------------------------------
+
+
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def telemetry(ctx):
+    """Manage opt-in anonymous usage telemetry (off by default).
+
+    \b
+    Selvedge never sends anything unless you explicitly enable this.
+    The heartbeat is a single tiny JSON ping, at most once per day:
+    version, Python major.minor, OS, and a random UUID minted on
+    enable (deleted on disable). No code, no paths, no reasoning
+    text, no repo names — run `selvedge telemetry status` to see the
+    exact payload. Full docs: docs/telemetry.md.
+
+    \b
+    Examples:
+      selvedge telemetry            # same as `status`
+      selvedge telemetry enable
+      selvedge telemetry disable
+    """
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(telemetry_status)
+
+
+@telemetry.command("enable")
+def telemetry_enable():
+    """Turn the anonymous heartbeat on (records consent, mints a random ID)."""
+    state = telemetry_mod.enable()
+    payload = telemetry_mod.build_payload("cli") or {}
+    console.print("\n[bold green]✓ Telemetry enabled[/bold green]")
+    console.print(f"  Install ID:  [dim]{state.get('install_id', '')}[/dim] [dim](random UUID, not machine-derived)[/dim]")
+    console.print(f"  Consent:     [dim]{telemetry_mod._consent_path()}[/dim]")
+    console.print("\n  The complete payload, sent at most once per day:\n")
+    console.print(f"  [dim]{json.dumps(payload, indent=2)}[/dim]")
+    console.print("\n  Disable any time: [bold]selvedge telemetry disable[/bold]\n")
+
+
+@telemetry.command("disable")
+def telemetry_disable():
+    """Turn the heartbeat off and delete the install ID."""
+    telemetry_mod.disable()
+    console.print("\n[bold green]✓ Telemetry disabled[/bold green]")
+    console.print("  [dim]The install ID was deleted; re-enabling mints a fresh one,[/dim]")
+    console.print("  [dim]so nothing links usage across consent periods.[/dim]\n")
+
+
+@telemetry.command("status")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def telemetry_status(as_json):
+    """Show telemetry state and the exact payload that would be sent."""
+    data = telemetry_mod.consent_state()
+
+    if as_json:
+        click.echo(json.dumps(data, indent=2))
+        return
+
+    enabled = data["enabled"]
+    label = "[bold green]enabled[/bold green]" if enabled else "[bold]disabled[/bold] [dim](default)[/dim]"
+    console.print(f"\n[bold]Telemetry:[/bold] {label}")
+    console.print(f"  Consent source:  [dim]{data['consent_source']}[/dim]")
+    console.print(f"  Consent file:    [dim]{data['consent_file']}[/dim]")
+    console.print(f"  Endpoint:        [dim]{data['endpoint']}[/dim]")
+    if data["install_id"]:
+        console.print(f"  Install ID:      [dim]{data['install_id']}[/dim]")
+    if data["last_ping"]:
+        console.print(f"  Last ping:       [dim]{data['last_ping']}[/dim]")
+    if enabled and data["payload_preview"]:
+        console.print("\n  The complete payload, sent at most once per day:\n")
+        console.print(f"  [dim]{json.dumps(data['payload_preview'], indent=2)}[/dim]")
+    else:
+        console.print("\n  [dim]Nothing is ever sent while disabled. Enable with:[/dim]")
+        console.print("  [bold]selvedge telemetry enable[/bold]")
+    console.print()

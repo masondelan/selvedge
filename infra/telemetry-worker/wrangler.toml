@@ -1,0 +1,18 @@
+# Selvedge telemetry receiver — see README.md in this directory.
+name = "selvedge-telemetry"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+
+# Workers Analytics Engine dataset the heartbeats land in. Free tier;
+# data points retained ~90 days; no IPs stored (the worker never writes
+# them).
+[[analytics_engine_datasets]]
+binding = "PINGS"
+dataset = "selvedge_telemetry"
+
+# Route on the production zone. Requires the selvedge.sh zone on the
+# same Cloudflare account and a `telemetry` DNS record (a proxied
+# AAAA 100:: placeholder is the standard Workers-route pattern).
+[[routes]]
+pattern = "telemetry.selvedge.sh/*"
+zone_name = "selvedge.sh"

@@ -78,6 +78,7 @@ include = [
     # silently ride along into the package.
     "docs/getting-started.md",
     "docs/coding-agents.md",
+    "docs/telemetry.md",
 ]
 exclude = [
     ".selvedge/",

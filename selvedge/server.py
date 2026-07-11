@@ -1001,6 +1001,14 @@ def main():
     # Configure structured logging once per process. Verbosity is controlled
     # by SELVEDGE_LOG_LEVEL (default WARNING).
     configure_logging()
+
+    # Opt-in anonymous heartbeat (off by default). Safe on the stdio
+    # channel: unlike the CLI's update check, telemetry never writes to
+    # stdout or stderr — see the module docstring in selvedge/telemetry.py.
+    from . import telemetry as _telemetry
+
+    _telemetry.ping_async("server")
+
     mcp.run()
 
 

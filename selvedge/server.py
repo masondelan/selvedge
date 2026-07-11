@@ -74,7 +74,18 @@ mcp = FastMCP(
         "\n"
         "BEFORE EDITING an entity, call prior_attempts on it — if the same "
         "change was tried before and reverted, you'll see why and can change "
-        "your plan instead of repeating a rejected approach.\n"
+        "your plan instead of repeating a rejected approach. A reverted "
+        "decision is not a permanent ban: if the constraint that killed it "
+        "no longer holds, log a change with change_type='supersede' to "
+        "re-open it (the trail then reads tried -> reverted -> re-opened). "
+        "Never re-apply a reverted change without superseding it first.\n"
+        "\n"
+        "STRUCTURED REASONING (optional): alongside free-text reasoning, "
+        "log_change accepts `constraint` (the testable principle behind the "
+        "decision, e.g. 'card data in our own DB = PCI scope') and "
+        "`stale_when` (what would invalidate it, e.g. 'payment provider "
+        "changed'). stale_decisions matches stale_when against later events "
+        "and flags decisions worth re-checking.\n"
         "\n"
         "REVISIT DATES: when you make an architectural change (a table, schema, "
         "dependency, or config) that should be reconsidered later, set "
@@ -118,10 +129,12 @@ class LogChangeResult(TypedDict):
 
     On success: ``status`` == "logged", ``id`` and ``timestamp`` populated,
     ``error`` empty, ``warnings`` may be a non-empty list if the reasoning
-    quality validator flagged the input.
+    quality validator flagged the input. ``supersedes`` carries the id of
+    the event this change superseded (auto-resolved when the caller didn't
+    pass one on a ``change_type="supersede"`` call), or ``""``.
 
     On validation failure: ``status`` == "error", ``error`` populated,
-    ``id`` and ``timestamp`` empty, ``warnings`` empty.
+    ``id`` and ``timestamp`` empty, ``warnings`` empty, ``supersedes`` empty.
     """
 
     id: str
@@ -129,6 +142,7 @@ class LogChangeResult(TypedDict):
     status: str
     error: str
     warnings: list[str]
+    supersedes: str
 
 
 class BlameResult(TypedDict):
@@ -154,6 +168,11 @@ class BlameResult(TypedDict):
     metadata: dict
     revisit_after: str
     expires_when: str
+    supersedes: str
+    constraint: str
+    stale_when: str
+    superseded_by: str
+    status: str
     error: str
 
 
@@ -173,6 +192,11 @@ _EMPTY_BLAME: BlameResult = {
     "metadata": {},
     "revisit_after": "",
     "expires_when": "",
+    "supersedes": "",
+    "constraint": "",
+    "stale_when": "",
+    "superseded_by": "",
+    "status": "",
     "error": "",
 }
 
@@ -335,6 +359,45 @@ def log_change(
             ),
         ),
     ] = "",
+    constraint: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "Optional: the testable principle that drove this decision, "
+                "split out of the free-text reasoning so it stays queryable. "
+                "Example: 'card data in our own DB puts us in PCI scope'. "
+                "Leave empty when there's no crisp constraint."
+            ),
+        ),
+    ] = "",
+    stale_when: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "Optional: the evidence that would make this decision stale, "
+                "as a short phrase. Example: 'payment provider changed'. "
+                "`stale_decisions` keyword-matches it against later change "
+                "events and flags 'review suggested' — surfacing only, never "
+                "an automatic un-retire."
+            ),
+        ),
+    ] = "",
+    supersedes: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "The id of the prior event this change overrides. Only valid "
+                "with change_type='supersede'. Leave empty on a supersede call "
+                "to auto-link the entity's most recent remove/delete event — "
+                "the usual 'this was reverted once, but the world changed' "
+                "re-open. The store stays append-only; the old verdict is "
+                "never edited, just derived as superseded."
+            ),
+        ),
+    ] = "",
     rename_from: Annotated[
         str,
         Field(
@@ -373,21 +436,43 @@ def log_change(
             reasoning="Split auth.py into an auth/ package; login moved.",
         )
 
-    On validation failure (invalid change_type, missing entity_path, or
-    `rename_from` set without change_type='rename') the result is
-    `{"status": "error", "error": "..."}` with no event written.
+    Superseding a reverted decision: when something that was tried and
+    reverted becomes correct again (the constraint that killed it no longer
+    holds), do NOT delete or edit history — set `change_type="supersede"`.
+    Selvedge links the new event to the reverted one (auto-resolving the
+    most recent remove/delete on the path when `supersedes` is empty) and
+    every read surface then reports the trail tried → reverted → re-opened.
+    Example:
+
+        log_change(
+            entity_path="payments.card_token",
+            change_type="supersede",
+            reasoning="Provider now vaults card data — PCI constraint gone.",
+            constraint="card data in our own DB puts us in PCI scope",
+        )
+
+    On validation failure (invalid change_type, missing entity_path,
+    `rename_from` set without change_type='rename', `supersedes` set without
+    change_type='supersede', or a supersede with nothing to re-open) the
+    result is `{"status": "error", "error": "..."}` with no event written.
     """
     storage = get_storage()
     storage.record_tool_call("log_change", entity_path=entity_path, agent=agent)
 
-    if rename_from and change_type != "rename":
+    def _error(msg: str) -> LogChangeResult:
         return {
             "id": "",
             "timestamp": "",
             "status": "error",
-            "error": "rename_from is only valid with change_type='rename'",
+            "error": msg,
             "warnings": [],
+            "supersedes": "",
         }
+
+    if rename_from and change_type != "rename":
+        return _error("rename_from is only valid with change_type='rename'")
+    if supersedes and change_type != "supersede":
+        return _error("supersedes is only valid with change_type='supersede'")
 
     # Normalize revisit_after with the same grammar as `--since` (relative
     # offsets are preserved, absolute dates canonicalized). A bad value is a
@@ -395,13 +480,7 @@ def log_change(
     try:
         normalized_revisit = normalize_revisit_after(revisit_after)
     except ValueError as e:
-        return {
-            "id": "",
-            "timestamp": "",
-            "status": "error",
-            "error": str(e),
-            "warnings": [],
-        }
+        return _error(str(e))
 
     try:
         if rename_from:
@@ -421,6 +500,21 @@ def log_change(
                 changeset_id=changeset_id,
             )
             stored = events[-1]
+        elif change_type == "supersede":
+            # Route through the supersede writer so the link to the prior
+            # reverted event is validated/auto-resolved in one place.
+            stored = storage.log_supersede(
+                entity_path,
+                reasoning=reasoning,
+                constraint=constraint,
+                stale_when=stale_when,
+                supersedes=supersedes,
+                agent=agent,
+                session_id=session_id,
+                git_commit=git_commit,
+                project=project,
+                changeset_id=changeset_id,
+            )
         else:
             event = ChangeEvent(
                 entity_path=entity_path,
@@ -434,16 +528,12 @@ def log_change(
                 project=project,
                 changeset_id=changeset_id,
                 revisit_after=normalized_revisit,
+                constraint=constraint,
+                stale_when=stale_when,
             )
             stored = storage.log_event(event)
     except ValueError as e:
-        return {
-            "id": "",
-            "timestamp": "",
-            "status": "error",
-            "error": str(e),
-            "warnings": [],
-        }
+        return _error(str(e))
 
     warnings = check_reasoning_quality(reasoning)
     warnings += check_entity_path_shape(stored.entity_path, stored.entity_type)
@@ -456,6 +546,7 @@ def log_change(
         "status": "logged",
         "error": "",
         "warnings": warnings,
+        "supersedes": stored.supersedes,
     }
 
 
@@ -483,7 +574,10 @@ def diff(
     """Get change history for a codebase entity, newest first.
 
     Supports prefix matching — e.g. 'users' returns all events for the users
-    table and any users.* column.
+    table and any users.* column. Each event carries a derived
+    `superseded_by` field (v0.3.9.1) — the id of a later supersede event
+    that overrode it, or "" — so a tried → reverted → re-opened trail is
+    readable straight off the history.
     """
     storage = get_storage()
     storage.record_tool_call("diff", entity_path=entity_path)
@@ -508,8 +602,12 @@ def blame(
     """Most recent change to an entity — what changed, when, who, why.
 
     Like `git blame` but for semantic entities (DB columns, functions, env
-    vars, dependencies) and AI agents. If no history exists for the entity,
-    returns `{"error": "..."}` with protocol-level `isError: false`.
+    vars, dependencies) and AI agents. The result also carries the derived
+    decision state (v0.3.9.1): `status` is the entity's current standing
+    (`active` / `reverted` / `reopened`), and `superseded_by` is the id of a
+    later supersede event that overrode this change, or `""`. If no history
+    exists for the entity, returns `{"error": "..."}` with protocol-level
+    `isError: false`.
     """
     storage = get_storage()
     storage.record_tool_call("blame", entity_path=entity_path)
@@ -531,11 +629,22 @@ def blame(
             populated["metadata"] = json.loads(md) if md else {}
         except json.JSONDecodeError:
             populated["metadata"] = {}
-    # revisit_after / expires_when are NULLABLE columns (v0.3.8) — pre-v3 rows
-    # read back as NULL. Coalesce to "" so the schema's "string" contract holds.
-    for nullable in ("revisit_after", "expires_when"):
+    # The active-memory (v0.3.8) and supersede (v0.3.9.1) columns are
+    # NULLABLE — pre-migration rows read back as NULL. Coalesce to "" so the
+    # schema's "string" contract holds.
+    for nullable in (
+        "revisit_after", "expires_when", "supersedes", "constraint", "stale_when",
+    ):
         if populated.get(nullable) is None:
             populated[nullable] = ""
+    # Derived decision state: entity-level status plus whether THIS event
+    # has been overridden by a later supersede.
+    decision = storage.get_decision_status(entity_path)
+    populated["status"] = decision["status"]
+    populated["superseded_by"] = next(
+        (e["superseded_by"] for e in decision["trail"] if e["id"] == populated["id"]),
+        "",
+    )
     populated["error"] = ""
     return populated  # type: ignore[return-value]
 
@@ -729,18 +838,29 @@ def prior_attempts(
     inferred `outcome` — so you can change your plan instead of repeating a
     rejected approach.
 
-    Each result is a change event with three extra fields:
+    Each result is a change event with six extra fields:
 
       - `outcome`           — "reverted" (a later remove/delete on the same
-                              path) or "active" (no later removal seen).
+                              path), "reopened" (reverted, but a later
+                              supersede re-opened the decision), or "active"
+                              (no later removal seen).
       - `confidence`        — "proximity_high" or "proximity_low".
       - `outcome_reasoning` — the reverting event's reasoning (WHY it was
                               rejected), or "" while still active.
+      - `superseded_by`     — id of the supersede event that re-opened a
+                              reverted verdict, or "".
+      - `supersede_reasoning` — WHY it was re-opened, or "".
+      - `current_status`    — the entity's derived standing right now:
+                              "active" / "reverted" / "reopened". Treat
+                              "reverted" as "don't repeat this without a
+                              supersede"; "reopened" means the old revert no
+                              longer stands.
 
-    Outcome is inferred from add->remove proximity — v0.3.7 has no explicit
-    reject/revert change types yet (those arrive in v0.3.11). Output is
-    templated, deterministic, and makes no LLM call. This is a pull-only
-    tool: it never writes and never pushes; you decide when to ask.
+    Together these read as the full trail: tried → reverted → re-opened.
+    Outcome is inferred from add->remove proximity plus explicit supersede
+    links. Output is templated, deterministic, and makes no LLM call. This
+    is a pull-only tool: it never writes and never pushes; you decide when
+    to ask.
 
     Conservative by design — `min_confidence` defaults to "proximity_high",
     so an empty list (nothing clearly tried-and-rejected) is the normal,
@@ -792,20 +912,30 @@ def stale_decisions(
         Field(default=20, ge=1, description="Maximum number of results."),
     ] = 20,
 ) -> list[dict]:
-    """Decisions whose `revisit_after` has passed AND that are still in active use.
+    """Decisions due for a revisit — past their date, or with a triggered stale condition.
 
-    The date-based half of active memory (v0.3.8). Returns events with a
-    `revisit_after` now in the past — but ONLY when the entity is still live, so
-    an old-but-correct decision nobody touches never nags. The required
-    active-use signal is one of: the entity was queried (`blame` / `diff` /
-    `prior_attempts`) at or after the decision, or its `changeset_id` saw later
-    activity. Pure age alone does NOT surface.
+    Two surfacing rules, both deterministic:
 
-    Each result is the change event plus four fields: `revisit_due` (UTC ISO),
-    `days_overdue` (int, 0 on the due day), `active_use_signals` (list), and
-    `stale_reason` (a one-line summary). Most-overdue first; filter by
-    `entity_path`, `project`, or `agent`. Date-based only — `expires_when`
-    evaluation lands in v0.3.11. Templated and deterministic; no LLM call.
+    1. Date-based (v0.3.8), `flag="revisit_due"`: events whose
+       `revisit_after` has passed — but ONLY when the entity is still live
+       (queried via `blame`/`diff`/`prior_attempts` after the decision, or
+       its `changeset_id` saw later activity). Pure age alone does NOT
+       surface, so an old-but-correct decision nobody touches never nags.
+
+    2. Condition-based (v0.3.9.1), `flag="review_suggested"`: events whose
+       `stale_when` text shares keywords with a LATER change event — the
+       evidence the decision named as invalidating it may have happened
+       (e.g. stale_when "payment provider changed" vs a later "switched
+       payment provider to Adyen" event). Surfacing only: nothing is
+       un-retired automatically — follow up with a `supersede` if the
+       condition really has been triggered.
+
+    Each result is the change event plus `flag`, `revisit_due` (UTC ISO or
+    ""), `days_overdue`, `active_use_signals`, `matched_terms`,
+    `matched_event_id`, and `stale_reason` (a one-line summary). Date-due
+    rows first, most-overdue leading; filter by `entity_path`, `project`, or
+    `agent`. `expires_when` evaluation lands in v0.3.11. Templated and
+    deterministic; no LLM call.
     """
     storage = get_storage()
     storage.record_tool_call("stale_decisions", entity_path=entity_path)

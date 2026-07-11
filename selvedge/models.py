@@ -19,6 +19,10 @@ class ChangeType(str, Enum):
     INDEX_ADD = "index_add"
     INDEX_REMOVE = "index_remove"
     MIGRATE = "migrate"
+    # A supersede event re-opens a previously reverted decision (v0.3.9.1).
+    # It links back to the event it overrides via ChangeEvent.supersedes —
+    # the record stays append-only; "re-opened" is a new fact, not an edit.
+    SUPERSEDE = "supersede"
 
 
 class EntityType(str, Enum):
@@ -96,6 +100,23 @@ class ChangeEvent:
     revisit_after: str = ""
     expires_when: str = ""
 
+    # Decision states + supersede flow (v0.3.9.1, migration v4). All three
+    # default to "" (absent) and follow the same nullable-column / coalesce
+    # convention as the v0.3.8 pair above.
+    #   - supersedes: the id of a prior event this event overrides. Set on
+    #     change_type="supersede" events; the linked event's verdict is then
+    #     derived as no longer standing (status "superseded") without ever
+    #     mutating it.
+    #   - constraint: the testable principle that drove the decision (e.g.
+    #     "card data in our own DB puts us in PCI scope") — split out of the
+    #     free-text reasoning so it stays queryable.
+    #   - stale_when: the evidence that would invalidate the verdict (e.g.
+    #     "payment provider changed"). `stale_decisions` keyword-matches this
+    #     against later change events and flags "review suggested".
+    supersedes: str = ""
+    constraint: str = ""
+    stale_when: str = ""
+
     def __post_init__(self) -> None:
         # entity_path: must be non-empty
         if not isinstance(self.entity_path, str) or not self.entity_path.strip():
@@ -141,4 +162,7 @@ class ChangeEvent:
             "metadata": self.metadata,
             "revisit_after": self.revisit_after,
             "expires_when": self.expires_when,
+            "supersedes": self.supersedes,
+            "constraint": self.constraint,
+            "stale_when": self.stale_when,
         }

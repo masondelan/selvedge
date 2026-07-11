@@ -56,7 +56,13 @@ CREATE TABLE IF NOT EXISTS events (
     -- rows read back as NULL; new writes store '' for "absent". `expires_when`
     -- ships now but its evaluator is deferred to v0.3.11.
     revisit_after TEXT,
-    expires_when  TEXT
+    expires_when  TEXT,
+    -- Decision states + supersede flow (v0.3.9.1, migration v4). Same
+    -- nullable convention. `constraint` is a SQL reserved word — quoted here
+    -- and in the INSERTs; it reads back as the plain dict key "constraint".
+    supersedes    TEXT,
+    "constraint"  TEXT,
+    stale_when    TEXT
 );
 """
 
@@ -186,6 +192,45 @@ def _parse_iso(ts: str) -> datetime:
 # in until explicit ``reject``/``revert`` change_types ship in v0.3.11.
 _REMOVAL_CHANGE_TYPES: frozenset[str] = frozenset({"remove", "delete", "index_remove"})
 
+# Words too generic to count toward a stale_when keyword match. Only tokens of
+# 4+ characters are considered at all, so the list only needs 4+ char glue
+# words. Deliberately small — precision comes from requiring MULTIPLE
+# overlapping tokens, not from an exhaustive stopword list.
+_STALE_WHEN_STOPWORDS: frozenset[str] = frozenset({
+    "about", "after", "again", "against", "because", "been", "before",
+    "being", "between", "changed", "changes", "could", "does", "doing",
+    "during", "each", "every", "from", "have", "here", "into", "longer",
+    "more", "most", "much", "must", "once", "only", "other", "over",
+    "same", "should", "since", "some", "such", "than", "that", "their",
+    "them", "then", "there", "these", "they", "this", "those", "through",
+    "under", "until", "used", "using", "very", "well", "were", "what",
+    "when", "where", "which", "while", "will", "with", "would", "your",
+})
+
+# Minimum number of distinct overlapping tokens for a stale_when condition to
+# count as matched by a later change event. Two is the precision floor: one
+# shared word ("payment") is coincidence, two ("payment" + "provider") is
+# signal.
+_STALE_WHEN_MIN_OVERLAP = 2
+
+# How many of the most recent change events get scanned for stale_when
+# keyword overlap. Bounds the work on huge stores; recent events are the
+# only ones that can plausibly represent "the world changed".
+_STALE_WHEN_SCAN_LIMIT = 500
+
+
+def _keyword_tokens(text: str) -> set[str]:
+    """Lowercased 4+ character word tokens of ``text``, minus stopwords.
+
+    The shared tokenizer for the stale_when keyword-overlap heuristic —
+    deterministic, dependency-free, no LLM. Splits on any non-alphanumeric
+    run so ``payments.provider`` yields both ``payments`` and ``provider``.
+    """
+    tokens = re.split(r"[^a-z0-9_]+", text.lower())
+    return {
+        t for t in tokens if len(t) >= 4 and t not in _STALE_WHEN_STOPWORDS
+    }
+
 # Read tools whose calls count as "this entity is in active use" for the
 # v0.3.8 stale-decisions active-use weighting. A decision aging past its
 # revisit_after only surfaces if the entity has actually been looked at (or
@@ -207,8 +252,45 @@ def _paths_related(a: str, b: str) -> bool:
     return a.startswith(b + ".") or b.startswith(a + ".")
 
 
-def _stale_reason_text(signals: list[str]) -> str:
-    """Render the active-use signals into a one-line, deterministic summary.
+def _derive_path_status(events: list[dict]) -> str:
+    """Derive the current decision status for one entity path.
+
+    ``events`` is the path's full timeline, oldest first. The latest event
+    wins:
+
+      - a removal (``remove`` / ``delete`` / ``index_remove``) → ``"reverted"``
+      - a ``supersede`` → ``"reopened"`` (the prior revert no longer stands)
+      - anything else → ``"active"``
+      - no events at all → ``"no_history"``
+
+    Pure derivation over the append-only log — no stored state, so the
+    status can never drift from the events that imply it.
+    """
+    if not events:
+        return "no_history"
+    latest = events[-1]
+    if latest["change_type"] in _REMOVAL_CHANGE_TYPES:
+        return "reverted"
+    if latest["change_type"] == "supersede":
+        return "reopened"
+    return "active"
+
+
+def _trail_phase(change_type: str) -> str:
+    """Map a change_type to its phase label in a decision trail.
+
+    The tried → reverted → re-opened vocabulary used by
+    :meth:`SelvedgeStorage.get_decision_status` and the CLI renderers.
+    """
+    if change_type in _REMOVAL_CHANGE_TYPES:
+        return "reverted"
+    if change_type == "supersede":
+        return "reopened"
+    return "tried"
+
+
+def _stale_reason_text(signals: list[str], matched_terms: tuple | list = ()) -> str:
+    """Render the surfacing signals into a one-line, deterministic summary.
 
     Pure templated assembly — the human-readable half of the ``stale_decisions``
     contract, with no LLM hop. Returns the empty string for no signals (which
@@ -219,21 +301,32 @@ def _stale_reason_text(signals: list[str]) -> str:
         "changeset_activity": "its changeset kept moving with later sibling changes",
     }
     parts = [phrases[s] for s in signals if s in phrases]
-    if not parts:
-        return ""
-    return "past its revisit date and still active — " + "; ".join(parts) + "."
+    sentences: list[str] = []
+    if parts:
+        sentences.append(
+            "past its revisit date and still active — " + "; ".join(parts) + "."
+        )
+    if "stale_when_match" in signals:
+        terms = ", ".join(matched_terms)
+        sentences.append(
+            "review suggested — a later change matched its stale_when "
+            f"condition ({terms}); not un-retired automatically."
+        )
+    return " ".join(sentences)
 
 
 def _coalesce_event_nullables(row: dict) -> dict:
     """Coalesce the nullable active-memory columns (v0.3.8) to ``""`` in place.
 
     ``revisit_after`` / ``expires_when`` are NULLABLE, so rows written before
-    migration v3 read back as ``NULL``. This keeps every read path on the
-    "every field always populated, never null" convention — so
-    diff / history / search / changeset / prior_attempts agree with
-    blame / stale_decisions instead of leaking ``null`` for a pre-v3 row.
+    migration v3 read back as ``NULL`` — likewise ``supersedes`` /
+    ``constraint`` / ``stale_when`` (v0.3.9.1, migration v4) for pre-v4 rows.
+    This keeps every read path on the "every field always populated, never
+    null" convention — so diff / history / search / changeset /
+    prior_attempts agree with blame / stale_decisions instead of leaking
+    ``null`` for a pre-migration row.
     """
-    for col in ("revisit_after", "expires_when"):
+    for col in ("revisit_after", "expires_when", "supersedes", "constraint", "stale_when"):
         if row.get(col) is None:
             row[col] = ""
     return row
@@ -415,23 +508,26 @@ class SelvedgeStorage:
             event.reasoning, event.agent, event.session_id,
             event.git_commit, event.project, event.changeset_id,
             event.metadata, event.revisit_after, event.expires_when,
+            event.supersedes, event.constraint, event.stale_when,
         )
+
+    # Shared column list for the two INSERT paths. `constraint` is a SQL
+    # reserved word, so it must stay quoted.
+    _INSERT_SQL = """
+        INSERT INTO events
+            (id, timestamp, entity_type, entity_path, change_type,
+             diff, reasoning, agent, session_id, git_commit, project,
+             changeset_id, metadata, revisit_after, expires_when,
+             supersedes, "constraint", stale_when)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """
 
     @_retry_on_locked
     def log_event(self, event: ChangeEvent) -> ChangeEvent:
         """Persist a ChangeEvent and return it (with id/timestamp set)."""
         self._normalize_for_storage(event)
         with self._session() as conn:
-            conn.execute(
-                """
-                INSERT INTO events
-                    (id, timestamp, entity_type, entity_path, change_type,
-                     diff, reasoning, agent, session_id, git_commit, project,
-                     changeset_id, metadata, revisit_after, expires_when)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                self._event_row(event),
-            )
+            conn.execute(self._INSERT_SQL, self._event_row(event))
         return event
 
     @_retry_on_locked
@@ -449,17 +545,92 @@ class SelvedgeStorage:
             return events
         rows = [self._event_row(self._normalize_for_storage(e)) for e in events]
         with self._session() as conn:
-            conn.executemany(
-                """
-                INSERT INTO events
-                    (id, timestamp, entity_type, entity_path, change_type,
-                     diff, reasoning, agent, session_id, git_commit, project,
-                     changeset_id, metadata, revisit_after, expires_when)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                rows,
-            )
+            conn.executemany(self._INSERT_SQL, rows)
         return events
+
+    @_retry_on_locked
+    def log_supersede(
+        self,
+        entity_path: str,
+        *,
+        reasoning: str = "",
+        constraint: str = "",
+        stale_when: str = "",
+        supersedes: str = "",
+        agent: str = "",
+        session_id: str = "",
+        git_commit: str = "",
+        project: str = "",
+        changeset_id: str = "",
+    ) -> ChangeEvent:
+        """Record a ``supersede`` event that re-opens a reverted decision.
+
+        The store stays append-only: nothing is edited or deleted. A new
+        ``change_type="supersede"`` event is written whose ``supersedes``
+        field links the prior event it overrides, and every read surface
+        (``prior_attempts`` / ``blame`` / :meth:`get_decision_status`)
+        derives "this verdict no longer stands" from that link.
+
+        Linking rules:
+
+          - ``supersedes`` given — it must be the id of an existing event on
+            the same entity path (exact or dotted-prefix); otherwise
+            ``ValueError``. Explicit beats inferred.
+          - ``supersedes`` empty — auto-link to the most recent removal event
+            (``remove`` / ``delete`` / ``index_remove``) on the path. If the
+            path has no removal to re-open, ``ValueError`` — superseding
+            nothing is almost always a mis-targeted entity path, and an
+            explicit error beats a dangling re-open marker.
+
+        The stored event inherits the superseded event's ``entity_type`` so
+        the trail stays coherent. Returns the stored :class:`ChangeEvent`.
+        """
+        canonical = canonicalize_entity_path(entity_path)
+        prefix = f"{_escape_like(canonical)}.%"
+        with self._session() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, entity_path, entity_type, change_type FROM events
+                WHERE entity_path = ? OR entity_path LIKE ? ESCAPE '\\'
+                ORDER BY timestamp DESC
+                """,
+                (canonical, prefix),
+            ).fetchall()
+
+        if supersedes:
+            target = next((r for r in rows if r["id"] == supersedes), None)
+            if target is None:
+                raise ValueError(
+                    f"supersedes id {supersedes!r} does not match any event "
+                    f"on entity {canonical!r}"
+                )
+        else:
+            target = next(
+                (r for r in rows if r["change_type"] in _REMOVAL_CHANGE_TYPES),
+                None,
+            )
+            if target is None:
+                raise ValueError(
+                    f"no reverted decision to supersede on {canonical!r} — "
+                    "no remove/delete event found; pass an explicit event id "
+                    "if you mean to override a non-removal event"
+                )
+
+        event = ChangeEvent(
+            entity_path=canonical,
+            change_type="supersede",
+            entity_type=target["entity_type"],
+            reasoning=reasoning,
+            agent=agent,
+            session_id=session_id,
+            git_commit=git_commit,
+            project=project,
+            changeset_id=changeset_id,
+            supersedes=target["id"],
+            constraint=constraint,
+            stale_when=stale_when,
+        )
+        return self.log_event(event)
 
     @_retry_on_locked
     def log_rename(
@@ -761,6 +932,12 @@ class SelvedgeStorage:
         """
         Return change history for an entity or entity prefix.
         e.g. "users" matches "users", "users.email", "users.created_at".
+
+        Each row carries an always-present derived ``superseded_by`` key —
+        the id of a later ``supersede`` event that explicitly links this row
+        via its ``supersedes`` field, or ``""``. That makes the full
+        tried → reverted → re-opened trail readable straight off the diff
+        output without a second query.
         """
         prefix_pattern = f"{_escape_like(entity_path)}.%"
         with self._session() as conn:
@@ -773,7 +950,20 @@ class SelvedgeStorage:
                 """,
                 (entity_path, prefix_pattern, limit),
             ).fetchall()
-        return [_coalesce_event_nullables(dict(r)) for r in rows]
+            results = [_coalesce_event_nullables(dict(r)) for r in rows]
+            ids = [r["id"] for r in results]
+            superseded: dict[str, str] = {}
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                for link in conn.execute(
+                    f"SELECT id, supersedes FROM events "
+                    f"WHERE supersedes IN ({placeholders})",
+                    ids,
+                ).fetchall():
+                    superseded[link["supersedes"]] = link["id"]
+        for r in results:
+            r["superseded_by"] = superseded.get(r["id"], "")
+        return results
 
     def get_blame(self, entity_path: str) -> dict | None:
         """Return the most recent event for an exact entity path."""
@@ -939,7 +1129,9 @@ class SelvedgeStorage:
         For each candidate path the timeline is walked oldest-first and every
         non-removal event (the "attempt") is paired with the next removal
         event (``remove`` / ``delete`` / ``index_remove``) on the same path. A
-        paired attempt reports ``outcome="reverted"``; an unpaired one
+        paired attempt reports ``outcome="reverted"`` — unless a later
+        ``supersede`` event re-opened the verdict, in which case it reports
+        ``outcome="reopened"`` (v0.3.9.1). An unpaired attempt reports
         ``outcome="active"``. ``confidence`` is ``proximity_high`` when the
         attempt->removal gap is within ``window_minutes``, else
         ``proximity_low`` (active attempts are always ``proximity_low``).
@@ -949,11 +1141,16 @@ class SelvedgeStorage:
         signal; pass ``"proximity_low"`` to include the noisy tail. An empty
         list is the preferred answer over a false positive.
 
-        Each result is an event dict plus three always-present keys —
+        Each result is an event dict plus six always-present keys —
         ``outcome``, ``confidence``, ``outcome_reasoning`` (the reverting
-        event's reasoning, or ``""`` while active). Removal events are folded
-        into the attempt they close and never appear on their own. Newest
-        first, capped at ``limit``.
+        event's reasoning, or ``""`` while active), ``superseded_by`` (the
+        supersede event's id when the revert was re-opened, else ``""``),
+        ``supersede_reasoning`` (why it was re-opened, else ``""``), and
+        ``current_status`` (the path's derived status: ``active`` /
+        ``reverted`` / ``reopened``). Together they read as the full trail:
+        tried → reverted → re-opened. Removal events are folded into the
+        attempt they close and never appear on their own. Newest first,
+        capped at ``limit``.
         """
         with self._session() as conn:
             if entity_path:
@@ -999,6 +1196,8 @@ class SelvedgeStorage:
         results: list[dict] = []
         for events in by_path.values():
             removals = [e for e in events if e["change_type"] in _REMOVAL_CHANGE_TYPES]
+            supersede_events = [e for e in events if e["change_type"] == "supersede"]
+            path_status = _derive_path_status(events)
             for e in events:
                 if e["change_type"] in _REMOVAL_CHANGE_TYPES:
                     continue  # removals surface via the attempt they close
@@ -1011,6 +1210,7 @@ class SelvedgeStorage:
                     ),
                     None,
                 )
+                superseding: dict | None = None
                 if closing is None:
                     outcome, confidence, outcome_reasoning = (
                         "active",
@@ -1024,10 +1224,33 @@ class SelvedgeStorage:
                     )
                     outcome = "reverted"
                     outcome_reasoning = closing["reasoning"]
+                    # A later supersede event re-opens the reverted verdict.
+                    # Explicit id-link wins; a supersede on the same path at
+                    # or after the removal counts too (covers hand-logged
+                    # supersede events with no id).
+                    closing_ts = _parse_iso(closing["timestamp"])
+                    superseding = next(
+                        (
+                            s
+                            for s in supersede_events
+                            if s["supersedes"] == closing["id"]
+                            or _parse_iso(s["timestamp"]) >= closing_ts
+                        ),
+                        None,
+                    )
+                    if superseding is not None:
+                        outcome = "reopened"
                 annotated = _coalesce_event_nullables(dict(e))
                 annotated["outcome"] = outcome
                 annotated["confidence"] = confidence
                 annotated["outcome_reasoning"] = outcome_reasoning
+                annotated["superseded_by"] = (
+                    superseding["id"] if superseding is not None else ""
+                )
+                annotated["supersede_reasoning"] = (
+                    superseding["reasoning"] if superseding is not None else ""
+                )
+                annotated["current_status"] = path_status
                 results.append(annotated)
 
         if min_confidence == "proximity_high":
@@ -1036,6 +1259,68 @@ class SelvedgeStorage:
         # Newest-first, then cap.
         results.sort(key=lambda r: r["timestamp"], reverse=True)
         return results[:limit]
+
+    def get_decision_status(self, entity_path: str) -> dict:
+        """Return the derived decision status and full trail for an entity.
+
+        The read-side companion of :meth:`log_supersede` (v0.3.9.1). Walks
+        the entity's timeline (exact path + dotted-prefix, same convention as
+        every other read) and derives:
+
+          - ``status`` — ``"active"`` / ``"reverted"`` / ``"reopened"`` /
+            ``"no_history"``, from the latest event (see
+            :func:`_derive_path_status`).
+          - ``status_line`` — a one-line, templated, deterministic summary
+            suitable for printing verbatim. No LLM call.
+          - ``trail`` — the events oldest-first, each annotated with a
+            ``phase`` key (``tried`` / ``reverted`` / ``reopened``) and a
+            derived ``superseded_by`` id (``""`` when nothing links it), so
+            the tried → reverted → re-opened arc is readable in one pass.
+
+        Every key is always present; ``trail`` is ``[]`` and ``status_line``
+        still populated when the entity has no history.
+        """
+        canonical = canonicalize_entity_path(entity_path)
+        prefix = f"{_escape_like(canonical)}.%"
+        with self._session() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM events
+                WHERE entity_path = ? OR entity_path LIKE ? ESCAPE '\\'
+                ORDER BY timestamp ASC
+                """,
+                (canonical, prefix),
+            ).fetchall()
+
+        trail = [_coalesce_event_nullables(dict(r)) for r in rows]
+        superseded: dict[str, str] = {
+            e["supersedes"]: e["id"] for e in trail if e["supersedes"]
+        }
+        for e in trail:
+            e["phase"] = _trail_phase(e["change_type"])
+            e["superseded_by"] = superseded.get(e["id"], "")
+
+        status = _derive_path_status(trail)
+        if status == "no_history":
+            status_line = f"no history recorded for '{canonical}'"
+        else:
+            latest = trail[-1]
+            when = latest["timestamp"][:10]
+            why = (latest["reasoning"] or "").strip()
+            why_part = f": {why}" if why else ""
+            if status == "reverted":
+                status_line = f"reverted ({latest['change_type']} on {when}){why_part}"
+            elif status == "reopened":
+                status_line = f"re-opened (superseded on {when}){why_part}"
+            else:
+                status_line = f"active (last {latest['change_type']} on {when})"
+
+        return {
+            "entity_path": canonical,
+            "status": status,
+            "status_line": status_line,
+            "trail": trail,
+        }
 
     def get_stale_decisions(
         self,
@@ -1046,17 +1331,17 @@ class SelvedgeStorage:
         agent: str = "",
         limit: int = 20,
     ) -> list[dict]:
-        """Return decisions whose ``revisit_after`` has passed AND are in active use.
+        """Return decisions due for a revisit — by date, or by stale-condition match.
 
-        Storage layer for the v0.3.8 ``stale_decisions`` surface (date-based
-        active memory). A candidate is any event carrying a non-empty
-        ``revisit_after`` whose resolved due date (see
-        :func:`selvedge.timeutil.resolve_revisit_due`) is at or before ``now``
-        (defaults to the current UTC time).
+        Storage layer for the ``stale_decisions`` surface. Two independent
+        surfacing rules, each purely derived and LLM-free:
 
-        **Active-use weighting — pure age does NOT surface.** A due decision is
-        returned only if there is an additional signal that the entity is still
-        live, exactly one of:
+        **1. Date-based (v0.3.8) — flag ``"revisit_due"``.** A candidate is
+        any event carrying a non-empty ``revisit_after`` whose resolved due
+        date (see :func:`selvedge.timeutil.resolve_revisit_due`) is at or
+        before ``now`` (defaults to the current UTC time). Pure age does NOT
+        surface — a due decision is returned only with an additional
+        active-use signal, one of:
 
           - ``queried`` — a ``blame`` / ``diff`` / ``prior_attempts`` tool-call
             on the entity (exact or dotted-prefix, either direction) recorded
@@ -1064,23 +1349,40 @@ class SelvedgeStorage:
           - ``changeset_activity`` — the decision carries a ``changeset_id`` and
             a *later* sibling event shares it (the feature kept moving).
 
-        This is the noise defense: an old-but-correct decision nobody touches
-        never nags. Filterable by ``entity_path`` (exact + ``.`` prefix),
-        ``project``, and ``agent``. Output is templated and deterministic — no
-        LLM call. ``expires_when`` is ignored here; its evaluator lands in
-        v0.3.11.
+        **2. Condition-based (v0.3.9.1) — flag ``"review_suggested"``.** A
+        candidate is any event carrying a non-empty ``stale_when`` (the
+        evidence that would invalidate the verdict, e.g. "payment provider
+        changed"). It surfaces when a *later* change event's text
+        (entity_path + reasoning + diff) shares at least
+        ``_STALE_WHEN_MIN_OVERLAP`` meaningful keywords with the condition —
+        dumb, deterministic keyword overlap, precision over recall. The
+        signal is ``stale_when_match``. **Surfacing only** — nothing is
+        un-retired automatically; a human (or agent) follows up with
+        ``supersede`` if the condition really has been triggered.
+
+        Filterable by ``entity_path`` (exact + ``.`` prefix), ``project``,
+        and ``agent``. ``expires_when`` is ignored here; its evaluator lands
+        in v0.3.11.
 
         Each result is the event dict (NULL columns coalesced to ``""``) plus
-        four always-present keys: ``revisit_due`` (canonical UTC ISO),
-        ``days_overdue`` (int, ``0`` on the due day), ``active_use_signals``
-        (list of the signal names above), and ``stale_reason`` (a one-line
-        human-readable summary). Most-overdue first, capped at ``limit``.
+        seven always-present keys: ``flag`` (``revisit_due`` /
+        ``review_suggested``), ``revisit_due`` (canonical UTC ISO, ``""`` for
+        condition-only rows), ``days_overdue`` (int, ``0`` on the due day or
+        for condition-only rows), ``active_use_signals`` (list of signal
+        names), ``matched_terms`` (the overlapping keywords, ``[]`` when no
+        condition matched), ``matched_event_id`` (the most recent matching
+        event, ``""`` when none), and ``stale_reason`` (a one-line
+        human-readable summary). Date-due rows first (most overdue leading),
+        then condition matches; capped at ``limit``.
         """
         now_dt = (
             _parse_iso(normalize_timestamp(now)) if now else datetime.now(timezone.utc)
         )
 
-        clauses = ["revisit_after IS NOT NULL", "revisit_after != ''"]
+        clauses = [
+            "((revisit_after IS NOT NULL AND revisit_after != '') "
+            "OR (stale_when IS NOT NULL AND stale_when != ''))"
+        ]
         params: list = []
         if entity_path:
             canonical = canonicalize_entity_path(entity_path)
@@ -1130,46 +1432,96 @@ class SelvedgeStorage:
                 except (ValueError, TypeError):
                     continue
 
+            # Recent events, fetched once for the stale_when keyword scan.
+            # Newest-first and bounded — only recent changes can plausibly
+            # represent "the world changed since this decision".
+            has_stale_when = any(r["stale_when"] for r in candidates)
+            recent_events: list[dict] = []
+            if has_stale_when:
+                recent_events = [
+                    dict(r)
+                    for r in conn.execute(
+                        "SELECT id, timestamp, entity_path, reasoning, diff "
+                        "FROM events ORDER BY timestamp DESC LIMIT ?",
+                        (_STALE_WHEN_SCAN_LIMIT,),
+                    ).fetchall()
+                ]
+
             for row in candidates:
                 ev = dict(row)
-                try:
-                    due = resolve_revisit_due(ev["timestamp"], ev["revisit_after"])
-                except ValueError:
-                    # Unparseable revisit_after — skip rather than crash the query.
-                    continue
-                if due > now_dt:
-                    continue  # not due yet
-
                 ev_ts = _parse_iso(ev["timestamp"])
-                signals: list[str] = []
-                # Signal 1: the entity was queried at/after the decision.
-                if any(
-                    tc_dt >= ev_ts and _paths_related(tc_path, ev["entity_path"])
-                    for tc_path, tc_dt in tool_calls
-                ):
-                    signals.append("queried")
-                # Signal 2: a later sibling shares the decision's changeset.
-                if ev.get("changeset_id"):
-                    sibling = conn.execute(
-                        "SELECT 1 FROM events WHERE changeset_id = ? "
-                        "AND timestamp > ? AND id != ? LIMIT 1",
-                        (ev["changeset_id"], ev["timestamp"], ev["id"]),
-                    ).fetchone()
-                    if sibling is not None:
-                        signals.append("changeset_activity")
 
-                if not signals:
-                    continue  # pure age — active-use weighting drops it
+                # Rule 1: revisit date passed + active use.
+                due_dt = None
+                signals: list[str] = []
+                if ev["revisit_after"]:
+                    try:
+                        due = resolve_revisit_due(ev["timestamp"], ev["revisit_after"])
+                    except ValueError:
+                        due = None  # unparseable — skip the date rule, not the row
+                    if due is not None and due <= now_dt:
+                        # Signal 1: the entity was queried at/after the decision.
+                        if any(
+                            tc_dt >= ev_ts and _paths_related(tc_path, ev["entity_path"])
+                            for tc_path, tc_dt in tool_calls
+                        ):
+                            signals.append("queried")
+                        # Signal 2: a later sibling shares the decision's changeset.
+                        if ev.get("changeset_id"):
+                            sibling = conn.execute(
+                                "SELECT 1 FROM events WHERE changeset_id = ? "
+                                "AND timestamp > ? AND id != ? LIMIT 1",
+                                (ev["changeset_id"], ev["timestamp"], ev["id"]),
+                            ).fetchone()
+                            if sibling is not None:
+                                signals.append("changeset_activity")
+                        if signals:
+                            due_dt = due
+                        # else: pure age — active-use weighting drops the rule
+
+                # Rule 2: a later change event matches the stale_when condition.
+                matched_terms: list[str] = []
+                matched_event_id = ""
+                if ev["stale_when"]:
+                    condition_tokens = _keyword_tokens(ev["stale_when"])
+                    for cand in recent_events:  # newest first
+                        if cand["id"] == ev["id"]:
+                            continue
+                        if _parse_iso(cand["timestamp"]) <= ev_ts:
+                            continue
+                        overlap = condition_tokens & _keyword_tokens(
+                            f"{cand['entity_path']} {cand['reasoning']} {cand['diff']}"
+                        )
+                        if len(overlap) >= _STALE_WHEN_MIN_OVERLAP:
+                            matched_terms = sorted(overlap)
+                            matched_event_id = cand["id"]
+                            signals.append("stale_when_match")
+                            break
+
+                if due_dt is None and not matched_event_id:
+                    continue  # neither rule fired
 
                 annotated = {k: ("" if v is None else v) for k, v in ev.items()}
-                annotated["revisit_due"] = normalize_timestamp(due.isoformat())
-                annotated["days_overdue"] = max(0, (now_dt - due).days)
+                annotated["flag"] = "revisit_due" if due_dt is not None else "review_suggested"
+                annotated["revisit_due"] = (
+                    normalize_timestamp(due_dt.isoformat()) if due_dt is not None else ""
+                )
+                annotated["days_overdue"] = (
+                    max(0, (now_dt - due_dt).days) if due_dt is not None else 0
+                )
                 annotated["active_use_signals"] = signals
-                annotated["stale_reason"] = _stale_reason_text(signals)
+                annotated["matched_terms"] = matched_terms
+                annotated["matched_event_id"] = matched_event_id
+                annotated["stale_reason"] = _stale_reason_text(
+                    signals, matched_terms=matched_terms
+                )
                 results.append(annotated)
 
-        # Most overdue first (earliest due date), then cap.
-        results.sort(key=lambda r: r["revisit_due"])
+        # Date-due rows first (most overdue leading), then condition-only
+        # matches ordered by decision time. Deterministic, then cap.
+        results.sort(
+            key=lambda r: (r["revisit_due"] == "", r["revisit_due"] or r["timestamp"])
+        )
         return results[:limit]
 
     def summarize(

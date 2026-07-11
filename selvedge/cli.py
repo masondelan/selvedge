@@ -15,6 +15,7 @@ Commands:
   selvedge prior-attempts     Prior attempts on an entity + inferred outcome
   selvedge stale              Dated decisions now due for a revisit
   selvedge log                Manually log a change event
+  selvedge supersede          Re-open a reverted decision (append-only)
   selvedge migrate-paths      Re-canonicalize stored entity paths (backfill)
   selvedge stats              Tool-call coverage report
   selvedge install-hook       Install git post-commit hook
@@ -998,14 +999,24 @@ def diff(entity_path, limit, as_json):
     table.add_column("Reasoning")
 
     for row in rows:
+        change = row.get("change_type", "")
+        if row.get("superseded_by"):
+            change = f"{change} [dim](superseded)[/dim]"
         table.add_row(
             fmt_ts(row.get("timestamp", "")),
-            row.get("change_type", ""),
+            change,
             row.get("agent", "") or "—",
             row.get("diff", "") or "—",
             row.get("reasoning", "") or "—",
         )
     console.print(table)
+
+    # Derived decision state (v0.3.9.1) — the clear current-status line
+    # under the trail.
+    decision = storage.get_decision_status(entity_path)
+    status_styles = {"reverted": "red", "reopened": "cyan", "active": "green"}
+    style = status_styles.get(decision["status"], "dim")
+    console.print(f"  [dim]Status[/dim]  [{style}]{decision['status_line']}[/{style}]\n")
 
 
 # ---------------------------------------------------------------------------
@@ -1035,6 +1046,14 @@ def blame(entity_path, as_json):
         sys.exit(1)
 
     if as_json:
+        # Mirror the MCP blame tool: include the derived decision state so
+        # the two surfaces can't diverge.
+        decision = storage.get_decision_status(entity_path)
+        row["status"] = decision["status"]
+        row["superseded_by"] = next(
+            (e["superseded_by"] for e in decision["trail"] if e["id"] == row["id"]),
+            "",
+        )
         click.echo(json.dumps(row, indent=2))
         return
 
@@ -1054,9 +1073,21 @@ def blame(entity_path, as_json):
         console.print(f"  [dim]Project[/dim]    {row['project']}")
     if row.get("diff"):
         console.print(f"  [dim]Diff[/dim]       {row['diff']}")
+    if row.get("constraint"):
+        console.print(f"  [dim]Constraint[/dim] {row['constraint']}")
+    if row.get("stale_when"):
+        console.print(f"  [dim]Stale when[/dim] {row['stale_when']}")
+    if row.get("supersedes"):
+        console.print(f"  [dim]Supersedes[/dim] {row['supersedes'][:8]}")
     if row.get("reasoning"):
         console.print("\n  [dim]Reasoning:[/dim]")
         console.print(f"    {row['reasoning']}")
+
+    # Derived decision state (v0.3.9.1) — the clear current-status line.
+    decision = storage.get_decision_status(entity_path)
+    status_styles = {"reverted": "red", "reopened": "cyan", "active": "green"}
+    style = status_styles.get(decision["status"], "dim")
+    console.print(f"\n  [dim]Status[/dim]     [{style}]{decision['status_line']}[/{style}]")
     console.print()
 
 
@@ -1311,10 +1342,11 @@ def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
 
     label = entity or f'"{description}"'
     console.print(f"\n[bold]Prior attempts[/bold]  [dim]{label}[/dim]\n")
+    outcome_styles = {"reverted": "red", "reopened": "cyan", "active": "yellow"}
     for r in rows:
         outcome = r.get("outcome", "")
         confidence = r.get("confidence", "")
-        outcome_style = "red" if outcome == "reverted" else "yellow"
+        outcome_style = outcome_styles.get(outcome, "yellow")
         console.print(
             f"  [dim]{fmt_ts(r.get('timestamp', ''))}[/dim]  "
             f"[cyan]{r.get('entity_path', '')}[/cyan]  "
@@ -1322,11 +1354,27 @@ def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
             f"[{outcome_style}]{outcome}[/{outcome_style}]  "
             f"[dim]({confidence})[/dim]"
         )
+        # The trail, one line per step: tried → reverted → re-opened.
         if r.get("reasoning"):
-            console.print(f"    [dim]attempt:[/dim]  {r['reasoning']}")
-        if outcome == "reverted" and r.get("outcome_reasoning"):
-            console.print(f"    [dim]reverted:[/dim] {r['outcome_reasoning']}")
+            console.print(f"    [dim]tried:[/dim]     {r['reasoning']}")
+        if outcome in ("reverted", "reopened") and r.get("outcome_reasoning"):
+            console.print(f"    [dim]reverted:[/dim]  {r['outcome_reasoning']}")
+        if outcome == "reopened" and r.get("supersede_reasoning"):
+            console.print(f"    [dim]re-opened:[/dim] {r['supersede_reasoning']}")
         console.print()
+
+    # One clear current-status line per distinct entity in the result set.
+    statuses = {r["entity_path"]: r.get("current_status", "") for r in rows}
+    status_styles = {"reverted": "red", "reopened": "cyan", "active": "green"}
+    for path, status in sorted(statuses.items()):
+        if not status:
+            continue
+        style = status_styles.get(status, "dim")
+        console.print(
+            f"  [bold]current status[/bold]  [cyan]{path}[/cyan]  "
+            f"[{style}]{status}[/{style}]"
+        )
+    console.print()
 
 
 # ---------------------------------------------------------------------------
@@ -1346,14 +1394,19 @@ def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
 @click.option("--limit", "-n", default=20, show_default=True, help="Number of results")
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
 def stale_cmd(entity, project, agent, limit, as_json):
-    """Show dated decisions now due for a revisit (and still in active use).
+    """Show decisions now due for a revisit.
 
     \b
-    The date-based half of active memory (v0.3.8): decisions whose
-    `revisit_after` has passed AND whose entity is still live (recently
-    queried, or its changeset kept moving). Pure age never surfaces here, so
-    an old-but-correct decision nobody touches won't nag. `--json` is built
-    for cron / Slack / digest jobs.
+    Two surfacing rules (see the `flag` field):
+      revisit_due       — `revisit_after` has passed AND the entity is still
+                          live (recently queried, or its changeset kept
+                          moving). Pure age never surfaces, so an
+                          old-but-correct decision nobody touches won't nag.
+      review_suggested  — a later change event keyword-matched the decision's
+                          `stale_when` condition (v0.3.9.1). Surfacing only —
+                          follow up with `selvedge supersede` if the
+                          condition really was triggered.
+    `--json` is built for cron / Slack / digest jobs.
 
     \b
     Examples:
@@ -1384,19 +1437,30 @@ def stale_cmd(entity, project, agent, limit, as_json):
         show_lines=False,
         header_style="bold",
     )
-    table.add_column("Entity", style="bold cyan")
+    # No "Logged" column — with the Flag column added (v0.3.9.1) it pushed
+    # the table past 80 cols and Rich truncated the entity paths, which are
+    # the one thing this view must always show. The due date carries the
+    # relevant time signal.
+    table.add_column("Entity", style="bold cyan", overflow="fold")
     table.add_column("Change", style="green")
-    table.add_column("Logged", style="dim", no_wrap=True)
+    table.add_column("Flag", no_wrap=True)
     table.add_column("Due", style="dim", no_wrap=True)
     table.add_column("Overdue", justify="right")
     table.add_column("Why", overflow="fold")
     for r in rows:
+        flag = r.get("flag", "revisit_due")
+        flag_cell = (
+            "[yellow]review[/yellow]"
+            if flag == "review_suggested"
+            else "[red]due[/red]"
+        )
+        overdue = f"{r.get('days_overdue', 0)}d" if r.get("revisit_due") else "—"
         table.add_row(
             r.get("entity_path", ""),
             r.get("change_type", ""),
-            fmt_ts(r.get("timestamp", "")),
+            flag_cell,
             fmt_ts(r.get("revisit_due", "")),
-            f"{r.get('days_overdue', 0)}d",
+            overdue,
             r.get("stale_reason", ""),
         )
     console.print(table)
@@ -1553,13 +1617,33 @@ _CHANGE_TYPE_CHOICES = [ct.value for ct in ChangeType]
     help="Old path when CHANGE_TYPE is 'rename'; ENTITY_PATH is the new path. "
     "Records the dual-event rename pattern (rename on old + create on new).",
 )
-def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, commit, project, changeset, revisit_after, rename_from):
+@click.option(
+    "--constraint",
+    default="",
+    help="The testable principle behind this decision, kept queryable "
+    "(e.g. 'card data in our own DB = PCI scope').",
+)
+@click.option(
+    "--stale-when",
+    default="",
+    help="What would invalidate this decision, as a short phrase "
+    "(e.g. 'payment provider changed'). `selvedge stale` matches it against "
+    "later events and flags 'review suggested'.",
+)
+@click.option(
+    "--supersedes",
+    default="",
+    help="Event id this change overrides. Only valid with CHANGE_TYPE "
+    "'supersede'; empty auto-links the latest remove/delete on the entity. "
+    "Prefer `selvedge supersede` for the guided flow.",
+)
+def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, commit, project, changeset, revisit_after, rename_from, constraint, stale_when, supersedes):
     """Manually log a change event.
 
     \b
     CHANGE_TYPE must be one of:
       add, remove, modify, rename, retype, create, delete,
-      index_add, index_remove, migrate
+      index_add, index_remove, migrate, supersede
 
     \b
     Examples:
@@ -1572,6 +1656,11 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
     if rename_from and change_type != "rename":
         err_console.print(
             "[red]error:[/red] --rename-from is only valid with CHANGE_TYPE 'rename'"
+        )
+        sys.exit(2)
+    if supersedes and change_type != "supersede":
+        err_console.print(
+            "[red]error:[/red] --supersedes is only valid with CHANGE_TYPE 'supersede'"
         )
         sys.exit(2)
 
@@ -1598,6 +1687,21 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
                 changeset_id=changeset,
             )
             stored = events[-1]
+        elif change_type == "supersede":
+            # Route through the supersede writer so the link to the prior
+            # reverted event is validated/auto-resolved in one place — same
+            # path the MCP log_change tool takes.
+            stored = storage.log_supersede(
+                entity_path,
+                reasoning=reasoning,
+                constraint=constraint,
+                stale_when=stale_when,
+                supersedes=supersedes,
+                agent=agent,
+                git_commit=commit,
+                project=project,
+                changeset_id=changeset,
+            )
         else:
             event = ChangeEvent(
                 entity_path=entity_path,
@@ -1610,6 +1714,8 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
                 project=project,
                 changeset_id=changeset,
                 revisit_after=normalized_revisit,
+                constraint=constraint,
+                stale_when=stale_when,
             )
             stored = storage.log_event(event)
     except ValueError as e:
@@ -1621,6 +1727,12 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
         console.print(
             f"[green]✓[/green] Renamed [bold]{rename_from}[/bold] → "
             f"[bold]{stored.entity_path}[/bold]  [dim]{stored.id[:8]}[/dim]{suffix}"
+        )
+    elif change_type == "supersede":
+        console.print(
+            f"[green]✓[/green] Superseded [dim]{stored.supersedes[:8]}[/dim] on "
+            f"[bold]{stored.entity_path}[/bold] — decision re-opened  "
+            f"[dim]{stored.id[:8]}[/dim]{suffix}"
         )
     else:
         console.print(
@@ -1636,6 +1748,102 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
         stored.change_type, stored.entity_type, stored.revisit_after
     )
     for warning in warnings:
+        err_console.print(f"[yellow]warning:[/yellow] {warning}")
+
+
+# ---------------------------------------------------------------------------
+# supersede (re-open a reverted decision, v0.3.9.1)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("supersede")
+@click.argument("entity_path")
+@click.option(
+    "--reasoning",
+    "-r",
+    required=True,
+    help="Why the reverted decision no longer stands — what changed in the world.",
+)
+@click.option(
+    "--constraint",
+    default="",
+    help="The (now-lifted or new) testable principle, kept queryable.",
+)
+@click.option(
+    "--stale-when",
+    default="",
+    help="What would invalidate THIS new verdict, for future stale-checking.",
+)
+@click.option(
+    "--supersedes",
+    default="",
+    help="Explicit event id to override. Default: the entity's most recent "
+    "remove/delete event.",
+)
+@click.option("--agent", default="", help="Agent or author name")
+@click.option("--commit", default="", help="Git commit hash")
+@click.option("--project", default="", help="Project name")
+@click.option("--changeset", "-c", default="", help="Changeset ID to group related changes")
+@click.option("--json", "as_json", is_flag=True, help="Output the stored event as JSON")
+def supersede_cmd(entity_path, reasoning, constraint, stale_when, supersedes, agent, commit, project, changeset, as_json):
+    """Re-open a reverted decision — append-only, never rewrites history.
+
+    \b
+    A reverted decision is not a permanent ban: when the constraint that
+    killed it no longer holds (provider changed, requirement dropped, scale
+    tipped), record a supersede. Selvedge logs a new change event of type
+    'supersede' linking the prior reverted event; prior-attempts / blame /
+    diff then read the full trail: tried → reverted → re-opened.
+
+    \b
+    There is deliberately no automatic un-retiring — this command IS the
+    explicit re-open step.
+
+    \b
+    Examples:
+      selvedge supersede payments.card_token -r "Provider now vaults cards — PCI constraint gone."
+      selvedge supersede users.sso_token -r "..." --constraint "tokens must be short-lived"
+      selvedge supersede users.sso_token -r "..." --supersedes 3fa2b1c0-...
+    """
+    storage = get_storage()
+    try:
+        stored = storage.log_supersede(
+            entity_path,
+            reasoning=reasoning,
+            constraint=constraint,
+            stale_when=stale_when,
+            supersedes=supersedes,
+            agent=agent,
+            git_commit=commit,
+            project=project,
+            changeset_id=changeset,
+        )
+    except ValueError as e:
+        err_console.print(f"[red]error:[/red] {e}")
+        sys.exit(2)
+
+    decision = storage.get_decision_status(stored.entity_path)
+
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    **stored.to_dict(),
+                    "status": decision["status"],
+                    "status_line": decision["status_line"],
+                },
+                indent=2,
+            )
+        )
+        return
+
+    console.print(
+        f"[green]✓[/green] Superseded [dim]{stored.supersedes[:8]}[/dim] on "
+        f"[bold]{stored.entity_path}[/bold]  [dim]{stored.id[:8]}[/dim]"
+    )
+    console.print(f"  [dim]Status[/dim]  [green]{decision['status_line']}[/green]")
+
+    for warning in check_reasoning_quality(reasoning):
         err_console.print(f"[yellow]warning:[/yellow] {warning}")
 
 

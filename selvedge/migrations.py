@@ -106,6 +106,24 @@ MIGRATIONS: tuple[Migration, ...] = (
         # bootstrap path records v3 as applied without re-running the ALTERs.
         bootstrap_check=lambda conn: _column_exists(conn, "events", "revisit_after"),
     ),
+    Migration(
+        version=4,
+        name="add_supersede_columns_to_events",
+        # Decision states + supersede flow (v0.3.9.1). Three NULLABLE TEXT
+        # columns, same metadata-only ALTER pattern as v3 — no NOT NULL, no
+        # DEFAULT, so SQLite does not rewrite the table and the migration is
+        # instant even on multi-million-event installs. `constraint` is a SQL
+        # reserved word, hence the quoting; the quoted identifier round-trips
+        # as the plain dict key "constraint" everywhere else.
+        statements=(
+            "ALTER TABLE events ADD COLUMN supersedes TEXT",
+            'ALTER TABLE events ADD COLUMN "constraint" TEXT',
+            "ALTER TABLE events ADD COLUMN stale_when TEXT",
+        ),
+        # Fresh 0.3.9.1+ databases get all three from CREATE_TABLE_SQL; the
+        # bootstrap path records v4 as applied without re-running the ALTERs.
+        bootstrap_check=lambda conn: _column_exists(conn, "events", "supersedes"),
+    ),
 )
 
 

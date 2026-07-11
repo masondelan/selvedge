@@ -44,6 +44,7 @@ dev = [
 [project.scripts]
 selvedge = "selvedge.cli:cli"
 selvedge-server = "selvedge.server:main"
+selvedge-hook = "selvedge.hooks.cli:main"
 
 [project.urls]
 Homepage = "https://selvedge.sh"
@@ -138,4 +139,11 @@ disallow_untyped_decorators = true
 
 [[tool.mypy.overrides]]
 module = "mcp.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# tomllib is stdlib only on 3.11+; mypy runs with python_version = "3.10"
+# where neither it nor the optional tomli backport resolves. The hook's
+# import dance handles absence at runtime.
+module = ["tomllib", "tomli"]
 ignore_missing_imports = true

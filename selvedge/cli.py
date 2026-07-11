@@ -2372,7 +2372,13 @@ def _diagnose_empty_state(storage: SelvedgeStorage) -> list[str]:
     is_flag=True,
     help="Don't install the git post-commit hook.",
 )
-def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook):
+@click.option(
+    "--skip-enforcement-hook",
+    is_flag=True,
+    help="Don't install the Claude Code PreToolUse enforcement hook "
+    "(.claude/settings.json).",
+)
+def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook, skip_enforcement_hook):
     """Interactive first-run wizard — wires Selvedge into your AI tools.
 
     \b
@@ -2381,6 +2387,9 @@ def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook):
       • install Selvedge's MCP entry into each tool's config
       • drop the canonical agent-instructions block into CLAUDE.md /
         .cursorrules / copilot-instructions.md
+      • install the PreToolUse enforcement hook into the project's
+        .claude/settings.json (Claude Code only) — blocks schema/migration
+        edits until prior_attempts has been checked this session
       • run `selvedge init` if .selvedge/ doesn't exist
       • install the post-commit hook for git_commit backfill
 
@@ -2415,6 +2424,7 @@ def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook):
         force=force,
         install_hook=not skip_hook,
         init_project_dir=not skip_init,
+        install_enforcement_hook=not skip_enforcement_hook,
         confirm=confirm,
     )
 

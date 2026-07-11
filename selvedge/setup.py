@@ -234,6 +234,95 @@ def install_mcp_entry(
 
 
 # ---------------------------------------------------------------------------
+# PreToolUse enforcement hook installer (v0.3.9.1)
+# ---------------------------------------------------------------------------
+
+#: The command Claude Code runs on each gated tool call. Ships as a console
+#: script with the package, so it's on PATH wherever `selvedge` is.
+HOOK_COMMAND = "selvedge-hook pretooluse"
+
+#: Tools the hook intercepts. Must stay in sync with
+#: ``selvedge.hooks.pretooluse._WATCHED_TOOLS``.
+HOOK_MATCHER = "Edit|Write|MultiEdit|NotebookEdit|Bash"
+
+
+def _desired_hook_entry() -> dict:
+    return {
+        "matcher": HOOK_MATCHER,
+        "hooks": [{"type": "command", "command": HOOK_COMMAND}],
+    }
+
+
+def install_pretooluse_hook(
+    settings_path: Path,
+    *,
+    write_backup: bool = True,
+) -> ConfigWriteResult:
+    """Idempotently merge the Selvedge PreToolUse hook into ``settings_path``.
+
+    Targets the project's ``.claude/settings.json`` (Claude Code's checked-in
+    project settings). Behavior matrix mirrors :func:`install_mcp_entry`:
+
+      - File doesn't exist → create with just our hook       → ``"created"``
+      - No ``hooks.PreToolUse`` selvedge entry → append ours → ``"added"``
+      - A PreToolUse entry already runs ``selvedge-hook pretooluse``
+        → no-op                                              → ``"unchanged"``
+      - Malformed JSON / non-object shapes → ``"error"`` (no write)
+
+    A ``.bak`` is written before any modification when ``write_backup=True``.
+    Existing non-Selvedge hooks are never touched — we only ever append.
+    """
+    desired = _desired_hook_entry()
+
+    if not settings_path.exists():
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps({"hooks": {"PreToolUse": [desired]}}, indent=2) + "\n"
+        )
+        return ConfigWriteResult("created", settings_path)
+
+    raw = settings_path.read_text()
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError as e:
+        return ConfigWriteResult(
+            "error",
+            settings_path,
+            detail=(
+                f"existing settings file is not valid JSON ({e.msg} at line "
+                f"{e.lineno}); fix it first and rerun"
+            ),
+        )
+    if not isinstance(data, dict):
+        return ConfigWriteResult(
+            "error",
+            settings_path,
+            detail="existing settings file is JSON but the top level is not an object",
+        )
+
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    pretooluse = hooks.get("PreToolUse")
+    if not isinstance(pretooluse, list):
+        pretooluse = []
+
+    for entry in pretooluse:
+        if not isinstance(entry, dict):
+            continue
+        for hook in entry.get("hooks", []) or []:
+            if isinstance(hook, dict) and HOOK_COMMAND in str(hook.get("command", "")):
+                return ConfigWriteResult("unchanged", settings_path)
+
+    backup_path = _write_backup(settings_path, raw) if write_backup else None
+    pretooluse.append(desired)
+    hooks["PreToolUse"] = pretooluse
+    data["hooks"] = hooks
+    settings_path.write_text(json.dumps(data, indent=2) + "\n")
+    return ConfigWriteResult("added", settings_path, backup_path)
+
+
+# ---------------------------------------------------------------------------
 # Wizard orchestration
 # ---------------------------------------------------------------------------
 
@@ -269,6 +358,7 @@ def run_wizard(
     force: bool = False,
     install_hook: bool = True,
     init_project_dir: bool = True,
+    install_enforcement_hook: bool = True,
     confirm: Callable[[str, bool], bool] | None = None,
     init_fn: Callable[[Path], None] | None = None,
     install_hook_fn: Callable[[Path], None] | None = None,
@@ -316,6 +406,42 @@ def run_wizard(
                 outcome=outcome,
                 force=force,
                 confirm=confirm,
+            )
+
+    # --- Step 1b: PreToolUse enforcement hook (Claude Code only, v0.3.9.1) ---
+    # Default-on: the CLAUDE.md "check prior_attempts first" instruction is
+    # probabilistic; the hook makes it deterministic. Offered only when
+    # Claude Code was detected — the hook protocol is Claude Code's.
+    if install_enforcement_hook and any(a.name == "claude-code" for a in agents):
+        settings_path = project / ".claude" / "settings.json"
+        if not confirm(
+            f"Install the Selvedge PreToolUse enforcement hook into "
+            f"{settings_path}? (blocks schema/migration edits until "
+            "prior_attempts is checked)",
+            True,
+        ):
+            outcome.add(
+                StepResult(
+                    "PreToolUse enforcement hook",
+                    "skipped",
+                    detail="user declined",
+                )
+            )
+        else:
+            result = install_pretooluse_hook(settings_path)
+            hook_status: dict[str, Literal["ok", "noop", "error"]] = {
+                "created": "ok",
+                "added": "ok",
+                "unchanged": "noop",
+                "error": "error",
+            }
+            outcome.add(
+                StepResult(
+                    "PreToolUse enforcement hook",
+                    hook_status.get(result.action, "error"),
+                    detail=result.detail or str(result.path),
+                    backup_path=result.backup_path,
+                )
             )
 
     # --- Step 2: selvedge init in the project ---
@@ -542,10 +668,13 @@ __all__ = [
     "AgentName",
     "AgentTarget",
     "ConfigWriteResult",
+    "HOOK_COMMAND",
+    "HOOK_MATCHER",
     "StepResult",
     "WizardOutcome",
     "detect_agents",
     "install_mcp_entry",
+    "install_pretooluse_hook",
     "render_block",
     "run_wizard",
 ]

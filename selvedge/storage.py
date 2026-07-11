@@ -779,6 +779,29 @@ class SelvedgeStorage:
             # failure is visible if SELVEDGE_LOG_LEVEL=DEBUG, but swallow.
             logger.exception("selvedge.storage: failed to record tool call %r", tool_name)
 
+    def get_tool_query_paths(self, tool_name: str, since: str = "") -> list[str]:
+        """Canonicalized entity paths passed to ``tool_name`` calls since ``since``.
+
+        Powers the PreToolUse enforcement hook's "was prior_attempts queried
+        for this entity in this session?" check (v0.3.9.1). Reads the same
+        local-only ``tool_calls`` telemetry both the MCP tools and the CLI
+        commands write to, so a query on either surface satisfies the hook.
+        Paths are canonicalized here because ``tool_calls`` stores the raw
+        agent-supplied value (same posture as ``get_stale_decisions``).
+        """
+        clauses = ["tool_name = ?", "entity_path != ''"]
+        params: list = [tool_name]
+        if since:
+            clauses.append("timestamp >= ?")
+            params.append(since)
+        sql = (
+            f"SELECT DISTINCT entity_path FROM tool_calls "
+            f"WHERE {' AND '.join(clauses)}"
+        )
+        with self._session() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [canonicalize_entity_path(r["entity_path"]) for r in rows]
+
     def get_last_tool_call_timestamp(self) -> str | None:
         """
         Return the most recent ``tool_calls`` timestamp, or None if empty.

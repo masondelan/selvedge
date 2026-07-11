@@ -1,0 +1,23 @@
+{
+    "name": "Selvedge",
+    "id": "selvedge",
+    "version": "1.0.0",
+    "description": "Long-term memory for AI-coded codebases — a `git blame` for AI agents, for the *why*, not just which line which model touched. Captured live, by the agent, as the change happens.",
+    "documentationURL": "https://github.com/masondelan/selvedge/tree/main/features/src/selvedge",
+    "licenseURL": "https://github.com/masondelan/selvedge/blob/main/LICENSE",
+    "options": {
+        "version": {
+            "type": "string",
+            "proposals": [
+                "latest",
+                "0.3.9"
+            ],
+            "default": "latest",
+            "description": "Version of the selvedge PyPI package to install ('latest' or an exact version such as '0.3.9')."
+        }
+    },
+    "installsAfter": [
+        "ghcr.io/devcontainers/features/common-utils",
+        "ghcr.io/devcontainers/features/python"
+    ]
+}

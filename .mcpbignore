@@ -36,6 +36,16 @@ htmlcov/
 .gitignore
 .dockerignore
 action.yml
+.pre-commit-hooks.yaml
+
+# Distribution shims that live in this repo but publish elsewhere
+# (npm registry / GHCR) — keep them out of the Python MCPB bundle.
+npm/
+features/
+
+# Ops infrastructure (telemetry receiver worker) — deploys to Cloudflare,
+# not into the bundle.
+infra/
 
 # Internal docs that shouldn't ship to end users
 CLAUDE.md

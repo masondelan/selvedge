@@ -1,0 +1,44 @@
+# Pre-commit hooks exposed by the Selvedge repo (https://pre-commit.com).
+#
+# Consumer repos reference these from their .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/masondelan/selvedge
+#       rev: v0.3.10   # first tag that contains .pre-commit-hooks.yaml
+#       hooks:
+#         - id: selvedge-verify
+#
+# Full usage guide: docs/pre-commit.md
+#
+# Both hooks are deterministic CLI commands — no LLM calls, no network.
+# `language: python` means the pre-commit framework pip-installs this repo
+# into an isolated virtualenv at the pinned rev (Python >= 3.10 required).
+# Both hooks read the store resolved by Selvedge's normal precedence chain
+# (SELVEDGE_DB env var, then walk-up to the project's .selvedge/).
+
+- id: selvedge-verify
+  name: selvedge verify (store correctness)
+  description: >-
+    Run Selvedge's correctness checks against the project's .selvedge store.
+    Must-fail findings (SQLite corruption, schema mismatch, invariant
+    violations) block the commit; should-warn signals (singleton changesets,
+    events past the backfill window with no git_commit) do not. Add
+    args: ["--strict"] to escalate warnings too. Requires an initialized
+    store — a missing DB is a deliberate failure, not a silent pass.
+  entry: selvedge verify
+  language: python
+  pass_filenames: false
+  always_run: true
+
+- id: selvedge-doctor
+  name: selvedge doctor (health check)
+  description: >-
+    PASS/WARN/FAIL ambient-state health check — DB path resolution, schema
+    version (downgrade detection), post-commit hook presence and silent
+    failures, MCP wiring, backup freshness, tool_calls size. Exits non-zero
+    only on FAIL rows, so warnings never block a commit. Broader and chattier
+    than selvedge-verify; consider stages: [pre-push] or [manual].
+  entry: selvedge doctor
+  language: python
+  pass_filenames: false
+  always_run: true

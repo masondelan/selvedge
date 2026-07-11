@@ -1,0 +1,44 @@
+# Dev container feature publishing.
+#
+# Publishes everything under features/src/ to GHCR as OCI artifacts, which
+# makes this resolvable in any devcontainer.json:
+#
+#     "features": { "ghcr.io/masondelan/selvedge/selvedge:1": {} }
+#
+# Intentionally gated on workflow_dispatch ONLY — nothing runs on push or
+# tag until Mason triggers it by hand from the Actions tab. When enabling
+# for real, consider also publishing on release tags.
+#
+# Post-first-publish checklist (one-time, manual):
+#   1. github.com/masondelan → Packages → the new `selvedge/selvedge`
+#      package → Package settings → Change visibility → Public. Without
+#      this, consumers get auth errors pulling the feature.
+#   2. Verify with: devcontainer features info manifest \
+#        ghcr.io/masondelan/selvedge/selvedge
+#   3. Optionally add the feature to the devcontainers collection index
+#      (github.com/devcontainers/devcontainers.github.io, collection-index.yml).
+
+name: Publish dev container features
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Publish features to GHCR
+        uses: devcontainers/action@v1
+        with:
+          publish-features: "true"
+          base-path-to-features: "./features/src"
+          # README.md in features/src/selvedge/ is hand-maintained; the
+          # action's auto-generated docs would clobber it via a bot PR.
+          generate-docs: "false"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

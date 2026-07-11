@@ -1,0 +1,39 @@
+{
+  "name": "selvedge-mcp",
+  "version": "0.3.9",
+  "description": "Long-term memory for AI-coded codebases — a `git blame` for AI agents, for the *why*, not just which line which model touched. Captured live, by the agent, as the change happens. (npx shim for the Python `selvedge` MCP server on PyPI.)",
+  "bin": {
+    "selvedge-mcp": "bin/selvedge-mcp.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "ai",
+    "claude",
+    "cursor",
+    "changelog",
+    "codebase",
+    "memory",
+    "devtools",
+    "selvedge"
+  ],
+  "author": "Mason Delan <masondelan@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://selvedge.sh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/masondelan/selvedge.git",
+    "directory": "npm"
+  },
+  "bugs": {
+    "url": "https://github.com/masondelan/selvedge/issues"
+  }
+}

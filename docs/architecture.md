@@ -168,10 +168,10 @@ Get all events belonging to a `changeset_id`, oldest first. Use to reconstruct t
 Full-text substring search across `entity_path`, `diff`, `reasoning`, `agent`.
 
 ### `prior_attempts`
-Given an `entity_path` or a free-text `description`, return prior change attempts on that entity, each annotated with an inferred `outcome` (`reverted` / `active`), a `confidence` (`proximity_high` / `proximity_low`), and `outcome_reasoning` (why a reverted attempt was rejected). Outcome is inferred from add→remove proximity within a configurable window (explicit `reject`/`revert` change types arrive in v0.3.11). Conservative-recall: `min_confidence` defaults to `proximity_high`, so an empty list is the preferred answer over a false positive. Templated, no LLM, pull-only.
+Given an `entity_path` or a free-text `description`, return prior change attempts on that entity, each annotated with an inferred `outcome` (`reverted` / `reopened` / `active`), a `confidence` (`proximity_high` / `proximity_low`), `outcome_reasoning` (why a reverted attempt was rejected), and — since v0.3.9.1 — the supersede-trail fields `superseded_by`, `supersede_reasoning`, `current_status`, plus `match_type` / `similarity`. Outcome is inferred from add→remove proximity within a configurable window, upgraded by explicit `revert` events (v0.3.9.1) and explicit supersede links; the `reject` type arrives in v0.3.11. An optional `fuzzy` query adds semantically similar records via the `selvedge[semantic]` extra (substring fallback with a note when absent). Conservative-recall: `min_confidence` defaults to `proximity_high`, so an empty list is the preferred answer over a false positive. Templated, no LLM in core, pull-only.
 
 ### `stale_decisions`
-Return events whose `revisit_after` has passed AND whose entity is still in active use (v0.3.8). The required active-use signal is one of: the entity was queried (`blame` / `diff` / `prior_attempts`) at or after the decision was logged, or the decision's `changeset_id` saw later sibling activity — **pure age alone never surfaces**, which is the noise defense against old-but-correct decisions. Filterable by `entity_path`, `project`, `agent`. Each result is the event plus `revisit_due`, `days_overdue`, `active_use_signals`, and a templated `stale_reason`. Date-based only in v0.3.8; `expires_when` evaluation arrives in v0.3.11. Templated, no LLM.
+Two surfacing rules since v0.3.9.1, both deterministic. **Date-based** (`flag="revisit_due"`, v0.3.8): events whose `revisit_after` has passed AND whose entity is still in active use — queried (`blame` / `diff` / `prior_attempts`) at or after the decision, or the decision's `changeset_id` saw later sibling activity; **pure age alone never surfaces**, which is the noise defense against old-but-correct decisions. **Condition-based** (`flag="review_suggested"`, v0.3.9.1): events whose `stale_when` text keyword-overlaps a *later* change event (≥2 meaningful tokens) — the named invalidation evidence may have happened; surfacing only, the follow-up is an explicit `supersede`. Filterable by `entity_path`, `project`, `agent`. Each result is the event plus `flag`, `revisit_due`, `days_overdue`, `active_use_signals`, `matched_terms`, `matched_event_id`, and a templated `stale_reason`. `expires_when` evaluation arrives in v0.3.11. Templated, no LLM.
 
 ---
 
@@ -190,17 +190,22 @@ selvedge history --project my-api
 selvedge search "billing"                  # full-text search
 selvedge prior-attempts users.auth_token   # prior attempts + inferred outcome (CLI parity, v0.3.8)
 selvedge prior-attempts -d "sso token" --all  # free-text mode, widened recall
-selvedge stale                             # dated decisions now due for a revisit (v0.3.8)
+selvedge prior-attempts --fuzzy "payment tokens"  # semantic recall (v0.3.9.1, selvedge[semantic])
+selvedge supersede payments.card_token -r "Provider vaults cards now."  # re-open a reverted decision (v0.3.9.1)
+selvedge index                             # build/update the optional embeddings index (v0.3.9.1)
+selvedge stale                             # decisions due: revisit_after passed, or stale_when matched (v0.3.9.1)
 selvedge stale --json                      # cron / Slack-friendly
 selvedge log users.phone add --reasoning "2FA" --agent me  # manual entry
 selvedge log users table add --revisit-after 90d --reasoning "..."  # dated decision (v0.3.8)
 selvedge log new.path rename --rename-from old.path        # dual-event rename
+selvedge log payments add --constraint "..." --stale-when "..."  # structured decision fields (v0.3.9.1)
 selvedge migrate-paths                     # dry-run re-canonicalization + collisions report
 selvedge migrate-paths --apply             # write canonical entity_paths (backfill)
 selvedge stats                             # tool call coverage (per-tool, per-agent, missing-reasoning)
 selvedge doctor                            # PASS/WARN/FAIL health check (DB path, schema, hook, MCP wiring)
 selvedge import ./migrations/              # backfill from SQL/Alembic migration files
 selvedge import ./migrations/ --dry-run   # preview without writing
+selvedge import --from-git --since v0.3.0  # seed pre-Selvedge reverts from git history (v0.3.9.1)
 selvedge export --since 30d --output history.json
 selvedge install-hook                      # install git post-commit hook
 selvedge backfill-commit --hash abc123     # manually backfill a git commit hash
@@ -282,6 +287,13 @@ Rules:
 - Before editing an entity, call selvedge.prior_attempts on it — if the same change
   was tried before and reverted, you'll see the prior reasoning and why it was
   rejected, and can change your plan instead of repeating a rejected approach.
+  (If the Selvedge PreToolUse hook is installed, this check is enforced:
+  schema/migration edits are blocked until prior_attempts has been consulted
+  this session.)
+- A reverted decision is not a permanent ban. If the constraint that killed it
+  no longer holds, re-open it explicitly with change_type="supersede" (never
+  re-apply a reverted change without superseding it first). Use
+  change_type="revert" when you roll a change back — clearer than a plain remove.
 - Then call selvedge.diff or selvedge.blame for the entity's broader history before
   conflicting with past decisions.
 
@@ -293,6 +305,7 @@ context light, use the equivalents:
   selvedge diff for its broader history.
 - Log a change: selvedge log <entity> <change_type> --reasoning "<why>"
   (for a rename add --rename-from <old>).
+- Re-open a reverted decision: selvedge supersede <entity> --reasoning "<why>".
 - Find things: selvedge search "<query>", selvedge history --since 7d,
   selvedge stale (decisions now due for a revisit).
 Add --json to any read command; selvedge <command> --help gives detail on demand.
@@ -984,11 +997,14 @@ github.com).
       they can be evaluated from local state only — no network, no
       LLM.
 - [ ] **New `change_type` values: `reject` and `revert`** — added
-      to the `ChangeType` enum. `reject` records "we considered this
-      and decided against it" without writing the change; `revert`
-      records "we tried this and rolled it back," distinct from a
-      regular `remove`. No new MCP tool — logged via existing
-      `log_change`. **Adoption defended on three surfaces:**
+      to the `ChangeType` enum. *(Update: `revert` shipped early in
+      v0.3.9.1 — the git-history importer needed it; see CHANGELOG.
+      `reject` remains this phase's item, alongside `supersede`
+      which also landed in v0.3.9.1.)* `reject` records "we
+      considered this and decided against it" without writing the
+      change; `revert` records "we tried this and rolled it back,"
+      distinct from a regular `remove`. No new MCP tool — logged via
+      existing `log_change`. **Adoption defended on three surfaces:**
       `log_change` docstring gains a worked example for the
       rejection use case; `selvedge.prompt.PROMPT_BLOCK` gains a
       sentence telling agents to log rejections (the load-bearing

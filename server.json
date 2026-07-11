@@ -3,7 +3,7 @@
   "name": "io.github.masondelan/selvedge",
   "title": "Selvedge",
   "description": "Long-term memory for AI-coded codebases — agents log the why behind every change and read it back.",
-  "version": "0.3.9",
+  "version": "0.3.9.1",
   "websiteUrl": "https://selvedge.sh",
   "repository": {
     "url": "https://github.com/masondelan/selvedge",
@@ -15,7 +15,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "selvedge",
-      "version": "0.3.9",
+      "version": "0.3.9.1",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

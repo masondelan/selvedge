@@ -6,6 +6,125 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.9.1] — 2026-07-10
+
+**The dev.to feedback release.** Every item here was publicly promised as
+"planned for a following version" in the comment replies to the launch post
+([*My AI agent tried to ship a mistake we'd already reverted*](https://dev.to/masondelan/my-ai-agent-tried-to-ship-a-mistake-wed-already-reverted-4737)).
+Five improvements from five threads of community feedback: decision states +
+an explicit supersede flow, a PreToolUse enforcement hook, structured
+constraint / stale-condition fields, git-history backfill, and optional
+semantic recall. The store stays append-only and the core stays zero-LLM /
+zero-network throughout.
+
+**Why a four-segment version:** PEP 440 allows it, and the release is a
+direct patch-series on the v0.3.9 launch narrative — the schema migration
+(v4) is three nullable, default-less `ADD COLUMN`s, the same metadata-only
+class as v0.3.8's migration v3, instant at any DB size. Drop-in upgrade for
+anyone on 0.3.9.
+
+### Added
+
+- **Supersede flow — "reverted" is no longer a permanent ban** (thread:
+  Nazar Boyko, Armorer Labs, Mudassir Khan, Alex Shev). New
+  `change_type="supersede"` re-opens a reverted decision by linking the
+  prior event via the new `supersedes` field; records stay append-only —
+  a re-open is a new fact, never an edit. `log_change` gained
+  `supersedes` / `constraint` / `stale_when` parameters instead of a ninth
+  MCP tool (mirrors the `rename_from` precedent; keeps the surface at
+  **8 tools**). Auto-links the entity's most recent remove/delete when no
+  explicit id is given; refuses to supersede nothing. New CLI:
+  `selvedge supersede ENTITY --reasoning ... [--constraint] [--stale-when]
+  [--supersedes ID]`. Explicit supersede only — **no automatic
+  un-retiring, by design** ("I don't trust auto un-retire yet").
+- **Derived decision states + full trail.** `prior_attempts` results gain
+  `outcome="reopened"`, `superseded_by`, `supersede_reasoning`, and
+  `current_status`; `blame` gains `status` + `superseded_by`; `diff` rows
+  gain `superseded_by`. The CLI renders the arc with a clear status line:
+  **tried → reverted → re-opened**. New storage surface
+  `get_decision_status(entity)` returns the status + phase-annotated trail.
+- **Structured decision fields** (thread: Armorer Labs, Raffaele Zarrelli).
+  `constraint` — the testable principle behind a decision ("card data in
+  our own DB = PCI scope") — and `stale_when` — the evidence that would
+  invalidate it ("payment provider changed") — are now first-class,
+  queryable columns alongside free-text reasoning. `stale_decisions` grew a
+  second rule: a decision whose `stale_when` keyword-overlaps a *later*
+  change event (≥2 meaningful tokens — dumb, deterministic overlap on
+  purpose) is flagged `review_suggested`. Surfacing only; the follow-up is
+  an explicit `supersede`. Results now carry `flag`, `matched_terms`,
+  `matched_event_id`.
+- **PreToolUse enforcement hook** (thread: René Zander, Tae Kim). The
+  CLAUDE.md "check prior_attempts first" instruction was probabilistic;
+  agents skip it. New `selvedge-hook pretooluse` console script intercepts
+  Edit/Write/Bash calls touching schema/migration paths and blocks (exit 2)
+  until `prior_attempts` has been queried for the affected entities this
+  session — **with the prior reasoning in the block message**, so the agent
+  gets the skipped context for free. Fail-open contract: every miss, error,
+  or unknown shape allows; decisions re-opened via supersede never block.
+  `--dry-run` prints the decision as JSON; `SELVEDGE_HOOK_DISABLE=1`
+  bypasses. Watch globs configurable via `.selvedge/config.toml`
+  (`[hook] watch_globs`). `selvedge setup` installs it into the project's
+  `.claude/settings.json` (default-on step, idempotent, backup-first;
+  `--skip-enforcement-hook` opts out).
+- **Git-history import** (thread: Alexey Spinov). `selvedge import
+  --from-git [PATH] [--since REF|DATE]` walks revert-message commits plus
+  file-deletion commits (`--diff-filter=D`) and seeds
+  `change_type="revert"` events (`agent="git-import"`, reasoning = commit
+  subject + body) — so reverts that predate Selvedge gate `prior_attempts`
+  and the hook like live-captured ones. Handles both revert diff shapes
+  (a `git revert` removing `ADD COLUMN` lines, a down-migration adding
+  `DROP` lines) to extract table/column entities. Idempotent on
+  `(commit, entity)`. Honest limit, stated in the help: reverts folded
+  into unrelated commits are missed.
+- **New `change_type="revert"`** — pulled forward from the v0.3.11 plan for
+  the importer; an explicit "we tried this and rolled it back" that counts
+  as a removal for outcome inference. (`reject` stays on the v0.3.11
+  roadmap.)
+- **Optional semantic recall** (thread: Dipankar Sarkar, Raffaele
+  Zarrelli). `pip install "selvedge[semantic]"` + `selvedge index` builds a
+  local embeddings index over reasoning text; `prior_attempts --fuzzy
+  "description"` (CLI and MCP) surfaces attempts on entities whose prior
+  reasoning is *semantically* similar — recall that survives renames
+  (`payment_token` vs `card_token`). Backend: **model2vec** static
+  embeddings (`potion-base-8M`) over sentence-transformers — no torch
+  stack, ~30 MB model, sub-second cold start; size and cold-start matter
+  more than quality for one-sentence reasoning strings. Fuzzy rows are
+  clearly labeled (`match_type="fuzzy"` + similarity); without the extra
+  (or before `selvedge index`) the query falls back to substring matching
+  with a one-line pointer. **Core never imports the backend** — pinned by
+  a subprocess test; the one network touch is the model download on the
+  first `selvedge index` run.
+
+### Changed
+
+- `prior_attempts` rows now always carry `match_type`
+  (`exact`/`substring`/`fuzzy`) and `similarity` (0.0 unless fuzzy), plus
+  the trail fields above — all always-populated, never null, per the
+  standing result-shape convention.
+- The MCP server instructions and `log_change` docstring now teach the
+  supersede etiquette: *never re-apply a reverted change without
+  superseding it first.*
+
+### Notes
+
+- **Migration v4** adds `supersedes`, `"constraint"` (quoted — SQL reserved
+  word), and `stale_when` as nullable, default-less TEXT columns.
+  Metadata-only ALTER, not a table rewrite; pre-v4 rows read back as `""`
+  on every surface.
+- **MCP schema footprint (called out):** the tool-definition core grows
+  from ~3.1k to ~3.6k tokens — still 8 tools, but `log_change` gained the
+  `supersedes` / `constraint` / `stale_when` params and `prior_attempts`
+  gained `fuzzy` plus the trail-field documentation. Deliberate: the new
+  surface is the feature. Descriptions were tightened in the same pass and
+  the CI drift gate moved 3200 → 3800.
+- **Test budget:** 114 new tests across `test_supersede.py` (35),
+  `test_hook.py` (45), `test_gitimport.py` (18), `test_semantic.py` (16) —
+  full suite 676. Large by design: four publicly-promised features, each
+  with migration-upgrade, error-path, and both-surfaces (MCP + CLI)
+  coverage.
+
+---
+
 ## [0.3.9] — 2026-06-22
 
 **Agent Trace export — Selvedge is a compatible producer.** New

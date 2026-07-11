@@ -109,6 +109,56 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.9.1
+
+**The dev.to feedback release.** Five improvements publicly promised in the
+comment threads of
+[the launch post](https://dev.to/masondelan/my-ai-agent-tried-to-ship-a-mistake-wed-already-reverted-4737),
+all landed. Append-only store and zero-LLM core, unchanged. **Drop-in
+upgrade for anyone on 0.3.9** (the v4 migration is metadata-only, instant at
+any size).
+
+**Reverted is no longer a permanent ban.** A reverted decision can become
+correct again — so re-open it *explicitly*, without rewriting history:
+
+```bash
+selvedge supersede payments.card_token \
+  --reasoning "Provider now vaults card data — the PCI constraint is gone."
+```
+
+`prior_attempts` / `blame` / `diff` then read the full trail — **tried →
+reverted → re-opened** — with a clear current-status line. Decisions can now
+also carry a queryable `constraint` (the principle that drove them) and a
+`stale_when` condition; when a later change event matches the condition,
+`stale_decisions` flags the decision **"review suggested"** (surfacing only —
+no automatic un-retiring, ever).
+
+**The prior_attempts check is now enforceable.** `selvedge setup` installs a
+Claude Code PreToolUse hook that blocks schema/migration edits until
+`prior_attempts` has been checked this session — and puts the prior reasoning
+*in the block message*, so the agent gets the skipped context for free.
+Fail-open by contract (a miss or error always allows), `--dry-run` and
+`SELVEDGE_HOOK_DISABLE=1` included.
+
+**Your pre-Selvedge reverts count too.** `selvedge import --from-git` walks
+git history (revert-message commits + file deletions) and seeds
+`change_type="revert"` events, idempotently — so the mistakes your repo
+already made once gate the hook and `prior_attempts` from day one.
+
+**And recall that survives renames** (optional):
+
+```bash
+pip install "selvedge[semantic]" && selvedge index
+selvedge prior-attempts --fuzzy "tokenized payment credentials"
+# finds the users.card_token revert even though you asked about payment tokens
+```
+
+Local static embeddings (model2vec, ~30 MB, no torch), clearly-labeled fuzzy
+matches, substring fallback when the extra isn't installed. Core never
+imports it. Full details in [`CHANGELOG.md`](CHANGELOG.md).
+
+---
+
 ## What's new in v0.3.9
 
 **Agent Trace export — Selvedge is a compatible producer.**
@@ -134,70 +184,6 @@ honest fidelity signal. This was planned for v0.4.0; only the exporter moved
 forward (Postgres + the tool rename remain the v0.4.0 markers; HTTP + auth ships
 in v0.4.1). Full mapping in
 [`docs/agent-trace-interop.md`](docs/agent-trace-interop.md).
-
----
-
-## What's new in v0.3.8
-
-**Active memory v1 (date-based).** Selvedge's append-only log learns to know
-when its own data is stale. A decision can now carry a revisit date, and the
-new **`stale_decisions`** tool surfaces decisions that have aged out — but only
-the ones whose entity is *still in active use*, so an old-but-correct decision
-nobody touches never nags. **Drop-in upgrade for anyone on 0.3.7.** This brings
-the MCP surface to **8 tools**.
-
-### `revisit_after` + `stale_decisions` — decisions with an expiry date
-
-Set `revisit_after` on an architectural `log_change` — an ISO date or a
-relative offset like `90d`:
-
-```jsonc
-log_change({
-  "entity_path": "deps/stripe", "change_type": "add", "entity_type": "dependency",
-  "reasoning": "Pinned Stripe SDK to v11 for the billing launch.",
-  "revisit_after": "180d"   // revisit this pin in ~6 months
-})
-```
-
-Later, `stale_decisions` returns the dated decisions that have come due — and
-filters out pure age:
-
-```jsonc
-stale_decisions({})
-// → only decisions past their revisit date whose entity is STILL in use:
-[
-  {
-    "entity_path": "deps/stripe", "change_type": "add",
-    "reasoning": "Pinned Stripe SDK to v11 for the billing launch.",
-    "revisit_due": "2026-...Z", "days_overdue": 12,
-    "active_use_signals": ["queried"],
-    "stale_reason": "past its revisit date and still active — the entity was queried (blame/diff/prior_attempts) after the decision."
-  }
-]
-```
-
-**Pure age never surfaces.** A decision only comes back if the entity is still
-live — recently queried (`blame` / `diff` / `prior_attempts`) or its changeset
-kept moving. That's the noise defense: a dated decision nobody has touched won't
-nag. Templated and deterministic — no LLM, ever. The pattern-based half
-(`expires_when` grammar, explicit `reject`/`revert` change types) lands in
-v0.3.11; the v0.3.8 migration adds the `expires_when` column now so that's a
-no-migration release.
-
-### CLI parity for the wedge + CLI-awareness
-
-`selvedge prior-attempts <entity>` lands — the v0.3.7 `prior_attempts` wedge
-was the only MCP tool without a CLI command. It's a thin presenter over the
-same store, so `--json` emits the identical list the tool returns. New
-`selvedge stale` mirrors `stale_decisions` (with `--json` for cron / Slack
-jobs). And the canonical agent-instructions block now names the CLI equivalents
-alongside the MCP tools, so a shell-having agent is never blocked when the MCP
-server isn't loaded. Selvedge stays **MCP-first**; the CLI is the additive
-second path.
-
-See [`CHANGELOG.md`](CHANGELOG.md) for the full list, the one-time migration-v3
-note (metadata-only `ADD COLUMN`, fast even on multi-million-event DBs), and the
-called-out test-budget overage from the bundled CLI + agent-block work.
 
 ---
 
@@ -279,9 +265,12 @@ That's it. `selvedge setup` is an interactive wizard: it detects which AI
 tools you have (Claude Code, Cursor, Copilot), writes the MCP entry into
 each one's config, drops the canonical agent-instructions block into your
 project's prompt file (`CLAUDE.md` / `.cursorrules` /
-`copilot-instructions.md`), runs `selvedge init`, and installs the
-post-commit hook. Every modified file gets a `.bak` written next to it
-before any change reaches disk. Re-running is a no-op.
+`copilot-instructions.md`), installs the PreToolUse enforcement hook into
+`.claude/settings.json` (Claude Code only — blocks schema/migration edits
+until `prior_attempts` has been checked; `--skip-enforcement-hook` to opt
+out), runs `selvedge init`, and installs the post-commit hook. Every
+modified file gets a `.bak` written next to it before any change reaches
+disk. Re-running is a no-op.
 
 For CI bootstrap or `devcontainer.json` `postCreateCommand`:
 ```bash
@@ -436,14 +425,14 @@ When connected as an MCP server, Selvedge exposes:
 
 | Tool | Description |
 |------|-------------|
-| `log_change` | Record a change event with entity, diff, and reasoning (pass `rename_from` with `change_type="rename"` for the dual-event rename pattern) |
-| `diff` | History for an entity or entity prefix |
-| `blame` | Most recent change + context for an exact entity |
+| `log_change` | Record a change event with entity, diff, and reasoning. `rename_from` + `change_type="rename"` records the dual-event rename pattern; `change_type="supersede"` re-opens a reverted decision (append-only); optional `constraint` / `stale_when` keep the decision's principle and its invalidation condition queryable |
+| `diff` | History for an entity or entity prefix, each row annotated with `superseded_by` |
+| `blame` | Most recent change + context for an exact entity, plus the derived decision `status` (active / reverted / reopened) |
 | `history` | Filtered history across all entities |
 | `changeset` | All events grouped under a named feature/task slug |
 | `search` | Full-text search across all events |
-| `prior_attempts` | Prior change attempts on an entity + inferred outcome (was it tried and reverted?) — call it before editing |
-| `stale_decisions` | Dated decisions past their `revisit_after` that are still in active use (pure age never surfaces) |
+| `prior_attempts` | Prior change attempts on an entity + inferred outcome (tried → reverted → re-opened) — call it before editing. Optional `fuzzy` query adds semantically similar records (needs the `semantic` extra; falls back to substring) |
+| `stale_decisions` | Decisions due for a revisit: past their `revisit_after` and still in active use (`flag="revisit_due"`), or whose `stale_when` condition matched a later change (`flag="review_suggested"`) |
 
 ---
 
@@ -465,14 +454,23 @@ selvedge changeset [CHANGESET_ID]         Show events in a changeset
                   [--project NAME]
                   [--since SINCE]
 selvedge search QUERY [--limit N]         Full-text search
-selvedge prior-attempts ENTITY            Prior attempts + inferred outcome
-                       [--description T]   (ENTITY xor --description)
-                       [--all]             widen recall to proximity_low
-                       [--window 7d]       proximity window
-selvedge stale [--entity ENTITY]          Dated decisions due for a revisit
-              [--project NAME]
-              [--agent NAME]
-              [--json]
+selvedge prior-attempts ENTITY            Prior attempts + inferred outcome,
+                       [--description T]   with the tried → reverted →
+                       [--all]             re-opened trail + status line
+                       [--window 7d]       (--all widens recall)
+                       [--fuzzy TEXT]      add semantic matches (needs the
+                                           semantic extra; substring fallback)
+selvedge supersede ENTITY                 Re-open a reverted decision —
+                  --reasoning TEXT         append-only, links the prior
+                  [--constraint TEXT]      reverted event (or --supersedes ID)
+                  [--stale-when TEXT]
+                  [--supersedes ID]
+selvedge index [--model NAME]             Build/update the optional semantic
+              [--json]                     embeddings index (selvedge[semantic])
+selvedge stale [--entity ENTITY]          Decisions due for a revisit: past
+              [--project NAME]            revisit_after + still in use, or
+              [--agent NAME]              stale_when matched by a later change
+              [--json]                    ("review suggested")
 selvedge stats [--since SINCE]            Tool call coverage report (per-tool, per-agent)
 selvedge doctor [--json]                  Health check: DB path, schema, hook, MCP wiring
 selvedge install-hook [--path PATH]       Install git post-commit hook
@@ -482,8 +480,10 @@ selvedge backfill-commit --hash HASH      Backfill git_commit on recent events
 selvedge import PATH                      Import migrations (SQL / Alembic) or
               [--format auto|sql|         an Agent Trace file (agent-trace)
                  alembic|agent-trace]
-              [--project NAME]
-              [--dry-run]
+              [--from-git]                or walk git history for reverts:
+              [--since REF|DATE]          revert-message commits + deletions
+              [--project NAME]            become change_type="revert" events
+              [--dry-run]                 (idempotent on commit + entity)
 selvedge export [--format json|csv|       Export history (agent-trace =
                  agent-trace]              Agent Trace v0.1.0 records)
               [--since SINCE]
@@ -494,12 +494,15 @@ selvedge export [--format json|csv|       Export history (agent-trace =
 selvedge log ENTITY CHANGE_TYPE           Manually log a change
              [--diff TEXT]                CHANGE_TYPE: add, remove, modify,
              [--reasoning TEXT]           rename, retype, create, delete,
-             [--agent NAME]               index_add, index_remove, migrate
-             [--commit HASH]
+             [--agent NAME]               index_add, index_remove, migrate,
+             [--commit HASH]              revert, supersede
              [--project NAME]
              [--changeset CS]
              [--revisit-after WHEN]       ISO date or offset (e.g. 90d)
              [--rename-from OLD]          OLD path when CHANGE_TYPE is 'rename'
+             [--constraint TEXT]          the principle behind the decision
+             [--stale-when TEXT]          what would invalidate it
+             [--supersedes ID]            with CHANGE_TYPE 'supersede'
 selvedge migrate-paths                    Re-canonicalize stored entity paths
                       [--apply]           (dry-run by default; --apply writes)
                       [--json]
@@ -527,6 +530,9 @@ are also accepted and normalized to UTC.
 | Env var | `SELVEDGE_DB=/path/to/db` | Per-session override |
 | Project init | `selvedge init` | Creates `.selvedge/selvedge.db` in CWD |
 | Global fallback | `~/.selvedge/selvedge.db` | Used if no project DB found |
+| Hook watch globs | `.selvedge/config.toml` | `[hook]`<br>`watch_globs = ["**/migrations/**", "db/**/*.sql"]` — replaces the enforcement hook's default schema/migration globs |
+| Hook bypass | `SELVEDGE_HOOK_DISABLE=1` | Disables the PreToolUse enforcement hook for the shell |
+| Semantic extra | `pip install "selvedge[semantic]"` | Enables `selvedge index` + `prior-attempts --fuzzy` (local model2vec embeddings, ~30 MB; core never depends on it) |
 
 ---
 

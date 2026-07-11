@@ -70,7 +70,14 @@ You have access to Selvedge (MCP server: `selvedge`) for change tracking.
 - Before editing an entity, call `selvedge.prior_attempts` on it — if the
   same change was tried before and reverted, you'll see the prior
   reasoning and why it was rejected, and can change your plan instead of
-  repeating a rejected approach.
+  repeating a rejected approach. (If the Selvedge PreToolUse hook is
+  installed, this check is enforced: schema/migration edits are blocked
+  until prior_attempts has been consulted this session.)
+- A reverted decision is not a permanent ban. If the constraint that
+  killed it no longer holds, re-open it explicitly with
+  `change_type="supersede"` (never re-apply a reverted change without
+  superseding it first). Use `change_type="revert"` when you roll a
+  change back — clearer than a plain remove.
 - Then call `selvedge.diff` or `selvedge.blame` for the entity's broader
   history before conflicting with past decisions.
 
@@ -84,7 +91,9 @@ or you just want to keep context light, use the equivalents:
   for its broader history.
 - Log a change: `selvedge log <entity> <change_type> --reasoning "<why>"`
   (change_type: add, remove, modify, rename, retype, create, delete,
-  index_add, index_remove, migrate; for a rename add `--rename-from <old>`).
+  index_add, index_remove, migrate, revert, supersede; for a rename add
+  `--rename-from <old>`).
+- Re-open a reverted decision: `selvedge supersede <entity> --reasoning "<why>"`.
 - Find things: `selvedge search "<query>"`, `selvedge history --since 7d`,
   `selvedge stale` (decisions now due for a revisit).
 

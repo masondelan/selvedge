@@ -803,6 +803,21 @@ def prior_attempts(
             ),
         ),
     ] = "",
+    fuzzy: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "Optional semantic query: ALSO return attempts on entities whose "
+                "prior reasoning is semantically similar to this text — catches "
+                "renames (payment_token vs card_token) that exact and substring "
+                "lookups miss. Results are labeled match_type='fuzzy' with a "
+                "similarity score. Requires the selvedge[semantic] extra and a "
+                "`selvedge index` run; otherwise falls back to substring "
+                "matching and says so in a leading note row."
+            ),
+        ),
+    ] = "",
     min_confidence: Annotated[
         str,
         Field(
@@ -869,22 +884,61 @@ def prior_attempts(
     so an empty list (nothing clearly tried-and-rejected) is the normal,
     preferred answer over a speculative false positive. Pass
     `min_confidence="proximity_low"` to widen recall.
+
+    Every row carries `match_type` ("exact" / "substring" / "fuzzy") and
+    `similarity` (0.0 unless fuzzy). Pass `fuzzy` with a short description
+    to also search semantically — the optional recall layer for renamed
+    entities. Without the selvedge[semantic] extra (or before `selvedge
+    index` has run) the fuzzy part falls back to substring matching, with a
+    leading `{"note": ...}` row explaining how to enable it.
     """
     storage = get_storage()
     storage.record_tool_call("prior_attempts", entity_path=entity_path)
-    if not entity_path and not description:
-        return [{"error": "prior_attempts requires either entity_path or description"}]
+    if not entity_path and not description and not fuzzy:
+        return [
+            {"error": "prior_attempts requires entity_path, description, or fuzzy"}
+        ]
     if min_confidence not in ("proximity_high", "proximity_low"):
         return [
             {"error": "min_confidence must be 'proximity_high' or 'proximity_low'"}
         ]
-    return storage.get_prior_attempts(
-        entity_path=entity_path,
-        query=description,
-        min_confidence=min_confidence,
-        window_minutes=window_minutes,
-        limit=limit,
-    )
+    results: list[dict] = []
+    if entity_path or description:
+        results = storage.get_prior_attempts(
+            entity_path=entity_path,
+            query=description,
+            min_confidence=min_confidence,
+            window_minutes=window_minutes,
+            limit=limit,
+        )
+    if fuzzy:
+        from . import semantic
+
+        try:
+            results += semantic.fuzzy_prior_attempts(
+                storage,
+                fuzzy,
+                min_confidence=min_confidence,
+                window_minutes=window_minutes,
+                limit=limit,
+                exclude_paths={r["entity_path"] for r in results},
+            )
+        except (semantic.SemanticUnavailable, semantic.IndexMissing) as e:
+            existing_paths = {r["entity_path"] for r in results}
+            fallback = [
+                r
+                for r in storage.get_prior_attempts(
+                    query=fuzzy,
+                    min_confidence=min_confidence,
+                    window_minutes=window_minutes,
+                    limit=limit,
+                )
+                if r["entity_path"] not in existing_paths
+            ]
+            results = [
+                {"note": f"fuzzy matching unavailable ({e}); fell back to substring"}
+            ] + results + fallback
+    return results
 
 
 @mcp.tool(

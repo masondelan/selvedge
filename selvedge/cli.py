@@ -13,6 +13,7 @@ Commands:
   selvedge history            Filtered history across all entities
   selvedge search <query>     Full-text search across all events
   selvedge prior-attempts     Prior attempts on an entity + inferred outcome
+  selvedge index              Build the optional semantic embeddings index
   selvedge stale              Dated decisions now due for a revisit
   selvedge log                Manually log a change event
   selvedge supersede          Re-open a reverted decision (append-only)
@@ -1265,6 +1266,17 @@ def search(query, limit, as_json):
     help="Free-text description to match instead of an exact ENTITY.",
 )
 @click.option(
+    "--fuzzy",
+    "-f",
+    "fuzzy",
+    default="",
+    help="Semantic query: also surface attempts on entities whose prior "
+    "reasoning is SIMILAR to this text (catches renames like payment_token "
+    "vs card_token). Needs the optional extra: pip install "
+    '"selvedge[semantic]" + `selvedge index`; falls back to substring '
+    "matching otherwise.",
+)
+@click.option(
     "--all",
     "show_all",
     is_flag=True,
@@ -1279,7 +1291,7 @@ def search(query, limit, as_json):
 )
 @click.option("--limit", "-n", default=20, show_default=True, help="Number of results")
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
+def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_json):
     """Show prior change attempts on an entity, each with an inferred outcome.
 
     \b
@@ -1287,6 +1299,8 @@ def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
     so the two surfaces can't diverge — `--json` emits the identical list the
     tool returns. Pass an ENTITY (exact, with `.`-prefix matching) OR
     --description for free-text mode; ENTITY wins if both are given.
+    --fuzzy adds semantically similar records on top of either, clearly
+    labeled (match_type="fuzzy" with a similarity score).
 
     \b
     Conservative by default: only the clear "tried, then reverted within the
@@ -1297,11 +1311,12 @@ def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
     Examples:
       selvedge prior-attempts users.auth_token
       selvedge prior-attempts --description "sso token" --all
+      selvedge prior-attempts users.card_token --fuzzy "tokenized payment credentials"
       selvedge prior-attempts src/auth.py::login --window 30d --json
     """
-    if not entity and not description:
+    if not entity and not description and not fuzzy:
         err_console.print(
-            "[red]error:[/red] provide an ENTITY or --description"
+            "[red]error:[/red] provide an ENTITY, --description, or --fuzzy"
         )
         sys.exit(2)
 
@@ -1318,20 +1333,53 @@ def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
     # reflects both surfaces. A prior_attempts lookup also counts as active-use
     # of the entity for the stale-decisions weighting.
     storage.record_tool_call("prior_attempts", entity_path=entity, agent="cli")
-    rows = storage.get_prior_attempts(
-        entity_path=entity,
-        query=description,
-        min_confidence=min_confidence,
-        window_minutes=window_minutes,
-        limit=limit,
-    )
+    rows = []
+    if entity or description:
+        rows = storage.get_prior_attempts(
+            entity_path=entity,
+            query=description,
+            min_confidence=min_confidence,
+            window_minutes=window_minutes,
+            limit=limit,
+        )
+
+    if fuzzy:
+        from . import semantic
+
+        try:
+            rows += semantic.fuzzy_prior_attempts(
+                storage,
+                fuzzy,
+                min_confidence=min_confidence,
+                window_minutes=window_minutes,
+                limit=limit,
+                exclude_paths={r["entity_path"] for r in rows},
+            )
+        except (semantic.SemanticUnavailable, semantic.IndexMissing) as e:
+            from rich.markup import escape
+
+            # escape(): the hint contains "[semantic]", which Rich would
+            # otherwise swallow as a markup tag.
+            err_console.print(f"[yellow]fuzzy unavailable:[/yellow] {escape(str(e))}")
+            err_console.print("[dim]falling back to substring matching[/dim]")
+            existing_paths = {r["entity_path"] for r in rows}
+            rows += [
+                r
+                for r in storage.get_prior_attempts(
+                    query=fuzzy,
+                    min_confidence=min_confidence,
+                    window_minutes=window_minutes,
+                    limit=limit,
+                )
+                if r["entity_path"] not in existing_paths
+            ]
 
     if as_json:
         click.echo(json.dumps(rows, indent=2))
         return
 
     if not rows:
-        target = entity or f'"{description}"'
+        target = entity or f'"{description or fuzzy}"'
         console.print(f"[green]No prior attempts found for {target}.[/green]")
         if not show_all:
             console.print(
@@ -1340,19 +1388,24 @@ def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
             )
         return  # empty is the normal, good answer — exit 0
 
-    label = entity or f'"{description}"'
+    label = entity or f'"{description or fuzzy}"'
     console.print(f"\n[bold]Prior attempts[/bold]  [dim]{label}[/dim]\n")
     outcome_styles = {"reverted": "red", "reopened": "cyan", "active": "yellow"}
     for r in rows:
         outcome = r.get("outcome", "")
         confidence = r.get("confidence", "")
         outcome_style = outcome_styles.get(outcome, "yellow")
+        fuzzy_tag = (
+            f"  [magenta]~fuzzy {r.get('similarity', 0.0):.2f}[/magenta]"
+            if r.get("match_type") == "fuzzy"
+            else ""
+        )
         console.print(
             f"  [dim]{fmt_ts(r.get('timestamp', ''))}[/dim]  "
             f"[cyan]{r.get('entity_path', '')}[/cyan]  "
             f"[green]{r.get('change_type', '')}[/green]  "
             f"[{outcome_style}]{outcome}[/{outcome_style}]  "
-            f"[dim]({confidence})[/dim]"
+            f"[dim]({confidence})[/dim]{fuzzy_tag}"
         )
         # The trail, one line per step: tried → reverted → re-opened.
         if r.get("reasoning"):
@@ -1375,6 +1428,63 @@ def prior_attempts_cmd(entity, description, show_all, window, limit, as_json):
             f"[{style}]{status}[/{style}]"
         )
     console.print()
+
+
+# ---------------------------------------------------------------------------
+# index (optional semantic embeddings — v0.3.9.1)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("index")
+@click.option(
+    "--model",
+    "model_name",
+    default="",
+    help="model2vec model to embed with (default: minishlab/potion-base-8M).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def index_cmd(model_name, as_json):
+    """Build or update the semantic embeddings index over reasoning text.
+
+    \b
+    Powers `selvedge prior-attempts --fuzzy` — recall that survives renames
+    (payment_token vs card_token). Requires the optional extra:
+
+        pip install "selvedge[semantic]"
+
+    \b
+    Incremental: only new or changed reasoning is re-embedded, so re-running
+    after a work session is cheap. The FIRST run downloads the embedding
+    model (~30 MB, cached); indexing and querying are fully local after
+    that. The core store is untouched — embeddings live in their own table,
+    and nothing in Selvedge's write/read paths depends on it.
+    """
+    from . import semantic
+
+    if not semantic.is_available():
+        from rich.markup import escape
+
+        # escape(): the hint contains "[semantic]", which Rich would
+        # otherwise swallow as a markup tag.
+        err_console.print(f"[yellow]{escape(semantic.INSTALL_HINT)}[/yellow]")
+        sys.exit(1)
+
+    kwargs = {"model_name": model_name} if model_name else {}
+    report = semantic.build_index(get_storage(), **kwargs)
+
+    if as_json:
+        click.echo(json.dumps(report, indent=2))
+        return
+
+    console.print(
+        f"[green]✓[/green] Semantic index up to date  "
+        f"[dim]model: {report['model']}[/dim]"
+    )
+    console.print(
+        f"  [bold]{report['indexed']}[/bold] embedded, "
+        f"[dim]{report['skipped']} unchanged, "
+        f"{report['total_indexed']} total in index[/dim]"
+    )
 
 
 # ---------------------------------------------------------------------------

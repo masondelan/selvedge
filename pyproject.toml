@@ -29,6 +29,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Optional semantic recall (v0.3.9.1): local static embeddings for
+# `selvedge index` + `prior_attempts --fuzzy`. model2vec over
+# sentence-transformers on purpose — no torch stack, ~30 MB model,
+# sub-second cold start; size and cold-start matter more than embedding
+# quality for one-sentence reasoning strings. Core never imports this.
+semantic = [
+    "model2vec>=0.3.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -144,6 +152,7 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # tomllib is stdlib only on 3.11+; mypy runs with python_version = "3.10"
 # where neither it nor the optional tomli backport resolves. The hook's
-# import dance handles absence at runtime.
-module = ["tomllib", "tomli"]
+# import dance handles absence at runtime. model2vec is the semantic
+# extra's backend — optional by design, never installed in the lint env.
+module = ["tomllib", "tomli", "model2vec"]
 ignore_missing_imports = true

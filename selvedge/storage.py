@@ -1181,16 +1181,19 @@ class SelvedgeStorage:
         signal; pass ``"proximity_low"`` to include the noisy tail. An empty
         list is the preferred answer over a false positive.
 
-        Each result is an event dict plus six always-present keys —
+        Each result is an event dict plus eight always-present keys —
         ``outcome``, ``confidence``, ``outcome_reasoning`` (the reverting
         event's reasoning, or ``""`` while active), ``superseded_by`` (the
         supersede event's id when the revert was re-opened, else ``""``),
-        ``supersede_reasoning`` (why it was re-opened, else ``""``), and
+        ``supersede_reasoning`` (why it was re-opened, else ``""``),
         ``current_status`` (the path's derived status: ``active`` /
-        ``reverted`` / ``reopened``). Together they read as the full trail:
-        tried → reverted → re-opened. Removal events are folded into the
-        attempt they close and never appear on their own. Newest first,
-        capped at ``limit``.
+        ``reverted`` / ``reopened``), ``match_type`` (``exact`` for
+        entity-path mode, ``substring`` for description mode; the optional
+        semantic layer contributes ``fuzzy`` rows), and ``similarity``
+        (``0.0`` unless the row came from a fuzzy match). Together they read
+        as the full trail: tried → reverted → re-opened. Removal events are
+        folded into the attempt they close and never appear on their own.
+        Newest first, capped at ``limit``.
         """
         with self._session() as conn:
             if entity_path:
@@ -1291,6 +1294,12 @@ class SelvedgeStorage:
                     superseding["reasoning"] if superseding is not None else ""
                 )
                 annotated["current_status"] = path_status
+                # How this row was found (v0.3.9.1): "exact" for entity-path
+                # lookups, "substring" for free-text description mode. The
+                # optional semantic layer adds "fuzzy" rows with a real
+                # similarity; 0.0 here means "not a similarity match".
+                annotated["match_type"] = "exact" if entity_path else "substring"
+                annotated["similarity"] = 0.0
                 results.append(annotated)
 
         if min_confidence == "proximity_high":

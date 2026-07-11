@@ -437,6 +437,26 @@ def main(argv: list[str] | None = None) -> int:
             ver = p.version or "—"
             print(f"  · {p.phase}")
             print(f"      {ver:9} [{p.status:11}] ship={p.ship_date or '—':11} {p.summary[:80]}")
+        if not args.dry_run:
+            # Loud-fail guard: a *real* run (CI / manual, no --dry-run) with
+            # missing creds must NOT exit 0. Without this the workflow goes
+            # green while writing nothing — a dropped/rotated NOTION_TOKEN
+            # silently stops the Notion mirror (exactly how v0.3.9.1 went
+            # missing). Pass --dry-run for an intentional parse-only run.
+            missing = [
+                name
+                for name, val in (
+                    ("NOTION_TOKEN", token),
+                    ("RELEASES_DB_ID", releases_db),
+                    ("ROADMAP_DB_ID", roadmap_db),
+                )
+                if not val
+            ]
+            raise SystemExit(
+                f"error: missing Notion credentials {missing}; refusing to "
+                "exit 0 without syncing. Set the secret(s), or pass --dry-run "
+                "for an intentional parse-only run."
+            )
         return 0
 
     notion = Notion(token)

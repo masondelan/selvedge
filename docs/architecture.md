@@ -1043,14 +1043,23 @@ github.com).
   `confidence: exact`.
 
 ### Phase 2.18 — Competitive interop + verifiable claims (v0.3.12)
-> Three items sharing a theme: making Selvedge's positioning claims
+> Items sharing a theme: making Selvedge's positioning claims
 > observable, verifiable, and interoperable. Git Notes reader makes
 > Selvedge a complement to Git AI's "open standard" framing rather
 > than a substitute. Verifiable-no-network test backs the
 > "your data stays on your machine" claim with CI. `ci-check` reporter
 > ships the metrics surface that a later release's enforcement mode
-> will gate on. Theme: *the positioning we already claim, now
-> machine-checkable.*
+> will gate on. And the **git-import provenance + trust tiers** cluster
+> (below) makes the v0.3.9.1 git-import slice audit-grade — a slice you
+> can re-derive from the repo and diff against the store is a verifiable
+> claim, which is exactly this phase's theme. Theme: *the positioning we
+> already claim, now machine-checkable.*
+>
+> The git-import cluster can pull forward to a v0.3.x point release if the
+> trust-tier gating is wanted before v0.3.12 — none of it needs a schema
+> migration (the `agent="git-import"` marker already distinguishes the
+> re-derivable slice retroactively; a dedicated `provenance` field is the
+> only schema-touching item and is optional).
 
 - [ ] **Git Notes one-way reader — `selvedge import --format
       git-notes`.** Competition response: Git AI pitches Git Notes
@@ -1081,11 +1090,58 @@ github.com).
       enforcement remains deferred (no version commitment) until
       telemetry shows what natural reasoning-quality distributions
       look like — Goodhart-trap defense.
+
+##### Git-import provenance + trust tiers
+> Follow-up to the v0.3.9.1 git-import feature, from design feedback on the
+> launch post. The through-line: a record's *provenance* decides how much
+> authority it can carry. A git-seeded record is **re-derivable** — anyone
+> can re-run the importer against the repo and diff its output against the
+> store, so drift or tampering is checkable by anyone. A live-captured
+> record is **testimony** — nothing regenerates it after the fact. That is
+> two trust tiers inside one store, and it makes the git slice stronger than
+> the Agent Trace import (a trace is authored by the same actor whose future
+> proposals you're checking; revert commits come from whoever shipped the
+> fix, long before the current session).
+
+- [ ] **Provenance as a queryable trust tier.** Formalize the marker that
+      separates the re-derivable (git-seeded) slice from live-captured
+      testimony — either promote `agent="git-import"` to a documented,
+      indexed contract or add a dedicated `provenance` field (the only
+      schema-touching option; migration if taken). Enforcement hook and
+      `ci-check --enforce` can then **hard-block on the re-derivable slice
+      and treat testimony as advisory**, two trust levels from one query
+      surface. Agent Trace imports inherit the weaker (testimony) tier.
+- [ ] **Importer as a pure function of repo state — re-derivability check.**
+      `selvedge import --from-git --verify` emits the importer's *complete*
+      derivation for the repo (not just the unseeded delta the current
+      `--dry-run` shows) so it can be diffed against the stored git slice;
+      a non-empty diff is drift or tampering. Records stay keyed on the
+      revert sha; upsert-or-skip so a moving repo converges rather than
+      duplicates. Never touches live-captured records.
+- [ ] **Entity-level identity across file boundaries.** Today only SQL DDL
+      drops seed entity-level records (`users.card_token`); every other diff
+      shape falls back to file paths, so a reverted column resurfacing in a
+      *different* file (migration vs model vs serializer) is missed. Extract
+      identifiers from any revert diff with enclosing-scope context
+      (class → table, so an ORM `card_token = Column(...)` becomes
+      `users.card_token`, not a bare, ambiguous `card_token`) and index on
+      those — widening the match without giving up determinism. This is the
+      boundary called out in `selvedge import --from-git` help and
+      `gitimport.py`'s "Honest limits".
+- [ ] **Capture-layer miss-rate.** With live capture running alongside git
+      import, every explicit revert lands in both slices; diffing them
+      yields a *measured* miss-rate for the live-capture layer — the one
+      layer that can't be re-derived and most wants a number. Surface it in
+      `selvedge stats` / `ci-check`.
 - [ ] **Tests** — `test_importers.py` Git Notes parser extensions
       (~10), `test_no_network.py` (~3), `test_ci_check.py`
       specifically asserting exit 0 under threshold violation
-      without `--enforce` and non-zero with it (~6). Soft budget:
-      ≤20 new tests.
+      without `--enforce` and non-zero with it (~6), plus the
+      git-import trust-tier suite: provenance query + tier gating,
+      `--verify` full-derivation diff (drift detection), cross-file
+      entity extraction with class-context, miss-rate diff (~15).
+      Soft budget: ≤35 new tests (raised from the interop items'
+      ≤20 to absorb the git-import cluster).
 
 #### Risks acknowledged & mitigations
 
@@ -1097,6 +1153,18 @@ github.com).
 - **`ci-check` Goodhart trap**: reporter-only by default; gating
   opt-in via `--enforce`. Default enforcement deferred until we
   have telemetry on natural distributions.
+- **Cross-file entity extraction lowering precision** (git-import
+  cluster): a bare column name with no table context is ambiguous
+  and would gate the hook on innocent entities. Defended by
+  requiring enclosing-scope context (class → table) before seeding
+  an entity-level record; a diff shape that can't be resolved to a
+  qualified entity stays file-level, same precision-over-recall
+  posture as the v0.3.9.1 importer.
+- **Trust-tier inversion risk** (git-import cluster): re-derivable ≠
+  precise. The git slice is a *heuristic* parse, so "hard-block"
+  authority rests on verifiability, not accuracy — the `--verify`
+  diff is what backs the hard tier, and any tier gating ships behind
+  `ci-check --enforce` (opt-in), never as a silent default.
 
 ### Phase 2.19 — Cross-repo CLI (v0.3.13)
 > First half of cross-repo personal-OSS memory. CLI surface ships

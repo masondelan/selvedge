@@ -2302,8 +2302,16 @@ def import_migrations(path, fmt, from_git, since, project, dry_run, as_json):
     a change_type="revert" event (agent="git-import", reasoning = commit
     subject+body) so prior_attempts and the enforcement hook see them.
     Idempotent — re-running skips (commit, entity) pairs already imported,
-    regardless of --project. Honest limit: reverts folded into unrelated
-    commits are missed.
+    regardless of --project.
+
+    \b
+    Identity boundary (know this): a DROP TABLE / DROP COLUMN in the revert
+    diff is seeded at the ENTITY level (e.g. `users.card_token`), so it
+    matches a re-add in any file. Every other diff shape — ORM model columns,
+    serializer fields, non-SQL code — is seeded at the FILE level, so a
+    reverted entity that resurfaces in a *different* file is missed.
+    Cross-file entity extraction is planned (see the phase plan). Also
+    missed: reverts folded into unrelated commits.
 
     \b
     Examples:

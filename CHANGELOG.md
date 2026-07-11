@@ -117,6 +117,15 @@ anyone on 0.3.9.
   gained `fuzzy` plus the trail-field documentation. Deliberate: the new
   surface is the feature. Descriptions were tightened in the same pass and
   the CI drift gate moved 3200 → 3800.
+- **Git-import identity boundary (stated, not hidden).** A `DROP TABLE` /
+  `DROP COLUMN` in a revert diff is seeded at the entity level
+  (`users.card_token`) and matches a re-add in any file; every other diff
+  shape (ORM columns, serializer fields, non-SQL code) is seeded file-level,
+  so a reverted entity resurfacing in a *different* file is missed.
+  Documented in `selvedge import --from-git` help and `gitimport.py`.
+  Widening it — plus provenance-based trust tiers (re-derivable git slice vs
+  live testimony) and a `--verify` re-derivation diff — is the "git-import
+  provenance + trust tiers" cluster in the Phase 2.18 plan.
 - **Test budget:** 114 new tests across `test_supersede.py` (35),
   `test_hook.py` (45), `test_gitimport.py` (18), `test_semantic.py` (16) —
   full suite 676. Large by design: four publicly-promised features, each

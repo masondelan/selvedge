@@ -22,11 +22,22 @@ the author date. Idempotent by construction: the importer keys on
 ``(git_commit, entity_path)`` and skips pairs already stored for the
 ``git-import`` agent.
 
-Honest limits, stated up front: reverts folded into unrelated commits (no
-"revert" in the message, nothing deleted) are missed, and message-sweep
-entities are file-level except where a dropped table/column is literally
-visible in the diff. Precision over recall — a seeded false "reverted"
-verdict would gate the enforcement hook on innocent entities.
+Honest limits, stated up front:
+
+  - **Reverts folded into unrelated commits** (no "revert" in the message,
+    nothing deleted) are missed.
+  - **Identity boundary.** git's identity is paths + hunks; a decision lives
+    at the entity level. A DROP TABLE / DROP COLUMN in the revert diff is
+    seeded at the entity level (``users.card_token``) and so matches a re-add
+    in any file — but every other diff shape (ORM model columns, serializer
+    fields, non-SQL code) is seeded file-level, so a reverted entity that
+    resurfaces in a *different* file is missed. Widening this — extracting
+    identifiers from any revert diff with enclosing-scope context, indexing
+    on those — is the Phase 2.18 "git-import provenance + trust tiers" work
+    in ``docs/architecture.md``.
+
+Precision over recall — a seeded false "reverted" verdict would gate the
+enforcement hook on innocent entities.
 """
 
 from __future__ import annotations

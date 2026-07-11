@@ -102,7 +102,15 @@ def get_embedder(model_name: str = DEFAULT_MODEL) -> EmbedFn:
         from model2vec import StaticModel
     except ImportError as e:
         raise SemanticUnavailable(INSTALL_HINT) from e
-    model = StaticModel.from_pretrained(model_name)
+    try:
+        model = StaticModel.from_pretrained(model_name)
+    except Exception as e:  # noqa: BLE001 — loading can fail many ways
+        # Offline machine, bad model name, corrupt cache — for callers this
+        # is the same situation as "no backend": fall back, don't crash.
+        raise SemanticUnavailable(
+            f"embedding model {model_name!r} failed to load ({e}); "
+            "fuzzy matching is unavailable"
+        ) from e
 
     def embed(texts: list[str]) -> Sequence[Sequence[float]]:
         return model.encode(texts).tolist()
@@ -237,9 +245,6 @@ def fuzzy_events(
     ``threshold``, capped at ``limit``. Raises :class:`IndexMissing` when no
     embeddings exist for the model.
     """
-    embed = embed_fn or get_embedder(model_name)
-    query_vec = _normalize(embed([query])[0])
-
     conn = _connect(storage.db_path)
     try:
         rows = conn.execute(
@@ -247,9 +252,14 @@ def fuzzy_events(
             (model_name,),
         ).fetchall()
         if not rows:
+            # Checked BEFORE touching the embedding backend: loading the
+            # model can hit the network (first-run download), and a query
+            # against a machine with no index must stay fully local.
             raise IndexMissing(
                 "no embeddings index yet — run `selvedge index` first"
             )
+        embed = embed_fn or get_embedder(model_name)
+        query_vec = _normalize(embed([query])[0])
 
         scored: list[tuple[float, str]] = []
         for r in rows:
@@ -298,6 +308,7 @@ def fuzzy_prior_attempts(
     window_minutes: int = 10080,
     limit: int = 20,
     exclude_paths: set[str] | None = None,
+    exclude_ids: set[str] | None = None,
     model_name: str = DEFAULT_MODEL,
     threshold: float = DEFAULT_THRESHOLD,
     embed_fn: EmbedFn | None = None,
@@ -311,8 +322,14 @@ def fuzzy_prior_attempts(
     confidence / trail fields), each additionally labeled
     ``match_type="fuzzy"`` with the entity's best ``similarity``.
 
-    ``exclude_paths`` drops entities the caller already has exact results
-    for. Raises :class:`SemanticUnavailable` / :class:`IndexMissing` like
+    Dedupe happens at the EVENT level, not just the path level:
+    ``get_prior_attempts`` expands dotted prefixes (a ``users`` lookup also
+    returns ``users.card_token`` attempts), so path-only exclusion would
+    let the same event appear once as exact and once as fuzzy, or twice
+    across overlapping hit paths. ``exclude_ids`` drops events the caller
+    already holds; hits are also deduped against each other by event id.
+    ``exclude_paths`` remains as a cheap pre-filter. Raises
+    :class:`SemanticUnavailable` / :class:`IndexMissing` like
     :func:`fuzzy_events` — callers fall back to substring matching.
     """
     hits = fuzzy_events(
@@ -324,6 +341,7 @@ def fuzzy_prior_attempts(
         embed_fn=embed_fn,
     )
     exclude = exclude_paths or set()
+    seen_ids = set(exclude_ids or set())
     best_similarity: dict[str, float] = {}
     for hit in hits:
         path = hit["entity_path"]
@@ -339,6 +357,9 @@ def fuzzy_prior_attempts(
             window_minutes=window_minutes,
             limit=limit,
         ):
+            if attempt["id"] in seen_ids:
+                continue
+            seen_ids.add(attempt["id"])
             attempt["match_type"] = "fuzzy"
             attempt["similarity"] = similarity
             results.append(attempt)

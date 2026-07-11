@@ -168,6 +168,40 @@ def test_git_revert_shape_extracts_removed_add_column(tmp_path):
     assert by_path["payments.card_number"].reasoning.startswith("Revert")
 
 
+def test_pure_rename_is_not_a_false_revert(tmp_path):
+    """Regression: a rename must report as R (new path), never as a delete —
+    so it never lands in the deletion sweep as a phantom revert. Forced with
+    -M independent of the user's diff.renames config."""
+    repo = tmp_path / "rename-repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    # Turn rename detection OFF in config to prove we override it with -M.
+    _git(repo, "config", "diff.renames", "false")
+    (repo / "old_name.py").write_text("print('hi')\n" * 5)
+    _commit_all(repo, "Add module", "2026-03-01T10:00:00+00:00")
+    _git(repo, "mv", "old_name.py", "new_name.py")
+    _commit_all(repo, "Rename module for clarity", "2026-03-02T10:00:00+00:00")
+
+    events = collect_revert_events(repo)
+    by_path = {e.entity_path for e in events}
+    # The rename commit had no "revert" in the message and deleted nothing
+    # (it's an R), so neither path should surface as a revert.
+    assert "old_name.py" not in by_path
+    assert "new_name.py" not in by_path
+
+
+def test_since_typo_ref_warns_on_stderr(tmp_path, capsys):
+    """A typo'd --since ref falls through to git's date parser; the importer
+    must say so on stderr rather than silently walking the whole history."""
+    repo = tmp_path / "warn-repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "f.txt").write_text("x\n")
+    _commit_all(repo, "init", "2026-03-01T10:00:00+00:00")
+    collect_revert_events(repo, since="v9.9.9-nope")
+    assert "does not resolve as a git ref" in capsys.readouterr().err
+
+
 def test_non_repo_raises(tmp_path):
     bare = tmp_path / "not-a-repo"
     bare.mkdir()

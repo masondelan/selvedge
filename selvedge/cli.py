@@ -1354,6 +1354,7 @@ def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_j
                 window_minutes=window_minutes,
                 limit=limit,
                 exclude_paths={r["entity_path"] for r in rows},
+                exclude_ids={r["id"] for r in rows},
             )
         except (semantic.SemanticUnavailable, semantic.IndexMissing) as e:
             from rich.markup import escape
@@ -2300,8 +2301,9 @@ def import_migrations(path, fmt, from_git, since, project, dry_run, as_json):
     message mentions "revert" plus commits that deleted files. Each becomes
     a change_type="revert" event (agent="git-import", reasoning = commit
     subject+body) so prior_attempts and the enforcement hook see them.
-    Idempotent — re-running skips (commit, entity) pairs already imported.
-    Honest limit: reverts folded into unrelated commits are missed.
+    Idempotent — re-running skips (commit, entity) pairs already imported,
+    regardless of --project. Honest limit: reverts folded into unrelated
+    commits are missed.
 
     \b
     Examples:
@@ -2360,9 +2362,10 @@ def import_migrations(path, fmt, from_git, since, project, dry_run, as_json):
             table.add_column("Entity", style="cyan")
             table.add_column("Reasoning")
             for ev in fresh:
-                table.add_row(
-                    ev.git_commit[:8], ev.entity_path, ev.reasoning.splitlines()[0][:60]
-                )
+                # `or [""]`: a commit created with --allow-empty-message
+                # yields reasoning="" and splitlines() returns [].
+                first_line = (ev.reasoning.splitlines() or [""])[0]
+                table.add_row(ev.git_commit[:8], ev.entity_path, first_line[:60])
             console.print(table)
             if skipped:
                 console.print(f"  [dim]{skipped} already-imported event(s) skipped.[/dim]")

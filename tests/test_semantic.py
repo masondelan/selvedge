@@ -158,6 +158,55 @@ def test_get_embedder_raises_without_extra(monkeypatch):
         semantic.get_embedder()
 
 
+def test_get_embedder_wraps_model_load_failure(monkeypatch):
+    """Regression: model2vec installed but the model won't load (offline,
+    corrupt cache, bad name) must raise SemanticUnavailable — the same
+    fall-back signal callers already catch — not an arbitrary exception."""
+    class _BrokenModel:
+        @staticmethod
+        def from_pretrained(name):
+            raise RuntimeError("could not download model weights")
+
+    fake_module = type(sys)("model2vec")
+    fake_module.StaticModel = _BrokenModel
+    monkeypatch.setitem(sys.modules, "model2vec", fake_module)
+    with pytest.raises(semantic.SemanticUnavailable, match="failed to load"):
+        semantic.get_embedder()
+
+
+def test_fuzzy_events_checks_index_before_touching_backend(storage, monkeypatch):
+    """Regression: querying against a machine with no index must raise
+    IndexMissing WITHOUT invoking the embedder — loading the model can hit
+    the network (first-run download), and a query must stay fully local."""
+    _seed_card_token_revert(storage)  # events exist, but no index built
+
+    def _boom(model_name):
+        raise AssertionError("embedder must not be constructed before the index check")
+
+    monkeypatch.setattr(semantic, "get_embedder", _boom)
+    with pytest.raises(semantic.IndexMissing):
+        semantic.fuzzy_events(storage, "anything")  # no embed_fn → would call get_embedder
+
+
+def test_fuzzy_prior_attempts_no_duplicate_events_across_prefixes(storage):
+    """Regression: get_prior_attempts expands dotted prefixes, so a table-level
+    hit and a column-level hit could return the same event twice. Event-level
+    dedupe (exclude_ids + seen set) must prevent it."""
+    # Reasoning on BOTH the table and its column matches the query, producing
+    # two hit paths ("users" and "users.card_token") whose prior_attempts
+    # expansions overlap on the users.card_token events.
+    _ev(storage, "users", "add", "2026-01-01T00:00:00Z",
+        "Users table holds card payment tokens.")
+    _seed_card_token_revert(storage)
+    semantic.build_index(storage, embed_fn=fake_embed)
+
+    rows = semantic.fuzzy_prior_attempts(
+        storage, "card payment tokens", embed_fn=fake_embed
+    )
+    ids = [r["id"] for r in rows]
+    assert len(ids) == len(set(ids)), f"duplicate events in fuzzy result: {ids}"
+
+
 # ---------------------------------------------------------------------------
 # CLI — `selvedge index` + `prior-attempts --fuzzy`
 # ---------------------------------------------------------------------------
@@ -222,10 +271,18 @@ def test_cli_fuzzy_labels_matches(runner, monkeypatch):
 
 
 def test_cli_fuzzy_falls_back_to_substring_with_pointer(runner, monkeypatch):
+    """Extra missing at QUERY time (index exists) → install pointer + fallback.
+
+    The index is seeded first because the index-existence check deliberately
+    runs before the backend loads (zero network on machines with no index) —
+    with no index at all, the message is the IndexMissing one instead,
+    covered by test_cli_fuzzy_index_missing_falls_back.
+    """
     from selvedge.cli import cli
 
     storage = _cli_storage()
     _seed_card_token_revert(storage)
+    semantic.build_index(storage, embed_fn=fake_embed)
     monkeypatch.setitem(sys.modules, "model2vec", None)
 
     result = runner.invoke(

@@ -1268,16 +1268,21 @@ class SelvedgeStorage:
                     outcome = "reverted"
                     outcome_reasoning = closing["reasoning"]
                     # A later supersede event re-opens the reverted verdict.
-                    # Explicit id-link wins; a supersede on the same path at
-                    # or after the removal counts too (covers hand-logged
-                    # supersede events with no id).
+                    # An explicit id-link only re-opens ITS removal; the
+                    # timestamp fallback applies only to hand-logged
+                    # supersede events with no id — otherwise a supersede of
+                    # one revert would flip every earlier, unrelated revert
+                    # on the same path to "reopened".
                     closing_ts = _parse_iso(closing["timestamp"])
                     superseding = next(
                         (
                             s
                             for s in supersede_events
                             if s["supersedes"] == closing["id"]
-                            or _parse_iso(s["timestamp"]) >= closing_ts
+                            or (
+                                not s["supersedes"]
+                                and _parse_iso(s["timestamp"]) >= closing_ts
+                            )
                         ),
                         None,
                     )

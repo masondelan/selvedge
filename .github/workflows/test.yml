@@ -27,11 +27,14 @@ jobs:
         run: mypy selvedge
 
       # Drift guard: fail if the MCP tool definitions balloon the agent's
-      # at-init context footprint. Budget is a bit above today's ~3.1k core
-      # (8 tools). tiktoken is a dev dependency so this uses the real
-      # tokenizer that matches the figures Selvedge publishes.
+      # at-init context footprint. Budget is a bit above today's ~3.6k core
+      # (still 8 tools; v0.3.9.1 added the supersede/constraint/stale_when
+      # params and the fuzzy recall surface — a deliberate, called-out
+      # increase from the ~3.1k v0.3.9 figure, see CHANGELOG). tiktoken is a
+      # dev dependency so this uses the real tokenizer that matches the
+      # figures Selvedge publishes.
       - name: MCP schema-tax budget
-        run: python scripts/schema_tax.py --max 3200
+        run: python scripts/schema_tax.py --max 3800
 
   test:
     runs-on: ubuntu-latest

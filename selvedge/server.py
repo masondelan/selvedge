@@ -259,11 +259,9 @@ def log_change(
         Field(
             description=(
                 "What kind of change. One of: add, remove, modify, rename, retype, "
-                "create, delete, index_add, index_remove, migrate, revert, "
-                "supersede. Use 'revert' for 'we tried this and rolled it back' "
-                "(clearer than a plain remove); 'supersede' re-opens a reverted "
-                "decision (see the supersedes parameter). "
-                "Invalid values are rejected — pick the closest match."
+                "create, delete, index_add, index_remove, migrate, revert "
+                "(tried and rolled back), supersede (re-open a reverted "
+                "decision). Invalid values are rejected — pick the closest match."
             ),
         ),
     ],
@@ -367,10 +365,8 @@ def log_change(
         Field(
             default="",
             description=(
-                "Optional: the testable principle that drove this decision, "
-                "split out of the free-text reasoning so it stays queryable. "
-                "Example: 'card data in our own DB puts us in PCI scope'. "
-                "Leave empty when there's no crisp constraint."
+                "Optional: the testable principle behind the decision, kept "
+                "queryable (e.g. 'card data in our own DB = PCI scope')."
             ),
         ),
     ] = "",
@@ -379,11 +375,9 @@ def log_change(
         Field(
             default="",
             description=(
-                "Optional: the evidence that would make this decision stale, "
-                "as a short phrase. Example: 'payment provider changed'. "
-                "`stale_decisions` keyword-matches it against later change "
-                "events and flags 'review suggested' — surfacing only, never "
-                "an automatic un-retire."
+                "Optional: what would invalidate this decision (e.g. 'payment "
+                "provider changed'). stale_decisions matches it against later "
+                "events and flags 'review suggested' — surfacing only."
             ),
         ),
     ] = "",
@@ -392,12 +386,10 @@ def log_change(
         Field(
             default="",
             description=(
-                "The id of the prior event this change overrides. Only valid "
-                "with change_type='supersede'. Leave empty on a supersede call "
-                "to auto-link the entity's most recent remove/delete event — "
-                "the usual 'this was reverted once, but the world changed' "
-                "re-open. The store stays append-only; the old verdict is "
-                "never edited, just derived as superseded."
+                "Id of the prior event this change overrides; only valid with "
+                "change_type='supersede'. Empty auto-links the entity's most "
+                "recent remove/delete. Append-only — the old verdict is never "
+                "edited, just derived as superseded."
             ),
         ),
     ] = "",
@@ -439,20 +431,13 @@ def log_change(
             reasoning="Split auth.py into an auth/ package; login moved.",
         )
 
-    Superseding a reverted decision: when something that was tried and
-    reverted becomes correct again (the constraint that killed it no longer
-    holds), do NOT delete or edit history — set `change_type="supersede"`.
-    Selvedge links the new event to the reverted one (auto-resolving the
-    most recent remove/delete on the path when `supersedes` is empty) and
-    every read surface then reports the trail tried → reverted → re-opened.
-    Example:
-
-        log_change(
-            entity_path="payments.card_token",
-            change_type="supersede",
-            reasoning="Provider now vaults card data — PCI constraint gone.",
-            constraint="card data in our own DB puts us in PCI scope",
-        )
+    Superseding a reverted decision: when a reverted change becomes correct
+    again (the constraint that killed it no longer holds), do NOT delete or
+    edit history — log with `change_type="supersede"` and the reason. The
+    new event links the prior revert (auto-resolved when `supersedes` is
+    empty) and every read surface then reports the trail
+    tried → reverted → re-opened. Never re-apply a reverted change without
+    superseding it first.
 
     On validation failure (invalid change_type, missing entity_path,
     `rename_from` set without change_type='rename', `supersedes` set without
@@ -578,9 +563,8 @@ def diff(
 
     Supports prefix matching — e.g. 'users' returns all events for the users
     table and any users.* column. Each event carries a derived
-    `superseded_by` field (v0.3.9.1) — the id of a later supersede event
-    that overrode it, or "" — so a tried → reverted → re-opened trail is
-    readable straight off the history.
+    `superseded_by` id ("" when nothing overrode it), so the
+    tried → reverted → re-opened trail reads straight off the history.
     """
     storage = get_storage()
     storage.record_tool_call("diff", entity_path=entity_path)
@@ -605,12 +589,11 @@ def blame(
     """Most recent change to an entity — what changed, when, who, why.
 
     Like `git blame` but for semantic entities (DB columns, functions, env
-    vars, dependencies) and AI agents. The result also carries the derived
-    decision state (v0.3.9.1): `status` is the entity's current standing
-    (`active` / `reverted` / `reopened`), and `superseded_by` is the id of a
-    later supersede event that overrode this change, or `""`. If no history
-    exists for the entity, returns `{"error": "..."}` with protocol-level
-    `isError: false`.
+    vars, dependencies) and AI agents. Also carries the derived decision
+    state: `status` (`active` / `reverted` / `reopened`) and
+    `superseded_by` (id of a later supersede overriding this change, or
+    ""). If no history exists for the entity, returns `{"error": "..."}`
+    with protocol-level `isError: false`.
     """
     storage = get_storage()
     storage.record_tool_call("blame", entity_path=entity_path)
@@ -808,13 +791,12 @@ def prior_attempts(
         Field(
             default="",
             description=(
-                "Optional semantic query: ALSO return attempts on entities whose "
-                "prior reasoning is semantically similar to this text — catches "
-                "renames (payment_token vs card_token) that exact and substring "
-                "lookups miss. Results are labeled match_type='fuzzy' with a "
-                "similarity score. Requires the selvedge[semantic] extra and a "
-                "`selvedge index` run; otherwise falls back to substring "
-                "matching and says so in a leading note row."
+                "Optional semantic query: also return attempts on entities "
+                "whose prior reasoning is similar to this text — catches "
+                "renames (payment_token vs card_token). Rows are labeled "
+                "match_type='fuzzy' with a similarity score; without the "
+                "selvedge[semantic] extra it falls back to substring matching "
+                "and says so in a leading note row."
             ),
         ),
     ] = "",
@@ -856,41 +838,21 @@ def prior_attempts(
     inferred `outcome` — so you can change your plan instead of repeating a
     rejected approach.
 
-    Each result is a change event with six extra fields:
-
-      - `outcome`           — "reverted" (a later remove/delete on the same
-                              path), "reopened" (reverted, but a later
-                              supersede re-opened the decision), or "active"
-                              (no later removal seen).
-      - `confidence`        — "proximity_high" or "proximity_low".
-      - `outcome_reasoning` — the reverting event's reasoning (WHY it was
-                              rejected), or "" while still active.
-      - `superseded_by`     — id of the supersede event that re-opened a
-                              reverted verdict, or "".
-      - `supersede_reasoning` — WHY it was re-opened, or "".
-      - `current_status`    — the entity's derived standing right now:
-                              "active" / "reverted" / "reopened". Treat
-                              "reverted" as "don't repeat this without a
-                              supersede"; "reopened" means the old revert no
-                              longer stands.
-
-    Together these read as the full trail: tried → reverted → re-opened.
-    Outcome is inferred from add->remove proximity plus explicit supersede
-    links. Output is templated, deterministic, and makes no LLM call. This
-    is a pull-only tool: it never writes and never pushes; you decide when
-    to ask.
+    Each result is a change event plus the trail fields: `outcome`
+    ("reverted" — a later removal on the path; "reopened" — reverted but a
+    later supersede re-opened it; "active"), `confidence` ("proximity_high"
+    / "proximity_low"), `outcome_reasoning` (WHY it was rejected),
+    `superseded_by` + `supersede_reasoning` (the re-open, when present), and
+    `current_status` — the entity's standing now. Treat "reverted" as
+    "don't repeat this without a supersede"; "reopened" means the old
+    revert no longer stands. Together they read: tried → reverted →
+    re-opened. Templated and deterministic — no LLM call; pull-only.
 
     Conservative by design — `min_confidence` defaults to "proximity_high",
     so an empty list (nothing clearly tried-and-rejected) is the normal,
     preferred answer over a speculative false positive. Pass
-    `min_confidence="proximity_low"` to widen recall.
-
-    Every row carries `match_type` ("exact" / "substring" / "fuzzy") and
-    `similarity` (0.0 unless fuzzy). Pass `fuzzy` with a short description
-    to also search semantically — the optional recall layer for renamed
-    entities. Without the selvedge[semantic] extra (or before `selvedge
-    index` has run) the fuzzy part falls back to substring matching, with a
-    leading `{"note": ...}` row explaining how to enable it.
+    `min_confidence="proximity_low"` to widen recall. Rows carry
+    `match_type` ("exact" / "substring" / "fuzzy") and `similarity`.
     """
     storage = get_storage()
     storage.record_tool_call("prior_attempts", entity_path=entity_path)
@@ -922,6 +884,7 @@ def prior_attempts(
                 window_minutes=window_minutes,
                 limit=limit,
                 exclude_paths={r["entity_path"] for r in results},
+                exclude_ids={r["id"] for r in results},
             )
         except (semantic.SemanticUnavailable, semantic.IndexMissing) as e:
             existing_paths = {r["entity_path"] for r in results}
@@ -971,28 +934,20 @@ def stale_decisions(
 ) -> list[dict]:
     """Decisions due for a revisit — past their date, or with a triggered stale condition.
 
-    Two surfacing rules, both deterministic:
+    Two deterministic rules. Date-based (`flag="revisit_due"`): events whose
+    `revisit_after` has passed AND the entity is still live (queried via
+    `blame`/`diff`/`prior_attempts` after the decision, or its changeset saw
+    later activity) — pure age alone never surfaces. Condition-based
+    (`flag="review_suggested"`): events whose `stale_when` text shares
+    keywords with a LATER change event — the named invalidation evidence may
+    have happened. Surfacing only: nothing is un-retired automatically;
+    follow up with a `supersede` if the condition really was triggered.
 
-    1. Date-based (v0.3.8), `flag="revisit_due"`: events whose
-       `revisit_after` has passed — but ONLY when the entity is still live
-       (queried via `blame`/`diff`/`prior_attempts` after the decision, or
-       its `changeset_id` saw later activity). Pure age alone does NOT
-       surface, so an old-but-correct decision nobody touches never nags.
-
-    2. Condition-based (v0.3.9.1), `flag="review_suggested"`: events whose
-       `stale_when` text shares keywords with a LATER change event — the
-       evidence the decision named as invalidating it may have happened
-       (e.g. stale_when "payment provider changed" vs a later "switched
-       payment provider to Adyen" event). Surfacing only: nothing is
-       un-retired automatically — follow up with a `supersede` if the
-       condition really has been triggered.
-
-    Each result is the change event plus `flag`, `revisit_due` (UTC ISO or
-    ""), `days_overdue`, `active_use_signals`, `matched_terms`,
-    `matched_event_id`, and `stale_reason` (a one-line summary). Date-due
-    rows first, most-overdue leading; filter by `entity_path`, `project`, or
-    `agent`. `expires_when` evaluation lands in v0.3.11. Templated and
-    deterministic; no LLM call.
+    Each result is the change event plus `flag`, `revisit_due`,
+    `days_overdue`, `active_use_signals`, `matched_terms`,
+    `matched_event_id`, and a one-line `stale_reason`. Date-due rows first,
+    most-overdue leading; filter by `entity_path`, `project`, or `agent`.
+    Templated and deterministic; no LLM call.
     """
     storage = get_storage()
     storage.record_tool_call("stale_decisions", entity_path=entity_path)

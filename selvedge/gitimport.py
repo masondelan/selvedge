@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from .importers import (
@@ -49,7 +50,11 @@ GIT_IMPORT_AGENT = "git-import"
 
 #: Field separator for --format parsing. NUL never appears in messages.
 _SEP = "%x00"
-_RECORD_SEP = "%x01"
+#: Record separator: NUL + Record Separator. A commit body CAN legally
+#: contain a lone 0x1e, but never a NUL — so the two-byte sequence is
+#: unforgeable by message content.
+_RECORD_SEP = "%x00%x1e"
+_RECORD_SEP_BYTES = "\x00\x1e"
 
 #: Bound the entities emitted per commit — a 400-file revert commit is a
 #: repo-wide rollback, not 400 individual decisions worth seeding.
@@ -63,8 +68,11 @@ class GitImportError(RuntimeError):
 def _run_git(repo: Path, args: list[str]) -> str:
     """Run a git command in ``repo`` and return stdout, or raise GitImportError."""
     try:
+        # core.quotepath=false: without it, git C-quotes non-ASCII paths
+        # ("r\303\251sum\303\251.md") and the stored entity would never
+        # match the live-logged one.
         result = subprocess.run(
-            ["git", "-C", str(repo), *args],
+            ["git", "-C", str(repo), "-c", "core.quotepath=false", *args],
             capture_output=True,
             text=True,
             check=False,
@@ -96,6 +104,13 @@ def _since_args(repo: Path, since: str) -> list[str]:
     )
     if probe.returncode == 0:
         return [f"{since}..HEAD"]
+    # Not a commit-ish — hand it to git's date parser. Say so out loud:
+    # git's approxidate is extremely lenient, so a typo'd TAG here would
+    # otherwise silently drop the bound and walk the whole history.
+    sys.stderr.write(
+        f"selvedge: --since {since!r} does not resolve as a git ref; "
+        "passing it to git as a date expression\n"
+    )
     return [f"--since={since}"]
 
 
@@ -104,7 +119,7 @@ def _log_commits(repo: Path, extra_args: list[str], since: str) -> list[dict]:
     fmt = f"{_RECORD_SEP}%H{_SEP}%aI{_SEP}%s{_SEP}%b"
     out = _run_git(repo, ["log", f"--format={fmt}", *extra_args, *_since_args(repo, since)])
     commits: list[dict] = []
-    for chunk in out.split("\x01"):
+    for chunk in out.split(_RECORD_SEP_BYTES):
         chunk = chunk.strip("\n")
         if not chunk:
             continue
@@ -120,8 +135,14 @@ def _log_commits(repo: Path, extra_args: list[str], since: str) -> list[dict]:
 
 
 def _touched_paths(repo: Path, sha: str, statuses: str = "") -> list[str]:
-    """File paths a commit touched, optionally filtered by status letters."""
-    args = ["show", sha, "--name-status", "--format=", "--no-renames"]
+    """File paths a commit touched, optionally filtered by status letters.
+
+    Rename detection is forced ON (``-M``, matching the sweep queries) so a
+    renamed file reports as ``R<score>\\told\\tnew`` — NOT as a delete+add —
+    and therefore never lands in the deletion sweep as a false revert. For
+    renames the new path is used.
+    """
+    args = ["show", sha, "-M", "--name-status", "--format="]
     out = _run_git(repo, args)
     paths: list[str] = []
     for line in out.splitlines():
@@ -152,7 +173,7 @@ def _dropped_sql_entities(repo: Path, sha: str) -> list[tuple[str, str]]:
     Either way the entity is what got torn down — so a revert that visibly
     dropped ``users.email`` seeds a column-level entity, not just a file.
     """
-    out = _run_git(repo, ["show", sha, "--format=", "--unified=0", "--no-renames"])
+    out = _run_git(repo, ["show", sha, "-M", "--format=", "--unified=0"])
     removed_lines: list[str] = []
     added_lines: list[str] = []
     for line in out.splitlines():
@@ -197,8 +218,10 @@ def collect_revert_events(
 
     # Sweep 1: commits whose message mentions "revert".
     message_hits = _log_commits(repo, ["-i", "--grep=revert"], since)
-    # Sweep 2: commits that deleted files (regardless of message).
-    deletion_hits = _log_commits(repo, ["--diff-filter=D"], since)
+    # Sweep 2: commits that deleted files (regardless of message). -M forces
+    # rename detection to match _touched_paths, so a pure rename is an R,
+    # not a D, on both sides — independent of the user's diff.renames config.
+    deletion_hits = _log_commits(repo, ["--diff-filter=D", "-M"], since)
 
     by_hash: dict[str, dict] = {}
     for commit in message_hits + deletion_hits:
@@ -215,10 +238,11 @@ def collect_revert_events(
 
         candidates: list[tuple[str, str]] = []
         if _REVERT_RE.search(commit["subject"]) or _REVERT_RE.search(commit["body"]):
-            # Message sweep: every touched path is part of what got reverted,
-            # plus any table/column visibly dropped in the patch.
-            candidates += [(p, "file") for p in _touched_paths(repo, sha)]
+            # Message sweep: any table/column visibly dropped in the patch,
+            # then every touched path. SQL entities lead so the per-commit
+            # cap can never truncate the highest-value extractions away.
             candidates += _dropped_sql_entities(repo, sha)
+            candidates += [(p, "file") for p in _touched_paths(repo, sha)]
         else:
             # Deletion sweep only: just the deleted files.
             candidates += [(p, "file") for p in _touched_paths(repo, sha, statuses="D")]

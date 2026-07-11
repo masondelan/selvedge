@@ -60,6 +60,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# SQL DDL extractors are reused so the hook derives the SAME dotted
+# table.column / table entities the migration importer stores from git
+# history — otherwise a raw `ALTER TABLE users ADD COLUMN sso_token` edit
+# (no literal dot) yields no entity and the hook can't gate the very
+# scenario it exists for: re-adding a reverted DB column.
+from ..importers import (
+    _SQL_ADD_COLUMN,
+    _SQL_CREATE_TABLE,
+    _SQL_DROP_COLUMN,
+    _SQL_DROP_TABLE,
+)
 from ..storage import SelvedgeStorage, _paths_related, canonicalize_entity_path
 from ..timeutil import normalize_timestamp
 
@@ -97,6 +108,7 @@ _MAX_BLOCKED_REPORTED = 3
 # naming convention); the right-hand side excludes file extensions so
 # "auth.py" or "schema.sql" never becomes a phantom column entity.
 _ENTITY_TOKEN_RE = re.compile(r"\b([a-z][a-z0-9_]{2,})\.([a-z][a-z0-9_]{2,})\b")
+
 _FILE_EXTENSIONS = frozenset({
     "cfg", "conf", "csv", "html", "ini", "js", "json", "jsx", "md",
     "py", "rb", "rs", "sh", "sql", "toml", "ts", "tsx", "txt", "xml",
@@ -258,24 +270,58 @@ def _entity_tokens(text: str) -> list[str]:
     is the real filter.
     """
     seen: list[str] = []
+
+    def _add(token: str) -> None:
+        if token not in seen and len(seen) < _MAX_ENTITY_CANDIDATES:
+            seen.append(token)
+
+    # SQL DDL first — highest precision, and the case the importer records
+    # from git history (ADD/DROP COLUMN → table.column; CREATE/DROP TABLE →
+    # table). Matching the importer's parsers keeps hook and store in step.
+    for m in _SQL_ADD_COLUMN.finditer(text):
+        _add(f"{m.group(1)}.{m.group(2)}")
+    for m in _SQL_DROP_COLUMN.finditer(text):
+        _add(f"{m.group(1)}.{m.group(2)}")
+    for m in _SQL_CREATE_TABLE.finditer(text):
+        _add(m.group(1))
+    for m in _SQL_DROP_TABLE.finditer(text):
+        _add(m.group(1))
+    # Then any already-dotted table.column literals elsewhere in the diff.
     for m in _ENTITY_TOKEN_RE.finditer(text):
         left, right = m.group(1), m.group(2)
         if right in _FILE_EXTENSIONS:
             continue
-        token = f"{left}.{right}"
-        if token not in seen:
-            seen.append(token)
+        _add(f"{left}.{right}")
         if len(seen) >= _MAX_ENTITY_CANDIDATES:
             break
     return seen
 
 
-def _relative_to(path_str: str, cwd: Path) -> str:
-    """Best-effort project-relative form of ``path_str`` for glob matching."""
+def _project_root(db_path: Path, cwd: Path) -> Path:
+    """The directory that entity paths are recorded relative to.
+
+    Entities are stored project-root-relative (git-import records
+    ``git show``'s repo-root-relative paths; agents log the same shape). The
+    root is the directory that CONTAINS ``.selvedge/`` — i.e.
+    ``<root>/.selvedge/selvedge.db`` → ``<root>``. Relativizing against the
+    payload ``cwd`` instead silently breaks enforcement for any session
+    opened in a subdirectory: an absolute ``…/backend/migrations/x.sql``
+    would become ``migrations/x.sql`` and never match the recorded
+    ``backend/migrations/x.sql``. When ``SELVEDGE_DB`` points somewhere
+    non-standard (no ``.selvedge`` parent), fall back to ``cwd`` — there is
+    no better guess.
+    """
+    if db_path.parent.name == ".selvedge":
+        return db_path.parent.parent.resolve()
+    return cwd.resolve()
+
+
+def _relative_to(path_str: str, root: Path) -> str:
+    """Best-effort ``root``-relative form of ``path_str`` for glob matching."""
     try:
         p = Path(path_str)
         if p.is_absolute():
-            return str(p.resolve().relative_to(cwd.resolve()))
+            return str(p.resolve().relative_to(root.resolve()))
     except (ValueError, OSError):
         pass
     return path_str.lstrip("./")
@@ -400,11 +446,16 @@ def evaluate(payload: dict, *, now: datetime | None = None) -> Decision:
     if db_path is None:
         return Decision("allow", reason="no project Selvedge DB")
 
+    # Relativize touched paths against the PROJECT ROOT (the dir holding
+    # .selvedge/), not the payload cwd — otherwise a session opened in a
+    # subdirectory sees entity paths that never match the recorded,
+    # root-relative ones, and enforcement goes silently inert.
+    root = _project_root(db_path, cwd)
     globs = [_glob_to_regex(g) for g in _load_watch_globs(db_path.parent)]
     touched = [
         p
         for p in _candidate_paths(tool_name, tool_input)
-        if any(rx.match(_relative_to(p, cwd)) for rx in globs)
+        if any(rx.match(_relative_to(p, root)) for rx in globs)
     ]
     if not touched:
         return Decision("allow", reason="no watched path touched")
@@ -412,7 +463,7 @@ def evaluate(payload: dict, *, now: datetime | None = None) -> Decision:
     # Entities: the touched files themselves + table.column tokens from the
     # change text. Heuristic extraction; the reverted-status check below is
     # the actual filter.
-    entities = [_relative_to(p, cwd) for p in touched]
+    entities = [_relative_to(p, root) for p in touched]
     entities += [t for t in _entity_tokens(_diff_text(tool_name, tool_input))]
     entities = entities[:_MAX_ENTITY_CANDIDATES]
 

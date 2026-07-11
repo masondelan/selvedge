@@ -73,6 +73,44 @@ def test_entity_tokens_capped():
     assert len(hook._entity_tokens(text)) == hook._MAX_ENTITY_CANDIDATES
 
 
+def test_entity_tokens_extracts_sql_ddl():
+    """Regression: raw SQL DDL has no literal 'table.column' dot — the hook
+    must parse ADD/DROP COLUMN and CREATE/DROP TABLE the same way the
+    importer does, or it can't gate the re-add of a reverted DB column (the
+    feature's headline scenario)."""
+    assert "users.sso_token" in hook._entity_tokens(
+        "ALTER TABLE users ADD COLUMN sso_token TEXT;"
+    )
+    assert "orders.total" in hook._entity_tokens(
+        "ALTER TABLE orders DROP COLUMN total;"
+    )
+    assert "payments" in hook._entity_tokens(
+        "CREATE TABLE payments (id INT, amount DECIMAL);"
+    )
+
+
+def test_block_on_raw_sql_ddl_readd(project):
+    """End-to-end regression for the extraction gap: a reverted column
+    (stored dotted, as git-import records it) must block a raw
+    `ALTER TABLE ... ADD COLUMN` edit that contains no literal dotted token."""
+    storage = _storage(project)
+    storage.log_event(ChangeEvent(
+        entity_path="users.sso_token", change_type="add",
+        timestamp="2026-01-01T00:00:00Z", reasoning="Tried an SSO token column.",
+    ))
+    storage.log_event(ChangeEvent(
+        entity_path="users.sso_token", change_type="revert",
+        timestamp="2026-01-02T00:00:00Z", reasoning="Reverted: SSO moved to JWTs.",
+    ))
+    payload = _edit_payload(
+        project, "migrations/003_readd.sql",
+        "ALTER TABLE users ADD COLUMN sso_token TEXT;",
+    )
+    decision = hook.evaluate(payload)
+    assert decision.action == "block"
+    assert decision.blocked_entities == ["users.sso_token"]
+
+
 # ---------------------------------------------------------------------------
 # evaluate() — fixtures
 # ---------------------------------------------------------------------------
@@ -254,6 +292,36 @@ def test_stale_query_outside_window_still_blocks(project):
 
     payload = _edit_payload(project, "migrations/0002.sql", "users.auth_token")
     assert hook.evaluate(payload).action == "block"
+
+
+def test_block_with_absolute_path_from_subdirectory(project):
+    """Regression: real Claude Code payloads carry ABSOLUTE file paths and
+    the session may be rooted in a subdirectory. Entities are recorded
+    project-root-relative (git-import / agents), so the hook must relativize
+    against the project root — the dir holding .selvedge/ — not the payload
+    cwd. Relativizing against cwd made enforcement silently inert here."""
+    storage = _storage(project)
+    # Recorded the way git-import / an agent would: repo-root-relative.
+    storage.log_event(ChangeEvent(
+        entity_path="backend/migrations/0002_orders.sql", change_type="add",
+        timestamp="2026-01-01T00:00:00Z", reasoning="Tried an orders table.",
+    ))
+    storage.log_event(ChangeEvent(
+        entity_path="backend/migrations/0002_orders.sql", change_type="remove",
+        timestamp="2026-01-02T00:00:00Z", reasoning="Reverted: orders live in the OMS.",
+    ))
+    # Session opened in the subdirectory; the edit carries an absolute path.
+    abs_file = str(project / "backend" / "migrations" / "0002_orders.sql")
+    payload = {
+        "session_id": "sess-sub",
+        "cwd": str(project / "backend"),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": abs_file, "old_string": "", "new_string": ""},
+    }
+    decision = hook.evaluate(payload)
+    assert decision.action == "block"
+    assert decision.blocked_entities == ["backend/migrations/0002_orders.sql"]
+    assert "orders live in the OMS" in decision.reason
 
 
 def test_bash_command_touching_watched_path_blocks(project):

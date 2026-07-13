@@ -60,7 +60,8 @@ You have access to Selvedge (MCP server: `selvedge`) for change tracking.
   empty, very short, or generic values like "user request" or "done".
   Good example: "User asked to add 2FA — needs phone number to send
   SMS verification codes."
-- Set `agent` to "claude-code" (or whichever agent you are).
+- Set `agent` to the tool you're using, e.g. "claude-code", "cursor",
+  or "codex".
 - Set `session_id` if you have access to the current session/conversation ID.
 - Set `git_commit` to the commit hash once you know it.
 - For multi-entity changes (e.g. adding a whole feature), set a shared

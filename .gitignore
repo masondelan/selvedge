@@ -7,6 +7,10 @@
 *.db-shm
 *.db-wal
 
+# ...except Selvedge's own history, which we dogfood (see README
+# "Selvedge tracks its own history"). A fresh clone can `selvedge status`.
+!.selvedge/selvedge.db
+
 # Python
 __pycache__/
 *.py[cod]

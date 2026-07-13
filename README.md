@@ -337,28 +337,32 @@ cd your-project
 selvedge init
 ```
 
-**2. Add to your Claude Code config**
+**2. Register the MCP server**
 
-`~/.claude/config.json`:
-```json
-{
-  "mcpServers": {
-    "selvedge": {
-      "command": "selvedge-server"
-    }
-  }
-}
+Selvedge is a standard stdio MCP server, so it works with any MCP client —
+Claude Code, Cursor, Windsurf, Codex CLI, Gemini CLI, and more. See
+**[Works with any MCP client](#works-with-any-mcp-client)** for the exact
+config per client. For Claude Code:
+
+```bash
+claude mcp add selvedge -- selvedge-server
 ```
-
-For Cursor: `~/.cursor/mcp.json`. For Copilot:
-`.github/copilot-instructions.md` (different format — see
-`selvedge prompt --help`).
 
 **3. Tell your agent to use it**
 
 ```bash
 selvedge prompt --install CLAUDE.md
 ```
+
+Point `--install` at whichever prompt file your client reads — the block
+itself is identical across clients:
+
+| Client | Prompt file |
+|--------|-------------|
+| Claude Code | `CLAUDE.md` |
+| Codex CLI (and other `AGENTS.md`-aware tools) | `AGENTS.md` |
+| Cursor | `.cursor/rules/selvedge.md` (or legacy `.cursorrules`) |
+| Gemini CLI | `GEMINI.md` |
 
 This installs the canonical agent-instructions block, sentinel-bracketed
 (`<!-- selvedge:start -->` / `<!-- selvedge:end -->`) so future
@@ -385,6 +389,118 @@ That's the same four steps the wizard runs.
 
 ---
 
+## Works with any MCP client
+
+Selvedge is a standard stdio MCP server — its launch command is
+`selvedge-server`, put on your `PATH` by `pip install selvedge`. Any
+MCP-capable client can run it. Pick yours:
+
+<details>
+<summary><b>Claude Code</b></summary>
+
+```bash
+claude mcp add selvedge -- selvedge-server
+```
+
+Or commit a project-level `.mcp.json` so your whole team gets it:
+
+```json
+{
+  "mcpServers": {
+    "selvedge": { "command": "selvedge-server" }
+  }
+}
+```
+
+Docs: <https://code.claude.com/docs/en/mcp>
+</details>
+
+<details>
+<summary><b>Cursor</b></summary>
+
+`.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
+
+```json
+{
+  "mcpServers": {
+    "selvedge": { "command": "selvedge-server" }
+  }
+}
+```
+
+Cursor's newer schema also accepts an explicit `"type": "stdio"`; the
+`command`-only form works too (Cursor infers stdio from `command`).
+Docs: <https://cursor.com/docs/mcp>
+</details>
+
+<details>
+<summary><b>Windsurf</b></summary>
+
+`~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "selvedge": { "command": "selvedge-server" }
+  }
+}
+```
+
+Windsurf hot-reloads the file — no restart needed. The in-app
+**Plugins → View raw config** button opens the exact file Cascade reads.
+Docs: <https://docs.windsurf.com/windsurf/cascade/mcp>
+</details>
+
+<details>
+<summary><b>Codex CLI</b></summary>
+
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.selvedge]
+command = "selvedge-server"
+```
+
+Or run `codex mcp add selvedge -- selvedge-server`.
+Docs: <https://developers.openai.com/codex/config-reference>
+</details>
+
+<details>
+<summary><b>Gemini CLI</b></summary>
+
+`~/.gemini/settings.json` (or `.gemini/settings.json` per project):
+
+```json
+{
+  "mcpServers": {
+    "selvedge": { "command": "selvedge-server" }
+  }
+}
+```
+
+Or run `gemini mcp add -s user selvedge selvedge-server`.
+Docs: <https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md>
+</details>
+
+<details>
+<summary><b>Any other MCP client</b></summary>
+
+Most clients share the same JSON shape — point yours at:
+
+```json
+{
+  "mcpServers": {
+    "selvedge": { "command": "selvedge-server" }
+  }
+}
+```
+
+If `selvedge-server` isn't found, use its absolute path (`which
+selvedge-server`).
+</details>
+
+---
+
 ## How it works
 
 Selvedge runs as an MCP server. AI agents in tools like Claude Code call
@@ -399,6 +515,25 @@ Each event records:
 - **Where** (git commit, project)
 
 The diff is git's job. The *why* is Selvedge's.
+
+---
+
+## Selvedge tracks its own history
+
+This repo dogfoods Selvedge: its `.selvedge/selvedge.db` is committed, so a
+fresh clone ships with Selvedge's own why-history. Clone it and ask why any
+part of Selvedge changed:
+
+```bash
+git clone https://github.com/masondelan/selvedge
+cd selvedge
+selvedge status                       # recent changes to Selvedge itself
+selvedge search "telemetry"           # why the opt-in heartbeat shipped
+selvedge blame selvedge/semantic.py   # why semantic search was added
+```
+
+Every event was logged by the agents that built Selvedge — the same
+`log_change` calls this README asks you to make in your own project.
 
 ---
 

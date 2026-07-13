@@ -290,10 +290,8 @@ def test_wizard_full_install_with_yes_to_all(
     fake_home: Path, fake_project: Path, monkeypatch
 ):
     """Full install path — every step lands ok or noop, no errors."""
-    # Fake Claude Code installed
+    # Fake Claude Code installed (detected via its ~/.claude/ dir)
     (fake_home / ".claude").mkdir()
-    claude_config = fake_home / ".claude" / "config.json"
-    claude_config.write_text("{}")
 
     outcome = run_wizard(
         project=fake_project,
@@ -315,8 +313,9 @@ def test_wizard_full_install_with_yes_to_all(
     # Hook installed
     assert statuses["Install git hook"] == "ok"
 
-    # And the actual MCP entry is in the config now
-    data = json.loads(claude_config.read_text())
+    # And the actual MCP entry landed in the project-level .mcp.json
+    # (current Claude Code reads it there, not ~/.claude/config.json)
+    data = json.loads((fake_project / ".mcp.json").read_text())
     assert "selvedge" in data["mcpServers"]
 
 
@@ -465,8 +464,8 @@ def test_wizard_skips_hook_when_not_in_git_repo(
 
 def test_wizard_force_resolves_conflict(fake_home: Path, fake_project: Path):
     """With force=True, an existing different MCP entry is overwritten cleanly."""
-    (fake_home / ".claude").mkdir()
-    config = fake_home / ".claude" / "config.json"
+    (fake_home / ".claude").mkdir()  # Claude Code detected via its home dir
+    config = fake_project / ".mcp.json"
     config.write_text(
         json.dumps({"mcpServers": {"selvedge": {"command": "/old/path"}}})
     )
@@ -485,3 +484,28 @@ def test_wizard_force_resolves_conflict(fake_home: Path, fake_project: Path):
     assert mcp_step.status == "ok"
     data = json.loads(config.read_text())
     assert data["mcpServers"]["selvedge"]["command"] == "selvedge-server"
+
+
+def test_wizard_claude_writes_project_mcp_json_not_home(
+    fake_home: Path, fake_project: Path
+):
+    """Regression: Claude Code's MCP entry must land in the project's
+    ``.mcp.json`` — what current Claude Code actually reads — and never in
+    the stale ``~/.claude/config.json`` the old wizard targeted."""
+    (fake_home / ".claude").mkdir()  # Claude Code detected via its home dir
+
+    run_wizard(
+        project=fake_project,
+        home=fake_home,
+        interactive=False,
+        confirm=lambda *_: True,
+        init_fn=_stub_init,
+        install_hook_fn=_stub_install_hook,
+    )
+
+    mcp_json = fake_project / ".mcp.json"
+    assert mcp_json.exists(), "expected a project-level .mcp.json"
+    data = json.loads(mcp_json.read_text())
+    assert data["mcpServers"]["selvedge"]["command"] == "selvedge-server"
+    # The stale home-dir path must NOT be written.
+    assert not (fake_home / ".claude" / "config.json").exists()

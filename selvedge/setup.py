@@ -2,7 +2,8 @@
 Selvedge first-run wizard — collapse the install funnel to one command.
 
 The current funnel is six manual steps with three documentation
-lookups: ``pip install selvedge``, edit ``~/.claude/config.json``,
+lookups: ``pip install selvedge``, add the MCP server (project
+``.mcp.json`` for Claude Code, ``~/.cursor/mcp.json`` for Cursor, …),
 restart agent, ``selvedge init``, paste system prompt into the
 project's ``CLAUDE.md``, ``selvedge install-hook``. ``selvedge setup``
 detects the AI tooling already installed on the user's machine and
@@ -59,20 +60,31 @@ class AgentTarget:
       - a *config* path — the JSON file we add the MCP entry to, OR
         ``None`` if the tool doesn't have a JSON MCP registry,
       - a *prompt* path — the file we drop the agent-instructions
-        block into so the agent knows how to use Selvedge.
+        block into so the agent knows how to use Selvedge,
+      - an optional *detect* path — when set, its existence is the
+        install signal (used when ``config_path`` is a project file we
+        write regardless of whether the tool is installed, e.g. Claude
+        Code's project ``.mcp.json``).
 
-    The wizard treats "agent is installed" as "either the config_path
-    or the prompt_path's parent already exists on disk". That's the
-    minimum signal that the user uses this tool.
+    The wizard treats "agent is installed" as "its detect_path (or,
+    absent that, its config_path / prompt_path) already exists on
+    disk". That's the minimum signal that the user uses this tool.
     """
 
     name: AgentName
     label: str
     config_path: Path | None
     prompt_path: Path
+    detect_path: Path | None = None
 
     def is_installed(self) -> bool:
         """Best-effort check: does the user have this tool on this machine?"""
+        # An explicit detect_path is the authoritative install signal. It's
+        # needed when the MCP config isn't written somewhere we can detect
+        # from — e.g. Claude Code, whose entry we write to a project-level
+        # .mcp.json but which is "installed" iff ~/.claude/ exists.
+        if self.detect_path is not None:
+            return self.detect_path.exists() or self.prompt_path.exists()
         if self.config_path is not None and self.config_path.exists():
             return True
         if self.prompt_path.exists():
@@ -108,8 +120,12 @@ def detect_agents(
         AgentTarget(
             name="claude-code",
             label="Claude Code",
-            config_path=home / ".claude" / "config.json",
+            # Modern Claude Code reads project-scoped MCP servers from a
+            # committed .mcp.json (or `claude mcp add`); it does NOT read
+            # ~/.claude/config.json. Detection still keys on ~/.claude/.
+            config_path=project / ".mcp.json",
             prompt_path=project / "CLAUDE.md",
+            detect_path=home / ".claude",
         ),
         AgentTarget(
             name="cursor",

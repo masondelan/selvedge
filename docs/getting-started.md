@@ -17,19 +17,23 @@ This creates `.selvedge/selvedge.db` in your project root. Commit the `.selvedge
 
 ## Connect to Claude Code
 
-Add Selvedge to your MCP config at `~/.claude/config.json`:
+Register the MCP server with Claude Code:
+
+```bash
+claude mcp add selvedge -- selvedge-server
+```
+
+Or commit a project-level `.mcp.json` so your whole team gets it:
 
 ```json
 {
   "mcpServers": {
-    "selvedge": {
-      "command": "selvedge-server"
-    }
+    "selvedge": { "command": "selvedge-server" }
   }
 }
 ```
 
-To use a project-specific database instead of the global fallback:
+To pin a project-specific database instead of the global fallback, add an `env` block:
 
 ```json
 {
@@ -44,9 +48,15 @@ To use a project-specific database instead of the global fallback:
 }
 ```
 
+Using a different client? Selvedge is a standard stdio MCP server — see
+[Works with any MCP client](../README.md#works-with-any-mcp-client) for
+Cursor, Windsurf, Codex CLI, and Gemini CLI.
+
 ## Tell your agent to log changes
 
-Add this to your project's `CLAUDE.md`:
+Add this to your agent's instructions file — `CLAUDE.md` (Claude Code),
+`AGENTS.md` (Codex CLI and others), `.cursor/rules/selvedge.md` (Cursor),
+or `GEMINI.md` (Gemini CLI):
 
 ```
 You have access to Selvedge (MCP server: selvedge) for change tracking.
@@ -55,7 +65,7 @@ Rules:
 - Call selvedge.log_change immediately after adding, modifying, or removing
   any DB column, table, function, API endpoint, dependency, or env variable.
 - Set `reasoning` to the user's original request or the problem being solved.
-- Set `agent` to "claude-code" (or whichever agent you are).
+- Set `agent` to the tool you're using, e.g. "claude-code", "cursor", or "codex".
 - Set `session_id` if you have access to the current session ID.
 - Set `git_commit` to the commit hash once you know it.
 - Before modifying an entity, call selvedge.diff or selvedge.blame to understand

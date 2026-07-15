@@ -321,7 +321,7 @@ Add --json to any read command; selvedge <command> --help gives detail on demand
 
 > **Keeping this accurate:** The source of truth for what's shipped is `CHANGELOG.md`.
 > If checkboxes here drift from reality, trust the changelog and update this file.
-> A weekly Cowork task flags any mismatch automatically.
+> A weekly scheduled check flags any mismatch automatically.
 
 ### Phase 1 — Core (DONE ✓ · v0.1.0)
 - [x] MCP server with 5 tools (log_change, diff, blame, history, search) — `changeset` added in v0.2.1, current count is 6
@@ -450,11 +450,11 @@ Add --json to any read command; selvedge <command> --help gives detail on demand
       `tools/list` doesn't leak the function-body indent.
 - [x] **`CLAUDE.md` ↔ `docs/architecture.md` split.** `CLAUDE.md` is
       now a thin agent-instructions file (sources of truth, code
-      conventions, version bump checklist, scheduled tasks). The
-      architecture, data model, MCP tool reference, full CLI
-      reference, phase plan, and non-goals all moved to
-      `docs/architecture.md`. Reduces noise on every Claude Code /
-      Cowork session boot and gives the architecture doc a stable home.
+      conventions, version bump checklist). The architecture, data
+      model, MCP tool reference, full CLI reference, phase plan, and
+      non-goals all moved to `docs/architecture.md`. Reduces noise on
+      every agent session boot and gives the architecture doc a stable
+      home.
 - [x] **MCP Inspector smoke test in CI parity.** The new test helper
       in `tests/test_mcp_protocol.py::_payload` handles all three
       FastMCP response shapes (list-wrapped, dict-direct, content-only),
@@ -556,7 +556,7 @@ github.com).
       `actions/checkout` / `setup-python` / `action-gh-release` to
       Node-20-supported majors (deadline 2026-06-02), README
       "What's new" stack-cap at 2, Smithery hand-zip + publish,
-      paired PR against `masondelan/selvedge-site`.
+      paired PR against the website repo.
 - [x] **Tests** — `test_verify.py` (13), `test_backup.py` (7),
       `test_doctor.py` extension (4). Total: 24 new tests (within ≤25 budget).
 
@@ -705,8 +705,8 @@ github.com).
 - [x] **Positioning artifacts (release-blocker, not optional polish):**
     * `docs/comparison.html` update naming `prior_attempts` as the
       "alternatives tried, rejected paths" capability the
-      line-attribution competitors don't have. Site PR in
-      `masondelan/selvedge-site` mirrors this.
+      line-attribution competitors don't have. Site PR in the
+      website repo mirrors this.
     * 60–120-second demo recording — Claude Code session that calls
       `prior_attempts` mid-task, sees a past rejection, changes its
       plan — saved to `docs/demos/prior-attempts.mp4` with a
@@ -1570,8 +1570,8 @@ prevents an LLM from creeping into Selvedge core. Reviewers (= the
 maintainer) reject the PR if the answer is "we'll add an LLM later if
 needed." Defending the non-goal is what makes Selvedge cheap,
 dependency-light, and auditable; it is also the principle most likely
-to drift quietly. See `long-term-thesis.md` §6 ("Things to leave
-alone") for the strategic version.
+to drift quietly. The strategic rationale is tracked in the project's
+internal strategy notes.
 
 ### Output shape proliferation
 
@@ -1676,10 +1676,9 @@ cost.
 **Trade-off acknowledged**: more releases means more cumulative
 release-cycle overhead. The v0.3.5 → v0.4.2 arc now contains 14
 releases instead of 5. Each release's manual Smithery republish and
-selvedge-site PR is friction. The auto-PR GitHub Action listed in
-"Open follow-ups" (under Website ↔ codebase sync) gets more urgent
-as a result; the manual cadence stops being acceptable past ~v0.3.8
-if the work hasn't been built.
+website-sync PR is friction. Automating that away gets more urgent as
+a result; the manual cadence stops being acceptable past ~v0.3.8 if
+the work hasn't been built.
 
 ### Maintainer-capacity check
 
@@ -1691,94 +1690,12 @@ rate increases from ~5 releases per year to ~14 per year. Ship rate
 is itself a defense — "actively maintained, fast-evolving" reads
 differently from "big-bang every quarter."
 
-**Discipline** (cross-referenced in `long-term-thesis.md` §7): at the
+**Discipline** (also tracked in the internal strategy notes): at the
 end of each phase ship, review the *next* phase's bullet list and
 *explicitly defer* any feature that isn't load-bearing for that
 release's headline goal. Deferred items move to the next phase or
 into the "Future work" appendix near the end of this doc. The phase
 plan is a budget, not a vow.
-
-### Website ↔ codebase sync
-
-Selvedge ships from two repos: `masondelan/selvedge` (this one — the
-code, MCP server, CLI, CHANGELOG, README) and
-`masondelan/selvedge-site` (Astro + Starlight, auto-deploys to
-selvedge.sh on push). The codebase repo is the source of truth for
-*what* shipped — CHANGELOG, server.py docstrings, manifest.json. The
-site is the source of truth for *how it's described* — homepage
-copy, the comparison page, the "decision archaeology" positioning,
-release-notes prose for non-users. Both must stay in lockstep or
-the most-visible-to-the-internet version of Selvedge ages out of
-date.
-
-`docs/comparison.html` is a transitional artifact: it predates
-selvedge-site (carried over from the old GitHub Pages deploy), and
-its canonical link points at `selvedge.sh/compare/agent-tools/`.
-Treat the site copy as canonical; `docs/comparison.html` is a stale
-mirror until the Pages-migration follow-up retires it.
-
-**Discipline (codified in this section, enforced via the release-
-cycle checklist in every phase from v0.3.5 onward):**
-
-* Every version bump triggers a paired commit/PR in
-  `masondelan/selvedge-site` — at minimum the version string and
-  the release-notes mirror; more if positioning or behavior
-  described on the site changed.
-* If a change in the codebase repo modifies the user-facing
-  narrative (new MCP tool, new CLI command, a wedge feature like
-  `prior_attempts`, a values-shift like the no-cloud claim), the
-  PR description on the codebase side must name the corresponding
-  site change in a "Site sync" section. No "Site sync: none"
-  default — the writer asserts it explicitly or it didn't get
-  considered.
-* Doctor's status output will surface the *installed* Selvedge
-  version. The site's homepage shows the *advertised* version. A
-  release where these two diverge for more than 24 hours is a
-  release-quality failure, not a marketing miss — track it in the
-  cross-cutting risk register if it happens.
-
-**Open follow-up** (tracked in the Future Work appendix): an
-auto-PR GitHub Action that opens a draft PR against `selvedge-site`
-on tag push. The release-scope restructure turned 5 releases into 14
-across the v0.3.5 → v0.4.2 arc, which means the manual selvedge-
-site PR runs 14 times instead of 5. Past ~v0.3.8 the manual cadence
-becomes the bottleneck and the auto-PR action needs to land.
-
-### Competitive narrative drift
-
-The 2026-05-07 internal teardown of Git AI (kept off-repo as
-competitive intel) identified five competitive moves that
-could pull Selvedge into a category it doesn't want to compete in:
-(1) Git AI ships an MCP server and narrows the architectural moat;
-(2) Git AI raises a public seed/Series A and the marketing-spend
-asymmetry widens; (3) Cursor / Anthropic / GitHub endorse Git AI's
-note format as the open standard for AI authorship; (4) an
-"AI-era observability" analyst category coalesces around Git AI's
-framing and Selvedge gets read as a weaker alternative;
-(5) Git AI's agent-vendor cooperation strategy works and every
-major agent ships a Git AI hook before Selvedge has equivalent
-reach. None of these are imminent; all of them are plausible inside
-the v0.3.5 → v0.4.2 window (the 2026-05-10 release-scope
-restructure widened the named window but did not lengthen the
-calendar arc).
-
-**Discipline**: every phase ship reviews this list and answers one
-question — "does this release widen the MCP-first / decision-
-archaeology lead, or does it cede ground?" Concrete defenses
-already sequenced into the phase plan: `prior_attempts` shipped
-with its positioning artifacts in v0.3.7 (wedge legible); Git Notes
-one-way reader in v0.3.12 (interop, not substitute); verifiable-
-no-network test in v0.3.12 (positioning claim made auditable); the
-cross-repo `prior_attempts` extension in v0.3.14 ("you considered
-this in your other project six months ago" — Git AI cannot match
-this with their data model); Agent Trace export in v0.4.2
-(compatible producer, not competitor). Position changes (homepage,
-comparison page) live in `docs/engagement-strategy.md` and
-`docs/comparison.html`; this section exists so the *engineering*
-phase plan keeps line-of-sight to the
-narrative those documents are trying to hold. If a future phase
-removes a competitive defense from this list without replacing it,
-the PR description must say which defense and why.
 
 ---
 
@@ -1821,15 +1738,6 @@ v0.3.7 to spec against. Promote to a phase when (a) a tracking
 issue exists, (b) a named owner commits to a 90-day shipping
 review, and (c) the extension repo has been created. Until then,
 roadmap noise.
-
-**Auto-PR GitHub Action for selvedge-site.** Build-process
-improvement that opens a draft PR against `masondelan/selvedge-site`
-on every tag push, with version bumps and CHANGELOG diff
-pre-filled. Manual review still required (positioning prose isn't
-auto-translatable from CHANGELOG bullets), but the draft removes
-the "did anyone update the site?" friction. Promote to a phase
-when the manual release-cycle cadence has bedded in (post-v0.3.8)
-and the friction is observable.
 
 **Push-model `prior_attempts` variant.** Currently pull-only.
 The push model would auto-warn on `log_change` when the entity

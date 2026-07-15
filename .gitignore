@@ -61,6 +61,10 @@ docs/seo-gsc-primer.md
 docs/marketing-templates.md
 docs/llmo-mention-share.md
 
+# Internal — extract from docs/architecture.md (release/site-sync ops +
+# competitive intel). Moved out of the public design doc; kept local.
+docs/architecture-internal.md
+
 # Internal — all launch / distribution drafts (positioning content,
 # submission templates, per-release playbooks). Bundle excludes via
 # .mcpbignore, so removing from tracking does not affect Smithery

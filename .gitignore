@@ -61,8 +61,7 @@ docs/seo-gsc-primer.md
 docs/marketing-templates.md
 docs/llmo-mention-share.md
 
-# Internal — extract from docs/architecture.md (release/site-sync ops +
-# competitive intel). Moved out of the public design doc; kept local.
+# Internal — local-only extract from docs/architecture.md, kept out of the repo.
 docs/architecture-internal.md
 
 # Internal — all launch / distribution drafts (positioning content,
@@ -79,14 +78,10 @@ launch/
 # is byte-identical and already tracked).
 assets/
 
-# Internal — competitive intel (kept local only, never committed)
-*competitive-teardown*.docx
-*-teardown.docx
-usegitai-competitive-teardown.docx
+# Internal — local working documents, never committed.
+*.docx
 
-# Internal — staging for the selvedge-site repo (a one-time SEO patch with
-# its own apply guide). Belongs in masondelan/selvedge-site, not the code
-# repo; kept here locally only.
+# Internal — local-only staging dir, never committed.
 _selvedge-site-seo-patch/
 
 # Internal — brand-kit assets (pitch deck, comparison one-pager, dashboard

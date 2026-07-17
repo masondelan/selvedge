@@ -68,7 +68,7 @@ packages = ["selvedge"]
 # Ship only what an end user of the PyPI package needs. The previous blanket
 # `docs/` + `CLAUDE.md` over-shipped the website HTML, brand PNGs (~1.5 MB),
 # sitemap/robots, marketing-templates, and the agent-instructions file to PyPI.
-# Website artifacts belong to masondelan/selvedge-site, not the wheel/sdist.
+# Website artifacts belong to the website repo, not the wheel/sdist.
 include = [
     "selvedge/",
     "README.md",

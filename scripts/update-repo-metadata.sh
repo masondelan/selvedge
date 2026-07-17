@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Update GitHub repo description, homepage, and topics for SEO.
 #
-# Why a script instead of API call from the maintainer's tooling: api.github.com
-# is blocked from the Cowork sandbox where most of these edits get drafted, so
-# we keep the metadata as code and run it locally with the gh CLI when changed.
+# Why a script instead of an API call: api.github.com is blocked from some
+# sandboxed drafting environments, so we keep the metadata as code and run it
+# locally with the gh CLI when changed.
 #
 # Usage:
 #   gh auth login   # if you haven't

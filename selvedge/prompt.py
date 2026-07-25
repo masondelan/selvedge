@@ -102,6 +102,20 @@ Add `--json` to any read command; `selvedge <command> --help` gives detail on
 demand.
 """
 
+#: Frontmatter for the Claude Code plugin's skill (``skills/selvedge/
+#: SKILL.md``). The description says *when* to reach for Selvedge, not just
+#: what it is, so Claude auto-loads the skill at the moments that matter —
+#: before editing a tracked entity, and after any substantive change. Kept
+#: colon-free so it stays a valid unquoted YAML scalar.
+SKILL_NAME = "selvedge"
+SKILL_DESCRIPTION = (
+    "Use before editing a tracked entity (a DB column, table, function, API "
+    "endpoint, dependency, or env var) and after any substantive change. Call "
+    "prior_attempts first to learn whether the change was tried and reverted "
+    "before, then log_change to record what changed and why. Selvedge is this "
+    "project's change memory — a local MCP server and CLI, no LLM calls."
+)
+
 
 # ---------------------------------------------------------------------------
 # Block construction
@@ -117,6 +131,29 @@ def render_block() -> str:
     whitespace (see ``install_to_file``).
     """
     return f"{SENTINEL_START}\n{PROMPT_BLOCK.strip()}\n{SENTINEL_END}"
+
+
+def render_skill() -> str:
+    """Return the full ``SKILL.md`` for the plugin's Selvedge skill.
+
+    Frontmatter (``name`` + ``description``) followed by the same
+    ``PROMPT_BLOCK`` body the CLAUDE.md installer writes. Rendering the
+    hand-installed prompt and the plugin skill from one constant is what
+    keeps them from drifting — ``tests/test_plugin.py`` asserts the committed
+    ``skills/selvedge/SKILL.md`` is byte-for-byte this output, and
+    ``selvedge prompt --format skill`` prints it. No sentinel markers: a
+    ``SKILL.md`` is a whole file Selvedge owns, not a managed region inside a
+    file the user also edits (which is what the sentinels in ``render_block``
+    are for).
+    """
+    return (
+        "---\n"
+        f"name: {SKILL_NAME}\n"
+        f"description: {SKILL_DESCRIPTION}\n"
+        "---\n"
+        "\n"
+        f"{PROMPT_BLOCK.strip()}\n"
+    )
 
 
 # ---------------------------------------------------------------------------

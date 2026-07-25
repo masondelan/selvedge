@@ -2704,6 +2704,16 @@ def _render_wizard_summary(outcome) -> None:
 
 @cli.command("prompt")
 @click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["block", "skill"]),
+    default="block",
+    help=(
+        "Output shape: 'block' (CLAUDE.md-ready, sentinel-bracketed) or "
+        "'skill' (a plugin SKILL.md with frontmatter). Default: block."
+    ),
+)
+@click.option(
     "--install",
     "install_path",
     type=click.Path(dir_okay=False, path_type=Path),
@@ -2715,7 +2725,7 @@ def _render_wizard_summary(outcome) -> None:
     is_flag=True,
     help="Skip writing the .bak file before --install modifies an existing file.",
 )
-def prompt_cmd(install_path, no_backup):
+def prompt_cmd(fmt, install_path, no_backup):
     """Print the canonical Selvedge agent-instructions block.
 
     \b
@@ -2735,12 +2745,34 @@ def prompt_cmd(install_path, no_backup):
     A `.bak` is written before any modification unless --no-backup is set.
 
     \b
+    --format skill prints a Claude Code plugin SKILL.md (frontmatter + the
+    same block body). It's what regenerates the bundled plugin skill, so the
+    skill can't drift from this block:
+      selvedge prompt --format skill > skills/selvedge/SKILL.md
+
+    \b
     Examples:
       selvedge prompt
       selvedge prompt --install CLAUDE.md
       selvedge prompt --install .cursorrules --no-backup
+      selvedge prompt --format skill
     """
-    from .prompt import PROMPT_BLOCK, install_to_file, render_block
+    from .prompt import PROMPT_BLOCK, install_to_file, render_block, render_skill
+
+    if fmt == "skill":
+        if install_path is not None:
+            raise click.UsageError(
+                "--install writes a sentinel-bracketed block into an existing "
+                "file and only applies to --format block. A skill is a whole "
+                "file Selvedge owns — redirect instead:\n"
+                "  selvedge prompt --format skill > skills/selvedge/SKILL.md"
+            )
+        # nl=False so stdout is byte-for-byte render_skill() (it already ends
+        # in a newline); the redirect above then writes the exact file the
+        # drift test checks.
+        click.echo(render_skill(), nl=False)
+        _ = PROMPT_BLOCK
+        return
 
     if install_path is None:
         click.echo(render_block())

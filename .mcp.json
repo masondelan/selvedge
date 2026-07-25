@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "selvedge": {
-      "command": "selvedge-server"
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/selvedge-plugin-server"
     }
   }
 }

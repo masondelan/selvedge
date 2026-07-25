@@ -1,0 +1,11 @@
+#!/bin/sh
+# Selvedge MCP server launcher for the Claude Code plugin.
+#
+# Referenced by .mcp.json as ${CLAUDE_PLUGIN_ROOT}/bin/selvedge-plugin-server.
+# Delegates to the shared resolver to start Selvedge's `selvedge-server`
+# console script over stdio, fetching the package via uvx/pipx when it isn't
+# already installed. See bin/selvedge-resolve for the resolution order and
+# the stdout-is-sacred invariant.
+set -eu
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$dir/selvedge-resolve" selvedge-server "$@"

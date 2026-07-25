@@ -1,0 +1,15 @@
+#!/bin/sh
+# Selvedge CLI launcher for the Claude Code plugin's slash commands.
+#
+# The plugin's bin/ directory is on the Bash tool's PATH while the plugin is
+# enabled, so the slash commands under commands/ can call `selvedge-cli <sub>`
+# as a bare command. This delegates to the shared resolver to run Selvedge's
+# `selvedge` CLI console script, fetching the package via uvx/pipx when it
+# isn't already installed.
+#
+# Named `selvedge-cli`, not `selvedge`, on purpose: the resolver probes PATH
+# for the real `selvedge` entrypoint, and a wrapper named `selvedge` would
+# find itself and recurse.
+set -eu
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$dir/selvedge-resolve" selvedge "$@"

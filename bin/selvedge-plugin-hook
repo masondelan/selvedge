@@ -1,0 +1,17 @@
+#!/bin/sh
+# Selvedge PreToolUse hook launcher for the Claude Code plugin.
+#
+# Referenced by hooks/hooks.json as
+#   "${CLAUDE_PLUGIN_ROOT}"/bin/selvedge-plugin-hook pretooluse
+# Delegates to the shared resolver to run Selvedge's `selvedge-hook` console
+# script (the PreToolUse gate). Passing the subcommand ("pretooluse") through
+# keeps the config declarative.
+#
+# Latency note: this fires on every gated Edit/Write/Bash call. When Selvedge
+# is pip-installed, the resolver's PATH-first branch runs it directly with no
+# cold start. With only uvx/pipx available it pays a Python start each call
+# (warm after the first, since uvx caches the environment) — the honest cost
+# of the zero-install path; `pip install selvedge` removes it.
+set -eu
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$dir/selvedge-resolve" selvedge-hook "$@"

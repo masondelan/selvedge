@@ -1,0 +1,77 @@
+#!/bin/sh
+# Selvedge plugin runner resolution — shared by the launcher scripts in this
+# directory (selvedge-plugin-server, selvedge-plugin-hook, selvedge-cli).
+#
+# The Claude Code plugin ships no Python; it fetches the `selvedge` package
+# from PyPI on demand so `/plugin install selvedge@selvedge` works with no
+# prior `pip install`. This script decides *how* to run one of Selvedge's
+# console scripts, in this order:
+#
+#   1. <entrypoint> already on PATH  — a real pip/pipx/uv install wins, so a
+#      user who already installed Selvedge keeps their exact version and a
+#      fast start (and, for the hook, no per-call cold start). This is why
+#      the order differs from npm/bin/selvedge-mcp.js, which targets Node-only
+#      hosts that usually have no install and so tries the pinned uvx first.
+#   2. uvx  --from selvedge==<pin> <entrypoint> [args...]
+#   3. pipx run --spec selvedge==<pin> <entrypoint> [args...]
+#   4. none found -> install guidance on stderr, exit 1.
+#
+# Invariants (mirrors the npm shim exactly):
+#   - NOTHING is ever written to stdout — stdout belongs to the MCP stdio
+#     protocol. Every diagnostic goes to stderr.
+#   - The pin defaults to the plugin's own version (SELVEDGE_PLUGIN_PIN below,
+#     held equal to .claude-plugin/plugin.json by a hygiene test) so installs
+#     are reproducible. SELVEDGE_VERSION overrides it; "latest" unpins.
+#
+# Usage: selvedge-resolve <entrypoint> [args...]
+#   selvedge-resolve selvedge-server
+#   selvedge-resolve selvedge-hook pretooluse
+#   selvedge-resolve selvedge status
+set -eu
+
+# Pinned Selvedge version. Kept in lockstep with .claude-plugin/plugin.json
+# by tests/test_plugin.py::test_launcher_pin_matches_plugin_version — bump
+# both together (see CLAUDE.md "Version bump checklist").
+SELVEDGE_PLUGIN_PIN="0.3.9.2"
+
+entry="${1:?selvedge-resolve: missing entrypoint argument}"
+shift
+
+# Requirement spec for the ephemeral Python runners. SELVEDGE_VERSION
+# overrides the pin; the literal "latest" unpins entirely.
+version="${SELVEDGE_VERSION:-$SELVEDGE_PLUGIN_PIN}"
+if [ "$version" = "latest" ]; then
+  spec="selvedge"
+else
+  spec="selvedge==$version"
+fi
+
+# 1. A real install already on PATH wins.
+if command -v "$entry" >/dev/null 2>&1; then
+  exec "$entry" "$@"
+fi
+
+# 2. uv's ephemeral runner.
+if command -v uvx >/dev/null 2>&1; then
+  exec uvx --from "$spec" "$entry" "$@"
+fi
+
+# 3. pipx's ephemeral runner.
+if command -v pipx >/dev/null 2>&1; then
+  exec pipx run --spec "$spec" "$entry" "$@"
+fi
+
+# 4. Nothing available — guidance to stderr, never stdout.
+{
+  echo "selvedge: could not find a way to run '$entry'."
+  echo
+  echo "The Selvedge Claude Code plugin runs the Python 'selvedge' package"
+  echo "(Python >= 3.10). It looked for, in order: $entry on PATH, then uvx,"
+  echo "then pipx — none were available."
+  echo
+  echo "Fix with ONE of:"
+  echo "  1. Install uv   (https://docs.astral.sh/uv/)  — plugin runs: uvx --from $spec $entry"
+  echo "  2. Install pipx (https://pipx.pypa.io/)       — plugin runs: pipx run --spec $spec $entry"
+  echo "  3. pip install \"$spec\"                         — puts $entry on PATH"
+} >&2
+exit 1

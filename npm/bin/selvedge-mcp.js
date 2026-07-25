@@ -17,8 +17,10 @@
  *   - NOTHING is ever written to stdout by this shim — stdout belongs to the
  *     MCP stdio protocol. All diagnostics go to stderr.
  *   - No npm dependencies; plain Node >= 18.
- *   - Deterministic: the PyPI version is pinned to this package's own
- *     version unless SELVEDGE_VERSION overrides it ("latest" unpins).
+ *   - Deterministic: the PyPI version is pinned to package.json's
+ *     `pypiVersion` (the four-segment PEP 440 server version, which npm's
+ *     semver `version` field can't express) unless SELVEDGE_VERSION
+ *     overrides it ("latest" unpins).
  */
 "use strict";
 
@@ -31,14 +33,20 @@ const PKG = require(path.join(__dirname, "..", "package.json"));
 /**
  * Resolve the PyPI requirement spec to run.
  *
- * Defaults to `selvedge==<this package's version>` so `npx selvedge-mcp`
- * is reproducible. Set SELVEDGE_VERSION to an exact version to override,
- * or to "latest" to unpin.
+ * Defaults to `selvedge==<pypiVersion>` so `npx selvedge-mcp` is
+ * reproducible. `pypiVersion` is a package.json field distinct from the
+ * npm `version` on purpose: the Python package uses four-segment PEP 440
+ * versions (e.g. 0.3.9.2) that npm's semver `version` field can't hold,
+ * so the shim's own npm version and the server version it pins are two
+ * separate lines, and the pin comes from `pypiVersion`. Falls back to the
+ * npm `version` when `pypiVersion` is absent (older shims). Set
+ * SELVEDGE_VERSION to an exact version to override, or to "latest" to
+ * unpin.
  *
- * @returns {string} a pip requirement spec, e.g. "selvedge==0.3.9".
+ * @returns {string} a pip requirement spec, e.g. "selvedge==0.3.9.2".
  */
 function pypiSpec() {
-  const v = (process.env.SELVEDGE_VERSION || PKG.version).trim();
+  const v = (process.env.SELVEDGE_VERSION || PKG.pypiVersion || PKG.version).trim();
   return v === "latest" ? "selvedge" : `selvedge==${v}`;
 }
 

@@ -17,6 +17,24 @@ This creates `.selvedge/selvedge.db` in your project root. Commit the `.selvedge
 
 ## Connect to Claude Code
 
+### The plugin (recommended)
+
+Inside Claude Code, two commands — no prior `pip install`, the plugin
+bootstraps the server itself via `uvx`/`pipx`:
+
+```
+/plugin marketplace add masondelan/selvedge
+/plugin install selvedge@selvedge
+```
+
+This brings the MCP server, a skill that tells the agent when to use it, the
+PreToolUse enforcement hook, and the `/selvedge:status` / `blame` / `history` /
+`prior-attempts` slash commands. The store creates itself on the first logged
+change. (Prefer a pinned install? `pip install selvedge` and the launcher uses
+that instead of `uvx`.)
+
+### Or register the server manually
+
 Register the MCP server with Claude Code:
 
 ```bash

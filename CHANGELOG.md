@@ -6,6 +6,94 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.9.2] — 2026-07-23
+
+**The Claude Code plugin, from scaffolding to first-class.** v0.3.7 registered
+the repo as a self-hosted plugin marketplace but shipped only metadata — the
+plugin assumed `selvedge-server` was already on your `PATH`, which is why the
+README demoted it to "(alternative)" and kept `selvedge setup` as the
+recommended path. This release makes `/plugin install selvedge@selvedge` a
+complete, zero-prior-install setup: a bootstrapping launcher, the
+agent-instructions as a bundled skill, the PreToolUse enforcement hook, and
+slash commands. **No store, schema, or tool-surface change** — the MCP server is
+byte-identical to 0.3.9.1. Drop-in for anyone on 0.3.9.x.
+
+### Added
+
+- **A launcher, so the plugin needs nothing preinstalled.**
+  `bin/selvedge-resolve` (POSIX sh) resolves how to run Selvedge's console
+  scripts in order: the entrypoint already on `PATH` → `uvx --from
+  selvedge==<pin>` → `pipx run --spec selvedge==<pin>` → install guidance on
+  stderr, exit 1. Three thin wrappers hang off it — `selvedge-plugin-server`
+  (the MCP command in `.mcp.json`), `selvedge-plugin-hook` (the hook command),
+  and `selvedge-cli` (what the slash commands call). It mirrors the npm shim's
+  invariants exactly: nothing is ever written to stdout (that channel belongs to
+  the MCP protocol), the version is pinned to `plugin.json`'s so installs are
+  reproducible, and `SELVEDGE_VERSION` overrides the pin (`latest` unpins). The
+  order is PATH-first on purpose — the reverse of the npm shim, which targets
+  Node-only hosts that usually have no install — so a machine that already has
+  Selvedge keeps its exact version and the hook's fast path.
+- **A bundled skill.** `skills/selvedge/SKILL.md` ships the agent-instructions
+  with the install instead of waiting for someone to write them into
+  `CLAUDE.md`. Its frontmatter says *when* to reach for Selvedge (before editing
+  a tracked entity, after any substantive change), so Claude loads it at the
+  right moments. The body is generated from the same `PROMPT_BLOCK` constant
+  `selvedge prompt` installs — new `selvedge prompt --format skill` emits the
+  file, and a test asserts the committed `SKILL.md` never drifts from it.
+- **The enforcement hook, wired by the plugin.** `hooks/hooks.json` runs the
+  PreToolUse gate on `Edit|Write|MultiEdit|NotebookEdit|Bash` — the same matcher
+  `selvedge setup` writes (a test locks the two together). Plugin users get the
+  gate without running `selvedge setup`.
+- **Four slash commands** — `/selvedge:status`, `/selvedge:blame <entity>`,
+  `/selvedge:history`, `/selvedge:prior-attempts <entity>` — thin wrappers over
+  the CLI, argument-passing only.
+- **`tests/test_plugin.py`** (28 tests): launcher resolution order with fake
+  runners and no network, the stdout-stays-empty-on-failure invariant,
+  `SELVEDGE_VERSION`/`latest` handling, version parity across every manifest +
+  the launcher pin + the npm shim's pin, skill↔`render_skill()` byte parity, and
+  hook double-registration idempotence.
+
+### Changed
+
+- **`.mcp.json` points the plugin's MCP command at
+  `${CLAUDE_PLUGIN_ROOT}/bin/selvedge-plugin-server`** instead of bare
+  `selvedge-server`. This file was added to register the repo as a marketplace;
+  repo self-development never relied on it loading (the CLI + post-commit hook do
+  the dogfooding), so nothing there regresses.
+- **`.claude-plugin/plugin.json` carries the version for real now**, joining
+  `pyproject.toml` / `selvedge/__init__.py` / `server.json` / `manifest.json` as
+  a must-match sibling — a test enforces the set, and the launcher's pin is held
+  equal to it.
+- **The npm shim pins the server through a new `pypiVersion` field**, separate
+  from its own npm `version`. npm's semver can't hold a four-segment PEP 440
+  version like `0.3.9.2`, so pinning `selvedge==<npm version>` could never track
+  the real server; the decoupled field fixes it. (The npm package is still
+  unpublished — this makes its first publish pin correctly.)
+
+### Notes
+
+- **Double-registration is harmless.** A user who installs the plugin *and* runs
+  `selvedge setup` gets the PreToolUse gate twice. The gate is a read-only,
+  fail-open evaluation with a deterministic block message, so two identical fires
+  return the identical decision — proven by a test. The MCP server should be
+  registered once, though: both the plugin and `selvedge setup` provide it, so
+  pick one (the plugin is recommended for Claude Code).
+- **Windows.** The launchers are POSIX `sh`; on Windows they need a POSIX shell
+  (Git Bash / WSL), which Claude Code's Windows builds commonly run under. A
+  single `.mcp.json` can't express a platform-specific command, and a
+  full-path-with-no-extension spawn wouldn't pick up a `.cmd` twin, so a native
+  Windows path is a tracked follow-up rather than a half-working shim.
+- **Official-directory submission is still pending.** The community directory
+  (`claude-plugins-community`) accepts plugins through a submission form at
+  `clau.de/plugin-directory-submission`, not a pull request — PRs there are
+  closed automatically. Submission materials are prepared; the form is a manual
+  step.
+- **Test budget:** 28 new tests, all in `test_plugin.py`. On the low side for a
+  release because nothing in the store or MCP layer moved — the surface under
+  test is packaging: one shell script, a generator, and four manifests.
+
+---
+
 ## [0.3.9.1] — 2026-07-10
 
 **The dev.to feedback release.** Every item here was publicly promised as

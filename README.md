@@ -109,6 +109,31 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.9.2
+
+**The Claude Code plugin is first-class now — not scaffolding.** Two commands,
+no prior `pip install`: the plugin fetches the server itself.
+
+```
+/plugin marketplace add masondelan/selvedge
+/plugin install selvedge@selvedge
+```
+
+One install carries the whole agent-facing surface. The MCP server starts
+through a launcher that tries an existing install, then `uvx`, then `pipx` — so
+a fresh machine needs nothing preinstalled, and anyone who already has Selvedge
+on their `PATH` keeps their exact version. Alongside the server, the install
+ships a **skill** that tells the agent *when* to reach for the tools (before
+editing a tracked entity, after any substantive change), the **PreToolUse
+enforcement hook** wired in by default, and four slash commands —
+`/selvedge:status`, `/selvedge:blame`, `/selvedge:history`,
+`/selvedge:prior-attempts`. The skill's text is generated from the same block
+`selvedge prompt` installs, so the plugin and the hand-written prompt can't
+drift. No store, schema, or tool-surface change — this is packaging, not new
+behavior. **Drop-in for anyone on 0.3.9.x.**
+
+---
+
 ## What's new in v0.3.9.1
 
 **The dev.to feedback release.** Five improvements publicly promised in the
@@ -156,34 +181,6 @@ selvedge prior-attempts --fuzzy "tokenized payment credentials"
 Local static embeddings (model2vec, ~30 MB, no torch), clearly-labeled fuzzy
 matches, substring fallback when the extra isn't installed. Core never
 imports it. Full details in [`CHANGELOG.md`](CHANGELOG.md).
-
----
-
-## What's new in v0.3.9
-
-**Agent Trace export — Selvedge is a compatible producer.**
-`selvedge export --format agent-trace` emits
-[Agent Trace](https://github.com/cursor/agent-trace) **v0.1.0** records — the
-open AI code-attribution wire format from Cursor + Cognition AI — so your
-captured history travels to any tool that reads the standard. Selvedge's
-reasoning and entity-level provenance ride along in each record's `metadata`
-under the `dev.selvedge` namespace. **Drop-in upgrade for anyone on 0.3.8.**
-
-```bash
-selvedge export --format agent-trace -o trace.json            # one record per event
-selvedge export --format agent-trace --ndjson -o trace.ndjson # stream, one per line
-selvedge export --format agent-trace --collapse-by-session    # merge a session into one record
-selvedge import trace.json --format agent-trace               # round-trip back in
-```
-
-It's **opt-in and additive** — nothing about the native model, the 8 MCP tools,
-or local SQLite changes. Entity-level events (a column, an env var, a
-dependency) have no line range, so Selvedge marks them
-`metadata.dev.selvedge.range_unknown: true` rather than fabricating one — an
-honest fidelity signal. This was planned for v0.4.0; only the exporter moved
-forward (Postgres + the tool rename remain the v0.4.0 markers; HTTP + auth ships
-in v0.4.1). Full mapping in
-[`docs/agent-trace-interop.md`](docs/agent-trace-interop.md).
 
 ---
 
@@ -255,6 +252,43 @@ emits it.
 
 ## Quickstart
 
+### Claude Code — install the plugin (recommended)
+
+Two commands, inside Claude Code. No prior `pip install` — the plugin
+bootstraps the server itself via `uvx` (or `pipx`):
+
+```
+/plugin marketplace add masondelan/selvedge
+/plugin install selvedge@selvedge
+```
+
+That's the whole agent-facing surface in one step:
+
+- the **MCP server** — 8 tools (`log_change`, `prior_attempts`, `blame`,
+  `diff`, `history`, `changeset`, `search`, `stale_decisions`);
+- a **skill** that tells the agent *when* to call them — before editing a
+  tracked entity, after any substantive change;
+- the **PreToolUse enforcement hook** — schema/migration edits are blocked
+  until `prior_attempts` has been checked this session, with the prior
+  reasoning in the block message;
+- **slash commands** — `/selvedge:status`, `/selvedge:blame <entity>`,
+  `/selvedge:history`, `/selvedge:prior-attempts <entity>`.
+
+The store (`.selvedge/selvedge.db`) creates itself on the first logged change.
+Two optional extras stay CLI-side: the post-commit hook that stamps each event
+with its commit hash (`selvedge install-hook`), and — if you want the
+`selvedge` command on your own shell `PATH` — `pip install selvedge`, which the
+launcher then prefers over `uvx` for an exact pinned version.
+
+> **Plugin or `selvedge setup` for Claude Code? Pick one.** Both wire the MCP
+> server; running both registers it twice. The plugin is the lighter path and
+> the one that updates itself. If you're on the plugin and only want the
+> post-commit commit-hash stamping, run `selvedge install-hook` on its own.
+
+### Any other MCP client — `selvedge setup`
+
+Cursor, Copilot, Windsurf, Codex CLI, Gemini CLI, and the rest:
+
 ```bash
 pip install selvedge
 cd your-project
@@ -276,26 +310,6 @@ For CI bootstrap or `devcontainer.json` `postCreateCommand`:
 ```bash
 selvedge setup --non-interactive --yes
 ```
-
-### Claude Code plugin marketplace (alternative)
-
-If you're a Claude Code user and want to install Selvedge through
-the official plugin marketplace flow, run these inside Claude Code
-*after* `pip install selvedge`:
-
-```
-/plugin marketplace add masondelan/selvedge
-/plugin install selvedge@selvedge
-```
-
-The plugin system wires the MCP server into Claude Code, but it
-does **not** install the Python package for you — `pip install
-selvedge` first, otherwise the `selvedge-server` command won't
-exist on your PATH and the plugin can't start. For the full setup
-(post-commit hook, project `CLAUDE.md` instructions block, etc.),
-`selvedge setup` is still the recommended path; the plugin
-marketplace install is just the lightweight Claude-Code-only
-entry point.
 
 **Verify the wiring** — open a second terminal in the same project:
 

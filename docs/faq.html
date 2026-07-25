@@ -66,6 +66,11 @@
       },
       {
         "@type": "Question",
+        "name": "How do I install Selvedge as a Claude Code plugin?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Two commands inside Claude Code: /plugin marketplace add masondelan/selvedge, then /plugin install selvedge@selvedge. No prior pip install — the plugin bootstraps the server via uvx or pipx. One install brings the MCP server, a skill that tells the agent when to use it, the PreToolUse enforcement hook, and the /selvedge:status, blame, history, and prior-attempts slash commands. For any other MCP client, pip install selvedge and selvedge setup." }
+      },
+      {
+        "@type": "Question",
         "name": "What is a changeset?",
         "acceptedAnswer": { "@type": "Answer", "text": "Imagine you're rolling out Stripe billing. It touches the users table, two new env vars, three API routes, one dependency, and four functions across the codebase. Tag every event with changeset:add-stripe-billing and selvedge changeset add-stripe-billing pulls the entire scope back later — even if the work was broken into eight smaller PRs over a month. It's the rollup view for cross-cutting features." }
       },
@@ -225,6 +230,10 @@
       <details class="qa">
         <summary>Does Selvedge work with Claude Code, Cursor, and Copilot?</summary>
         <div class="answer">Yes — all three. <code>selvedge setup</code> detects which AI tools you have and configures all of them in one pass: writes the MCP entry into each tool's config, drops the canonical agent-instructions block into the right prompt file (<code>CLAUDE.md</code> / <code>.cursorrules</code> / <code>copilot-instructions.md</code>), and installs the post-commit hook.</div>
+      </details>
+      <details class="qa">
+        <summary>How do I install Selvedge as a Claude Code plugin?</summary>
+        <div class="answer">Two commands inside Claude Code: <code>/plugin marketplace add masondelan/selvedge</code>, then <code>/plugin install selvedge@selvedge</code>. No prior <code>pip install</code> — the plugin bootstraps the server via <code>uvx</code> or <code>pipx</code>. One install brings the MCP server, a skill that tells the agent when to use it, the PreToolUse enforcement hook, and the <code>/selvedge:status</code>, <code>blame</code>, <code>history</code>, and <code>prior-attempts</code> slash commands. For any other MCP client, <code>pip install selvedge &amp;&amp; selvedge setup</code>.</div>
       </details>
       <details class="qa">
         <summary>What is a changeset?</summary>

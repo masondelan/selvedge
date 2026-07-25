@@ -721,6 +721,34 @@
       <p class="eyebrow mb-4">— get started</p>
       <h2 class="h-section text-4xl md:text-6xl mb-10 lowercase">two commands.<br>thirty seconds.</h2>
 
+      <p class="max-w-prose font-sans text-inkwell leading-relaxed mb-6">
+        <strong>In Claude Code</strong>, install the plugin — no
+        <code class="inline">pip install</code> first, it bootstraps the
+        server itself:
+      </p>
+      <div class="flex flex-wrap gap-3 items-center mb-6">
+        <span class="stamp">
+          <span><span style="color:#5C6B82;">&gt;</span>&nbsp;&nbsp;/plugin marketplace add masondelan/selvedge</span>
+        </span>
+        <span class="stamp">
+          <span><span style="color:#5C6B82;">&gt;</span>&nbsp;&nbsp;/plugin install selvedge@selvedge</span>
+        </span>
+      </div>
+      <p class="max-w-prose font-sans text-inkwell leading-relaxed mb-10">
+        One install carries the whole agent-facing surface: the MCP server,
+        a skill that tells the agent when to reach for it, the PreToolUse
+        hook that blocks a schema edit until
+        <code class="inline">prior_attempts</code> has been checked, and the
+        <code class="inline">/selvedge:status</code> /
+        <code class="inline">blame</code> /
+        <code class="inline">history</code> /
+        <code class="inline">prior-attempts</code> slash commands.
+      </p>
+
+      <p class="max-w-prose font-sans text-inkwell leading-relaxed mb-6">
+        <strong>Every other MCP client</strong> — Cursor, Copilot, Windsurf,
+        Codex, Gemini — runs the wizard:
+      </p>
       <div class="flex flex-wrap gap-3 items-center mb-8">
         <span class="stamp">
           <span><span style="color:#5C6B82;">$</span>&nbsp;&nbsp;pip install selvedge</span>

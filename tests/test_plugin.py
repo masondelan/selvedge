@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -456,3 +457,72 @@ def test_mcpbignore_does_not_exclude_the_manifest_icon():
     ignore = (_REPO_ROOT / ".mcpbignore").read_text().splitlines()
     assert f"!{icon}" in ignore, f"{icon} is referenced by manifest.json but not un-ignored"
     assert "docs/" not in ignore, "blanket docs/ exclusion would drop the icon"
+
+
+# ---------------------------------------------------------------------------
+# npm shim behavior (review issue #28)
+#
+# `bin/selvedge-resolve` gets seven tests for exactly these code paths; the JS
+# shim had none, so its documented "never writes to stdout" invariant — which
+# is what keeps MCP stdio framing intact for every `npx selvedge-mcp` user —
+# was unenforced.
+# ---------------------------------------------------------------------------
+
+
+_NODE = shutil.which("node")
+_SHIM = _REPO_ROOT / "npm" / "bin" / "selvedge-mcp.js"
+needs_node = pytest.mark.skipif(_NODE is None, reason="node not available")
+
+
+def _run_shim(env_extra: dict, path_dir: Path | None = None):
+    env = {"PATH": str(path_dir) if path_dir else "", "HOME": str(_REPO_ROOT)}
+    env.update(env_extra)
+    return subprocess.run(
+        [_NODE, str(_SHIM)], capture_output=True, text=True, timeout=30, env=env
+    )
+
+
+@needs_node
+def test_shim_rejects_a_version_with_shell_metacharacters(tmp_path):
+    """An env-controlled spec reaches a cmd.exe command line on Windows."""
+    result = _run_shim({"SELVEDGE_VERSION": "0.3.9.2 & calc"}, tmp_path)
+    assert result.returncode == 1
+    assert result.stdout == "", "stdout must stay clean — it is the MCP frame channel"
+    assert "refusing" in result.stderr
+
+
+@needs_node
+def test_shim_writes_nothing_to_stdout_when_no_runner_is_found(tmp_path):
+    """With an empty PATH there is no uvx, no pipx, no selvedge-server."""
+    result = _run_shim({}, tmp_path)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.strip(), "failure must explain itself on stderr"
+
+
+@needs_node
+def test_shim_prefers_uvx_and_passes_the_pinned_spec(tmp_path):
+    """Selection order and the pin both matter; assert them together."""
+    marker = tmp_path / "called.txt"
+    for name in ("uvx", "pipx"):
+        shim = tmp_path / name
+        shim.write_text(f'#!/bin/sh\necho "{name} $*" >> "{marker}"\n')
+        shim.chmod(0o755)
+    result = _run_shim({}, tmp_path)
+    assert result.stdout == ""
+    called = marker.read_text() if marker.exists() else ""
+    assert called.startswith("uvx "), f"expected uvx first, got: {called!r}"
+    assert f"selvedge=={_VERSION}" in called, f"pin not passed through: {called!r}"
+    assert result.returncode == 0
+
+
+@needs_node
+def test_shim_latest_unpins(tmp_path):
+    marker = tmp_path / "called.txt"
+    shim = tmp_path / "uvx"
+    shim.write_text(f'#!/bin/sh\necho "uvx $*" >> "{marker}"\n')
+    shim.chmod(0o755)
+    _run_shim({"SELVEDGE_VERSION": "latest"}, tmp_path)
+    called = marker.read_text()
+    assert "--from selvedge " in called or called.rstrip().endswith("selvedge-server")
+    assert "selvedge==" not in called, f"latest should unpin: {called!r}"

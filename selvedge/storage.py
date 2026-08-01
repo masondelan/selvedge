@@ -1119,6 +1119,14 @@ class SelvedgeStorage:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    #: SQLite raises `LIKE or GLOB pattern too complex` past
+    #: SQLITE_MAX_LIKE_PATTERN_LENGTH (50,000 by default). An agent pasting a
+    #: large diff into a search or `prior_attempts(description=...)` would hit
+    #: it and get a raw OperationalError instead of the project's error-dict
+    #: convention. Truncating is the right call over rejecting: a query this
+    #: long is a paste, and its first few thousand characters are the signal.
+    _MAX_QUERY_CHARS = 4096
+
     def search(self, query: str, limit: int = 20) -> list[dict]:
         """Full-text search across entity_path, diff, reasoning, and agent.
 
@@ -1127,7 +1135,7 @@ class SelvedgeStorage:
         that type rather than the events whose reasoning discusses one — a
         confidently wrong answer with nothing in the docs to explain it.
         """
-        pattern = f"%{_escape_like(query)}%"
+        pattern = f"%{_escape_like(query[: self._MAX_QUERY_CHARS])}%"
         with self._session() as conn:
             rows = conn.execute(
                 """
@@ -1234,7 +1242,7 @@ class SelvedgeStorage:
                     (canonical, prefix),
                 ).fetchall()
             elif query:
-                pattern = f"%{_escape_like(query)}%"
+                pattern = f"%{_escape_like(query[: self._MAX_QUERY_CHARS])}%"
                 path_rows = conn.execute(
                     """
                     SELECT DISTINCT entity_path FROM events

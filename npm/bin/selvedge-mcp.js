@@ -47,7 +47,21 @@ const PKG = require(path.join(__dirname, "..", "package.json"));
  */
 function pypiSpec() {
   const v = (process.env.SELVEDGE_VERSION || PKG.pypiVersion || PKG.version).trim();
-  return v === "latest" ? "selvedge" : `selvedge==${v}`;
+  if (v === "latest") return "selvedge";
+  // Validate before this value can reach a command line. On Windows a .cmd or
+  // .bat runner is spawned with shell:true (Node refuses otherwise since
+  // CVE-2024-27980), and Node does NOT escape arguments in shell mode — so a
+  // SELVEDGE_VERSION of `1.0 & calc` set in a shared repo's .mcp.json would
+  // execute the injected command. PEP 440 versions never need anything
+  // outside this set.
+  if (!/^[A-Za-z0-9.+!-]+$/.test(v)) {
+    process.stderr.write(
+      `selvedge-mcp: refusing to use SELVEDGE_VERSION=${JSON.stringify(v)} — ` +
+      `expected a version like "0.3.9.2" or "latest".\n`
+    );
+    process.exit(1);
+  }
+  return `selvedge==${v}`;
 }
 
 /**

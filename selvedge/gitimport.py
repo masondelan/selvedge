@@ -209,7 +209,23 @@ def _dropped_sql_entities(repo: Path, sha: str) -> list[tuple[str, str]]:
     return entities
 
 
-_REVERT_RE = re.compile(r"revert", re.IGNORECASE)
+# Revert detection is anchored on git's own conventions, not a substring
+# sweep. A bare `revert` match fires on "add a revert button to the toolbar"
+# and "explain how to revert a migration", seeding `revert` events on every
+# file those commits touched — and a seeded false "reverted" verdict is what
+# gates the enforcement hook on an innocent entity, which is precisely the
+# failure this module's precision-over-recall posture exists to prevent.
+#
+# The subject pattern tolerates a conventional-commit prefix (`fix: revert
+# the sso rollout`) but requires `revert` to start the message proper, so a
+# mention mid-sentence does not count. The body pattern is the trailer
+# `git revert` always writes.
+_REVERT_SUBJECT_RE = re.compile(
+    r"^(?:\w+(?:\([^)]*\))?!?:\s*)?reverts?\b", re.IGNORECASE
+)
+_REVERT_BODY_RE = re.compile(
+    r"^\s*this reverts commit\b", re.IGNORECASE | re.MULTILINE
+)
 
 
 def collect_revert_events(
@@ -248,7 +264,9 @@ def collect_revert_events(
             reasoning += "\n\n" + commit["body"]
 
         candidates: list[tuple[str, str]] = []
-        if _REVERT_RE.search(commit["subject"]) or _REVERT_RE.search(commit["body"]):
+        if _REVERT_SUBJECT_RE.search(commit["subject"]) or _REVERT_BODY_RE.search(
+            commit["body"]
+        ):
             # Message sweep: any table/column visibly dropped in the patch,
             # then every touched path. SQL entities lead so the per-commit
             # cap can never truncate the highest-value extractions away.

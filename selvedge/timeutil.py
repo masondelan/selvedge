@@ -39,7 +39,9 @@ def normalize_timestamp(ts: str) -> str:
 
     Accepts naive timestamps (assumed UTC), tz-aware timestamps in any
     offset, and 'Z' suffixed timestamps. Always returns a string of the
-    form ``YYYY-MM-DDTHH:MM:SS[.ffffff]Z``.
+    form ``YYYY-MM-DDTHH:MM:SS.ffffffZ`` — fixed width, always including the
+    fractional part, so that lexicographic order equals chronological order
+    wherever timestamps are sorted as text (which is everywhere in the store).
 
     Raises ValueError if the input is empty or unparseable.
     """
@@ -52,7 +54,13 @@ def normalize_timestamp(ts: str) -> str:
         dt = dt.replace(tzinfo=timezone.utc)
     else:
         dt = dt.astimezone(timezone.utc)
-    iso = dt.isoformat()
+    # Always emit the fractional part, even when it is zero. Every ORDER BY in
+    # the store sorts timestamps as TEXT, and '.' (0x2E) sorts below 'Z'
+    # (0x5A) — so a bare ...SSZ would sort AFTER a ...SS.ffffffZ in the same
+    # second, making lexicographic order disagree with chronological order.
+    # Both precisions arrive routinely: git's %aI and imported Agent Trace
+    # records are second-precision, utc_now_iso() is microsecond-precision.
+    iso = dt.isoformat(timespec="microseconds")
     if iso.endswith("+00:00"):
         iso = iso[:-6] + "Z"
     return iso

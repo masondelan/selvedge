@@ -159,7 +159,7 @@ def test_normalize_revisit_after_preserves_relative_offset():
 
 
 def test_normalize_revisit_after_canonicalizes_absolute_date():
-    assert normalize_revisit_after("2026-09-01") == "2026-09-01T00:00:00Z"
+    assert normalize_revisit_after("2026-09-01") == "2026-09-01T00:00:00.000000Z"
 
 
 def test_normalize_revisit_after_empty_is_empty():

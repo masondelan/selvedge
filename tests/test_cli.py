@@ -822,7 +822,7 @@ def test_stale_cli_json_shape(runner):
     assert row["active_use_signals"] == ["queried"]
     # Due date resolves from the seeded 2020-06-01 absolute revisit date,
     # and the overdue count is the real elapsed days (well over 2000 by now).
-    assert row["revisit_due"] == "2020-06-01T00:00:00Z"
+    assert row["revisit_due"] == "2020-06-01T00:00:00.000000Z"
     assert row["days_overdue"] > 2000
     assert row["stale_reason"]
 

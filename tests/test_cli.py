@@ -1,6 +1,8 @@
 """Tests for the Selvedge CLI."""
 
 
+import json
+
 import pytest
 from click.testing import CliRunner
 
@@ -921,3 +923,26 @@ def test_log_architectural_change_nudges_revisit_after(runner):
     ])
     assert result.exit_code == 0
     assert "revisit_after" in result.output
+
+
+def test_blame_miss_under_json_emits_json(runner, tmp_path, monkeypatch):
+    """`blame --json` on a miss must still put parseable JSON on stdout."""
+    db = tmp_path / "b.db"
+    monkeypatch.setenv("SELVEDGE_DB", str(db))
+    SelvedgeStorage(db)
+    result = runner.invoke(cli, ["blame", "zzz.nope", "--json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert "zzz.nope" in payload["error"]
+
+
+def test_cli_log_counts_toward_log_change_coverage(runner, tmp_path, monkeypatch):
+    """A CLI write must count in the same coverage ratio CLI reads feed."""
+    db = tmp_path / "s.db"
+    monkeypatch.setenv("SELVEDGE_DB", str(db))
+    SelvedgeStorage(db)
+    runner.invoke(cli, ["log", "users.email", "add", "-r", "Added for SMS 2FA codes"])
+    runner.invoke(cli, ["blame", "users.email"])
+    stats = SelvedgeStorage(db).get_tool_stats()
+    assert stats["log_change_calls"] == 1
+    assert stats["log_change_ratio"] > 0

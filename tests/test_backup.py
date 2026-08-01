@@ -8,6 +8,7 @@ import json
 import sqlite3
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -119,3 +120,82 @@ def test_backup_cli_writes_and_emits_json(runner, db_path):
     from pathlib import Path
     assert Path(payload["output_path"]).is_file()
     assert payload["bytes_written"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Interrupted snapshots must not be trusted
+#
+# `VACUUM INTO` writes directly to the final `selvedge-*.db` name. If it is
+# interrupted — OOM kill, SIGTERM from a CI timeout, laptop shutdown, disk
+# full — the truncated file keeps that name, and every consumer trusts the
+# name: `last_backup_time` (so `selvedge doctor` reports a green "0d ago"),
+# `list_backups`, and `_rotate`, which sorts by mtime and will happily evict
+# the last *valid* snapshot to make room for corrupt ones.
+# ---------------------------------------------------------------------------
+
+
+def _explode_on_vacuum(monkeypatch, real_connect=sqlite3.connect):
+    """Make VACUUM INTO fail the way a kill mid-write does: partial file, raise."""
+
+    class _Boom(sqlite3.Connection):
+        def execute(self, sql, *a, **kw):  # type: ignore[override]
+            if sql.strip().upper().startswith("VACUUM INTO"):
+                # Simulate the partially-written destination the real failure
+                # leaves behind, then fail.
+                Path(a[0][0]).write_bytes(b"SQLite format 3\x00" + b"\x00" * 512)
+                raise sqlite3.OperationalError("disk I/O error")
+            return super().execute(sql, *a, **kw)
+
+    monkeypatch.setattr(
+        backup_mod.sqlite3,
+        "connect",
+        lambda *a, **kw: real_connect(*a, **{**kw, "factory": _Boom}),
+    )
+
+
+def test_interrupted_backup_leaves_no_trusted_snapshot(db_path, monkeypatch):
+    s = SelvedgeStorage(db_path)
+    s.log_event(ChangeEvent(entity_path="users.email", change_type="add"))
+    backups_dir = backup_mod.default_backups_dir(db_path)
+
+    _explode_on_vacuum(monkeypatch)
+    with pytest.raises(sqlite3.OperationalError):
+        backup_mod.create_backup(db_path)
+
+    # Nothing carrying the trusted name, and no leftover temp file either.
+    assert list(backups_dir.glob("selvedge-*.db")) == []
+    assert list(backups_dir.glob("*.part")) == []
+    assert backup_mod.last_backup_time(db_path) is None
+
+
+def test_interrupted_backups_do_not_evict_the_last_good_one(db_path, monkeypatch):
+    """Interrupted runs must not consume rotation slots.
+
+    Rotation keeps the `keep_last` newest `selvedge-*.db` files by mtime. If
+    interrupted vacuums leave truncated files under that name they are the
+    newest, so the next successful backup's rotation evicts the older — and
+    only valid — snapshot, leaving a directory of unrestorable files.
+    """
+    s = SelvedgeStorage(db_path)
+    s.log_event(ChangeEvent(entity_path="users.email", change_type="add"))
+    good = backup_mod.create_backup(db_path, keep_last=3).output_path
+    assert good.is_file()
+
+    _explode_on_vacuum(monkeypatch)
+    for _ in range(8):
+        with pytest.raises(sqlite3.OperationalError):
+            backup_mod.create_backup(db_path, keep_last=3)
+    monkeypatch.undo()
+
+    # A later successful backup rotates; the valid history must survive it.
+    time.sleep(0.01)
+    backup_mod.create_backup(db_path, keep_last=3)
+
+    survivors = list(backup_mod.default_backups_dir(db_path).glob("selvedge-*.db"))
+    assert good in survivors, "rotation evicted the only valid snapshot"
+    for snap in survivors:
+        con = sqlite3.connect(snap)
+        try:
+            assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok", snap
+        finally:
+            con.close()

@@ -18,6 +18,7 @@ appends it the same way.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -97,14 +98,30 @@ def create_backup(
                 break
             n += 1
 
+    # Vacuum to a temporary name and rename into place only on success. Every
+    # consumer downstream trusts the `selvedge-*.db` name to mean "a complete
+    # snapshot" — `_rotate` sorts by mtime and prunes, `list_backups` and
+    # `last_backup_time` report it, and `selvedge doctor` turns the latter into
+    # a green "last backup 0d ago". A vacuum killed partway (OOM, SIGTERM from
+    # a CI timeout, shutdown, disk full) would otherwise leave a truncated file
+    # holding that name: unopenable, newest by mtime, and therefore evicting
+    # real snapshots on the next rotation.
+    part = dest.with_name(dest.name + ".part")
     conn = sqlite3.connect(str(db_path))
     try:
         # VACUUM INTO is online — concurrent readers/writers are fine. It
         # also rewrites the file from scratch, so the snapshot has no
         # WAL/SHM sidecars to worry about.
-        conn.execute("VACUUM INTO ?", (str(dest),))
+        conn.execute("VACUUM INTO ?", (str(part),))
+    except BaseException:
+        # BaseException, not Exception: a KeyboardInterrupt mid-vacuum must
+        # clean up too, since that is one of the ways this actually happens.
+        part.unlink(missing_ok=True)
+        part.with_name(part.name + "-journal").unlink(missing_ok=True)
+        raise
     finally:
         conn.close()
+    os.replace(part, dest)
 
     pruned = _rotate(default_backups_dir(db_path), keep_last=keep_last)
 

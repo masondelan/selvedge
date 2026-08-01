@@ -24,7 +24,12 @@ classifiers = [
     "Topic :: Software Development :: Version Control",
 ]
 dependencies = [
-    "mcp>=1.0.0",
+    # Upper bound is load-bearing, not caution. mcp 2.0.0 (2026-07-28) removed
+    # `mcp.server.fastmcp` and renamed every ToolAnnotations field from
+    # camelCase to snake_case, so an unbounded `mcp>=1.0.0` resolves to a
+    # release where `selvedge-server` fails at import. Lift this only together
+    # with the 2.x migration.
+    "mcp>=1.0.0,<2.0.0",
     "click>=8.0.0",
     "rich>=13.0.0",
 ]

@@ -258,20 +258,38 @@ def test_session_rolls_back_on_error(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+# The v0.3.7 `events` table, spelled out. Deliberately NOT derived from the
+# current CREATE_TABLE_SQL by dropping columns: `ALTER TABLE ... DROP COLUMN`
+# re-parses the table definition and its behavior varies across the SQLite
+# versions in the support matrix, which made this fixture pass on one and fail
+# on another. A literal legacy schema is both version-independent and a more
+# faithful simulation of what a pre-upgrade store actually looks like.
+_PRE_V3_EVENTS_SQL = """
+CREATE TABLE IF NOT EXISTS events (
+    id           TEXT PRIMARY KEY,
+    timestamp    TEXT NOT NULL,
+    entity_type  TEXT NOT NULL DEFAULT 'other',
+    entity_path  TEXT NOT NULL,
+    change_type  TEXT NOT NULL,
+    diff         TEXT NOT NULL DEFAULT '',
+    reasoning    TEXT NOT NULL DEFAULT '',
+    agent        TEXT NOT NULL DEFAULT '',
+    session_id   TEXT NOT NULL DEFAULT '',
+    git_commit   TEXT NOT NULL DEFAULT '',
+    project      TEXT NOT NULL DEFAULT '',
+    changeset_id TEXT NOT NULL DEFAULT '',
+    metadata     TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
+
 def _build_pre_v3_db(db_path: Path) -> None:
     """Simulate a v0.3.7-shaped store: migrations {1,2} applied, v3/v4 pending."""
     from selvedge.migrations import SCHEMA_MIGRATIONS_TABLE_SQL
-    from selvedge.storage import CREATE_TABLE_SQL
 
     con = sqlite3.connect(db_path)
     try:
-        con.executescript(CREATE_TABLE_SQL)
-        present = {r[1] for r in con.execute("PRAGMA table_info(events)")}
-        for col in (
-            "revisit_after", "expires_when", "supersedes", "constraint", "stale_when",
-        ):
-            if col in present:
-                con.execute(f'ALTER TABLE events DROP COLUMN "{col}"')
+        con.executescript(_PRE_V3_EVENTS_SQL)
         con.execute(SCHEMA_MIGRATIONS_TABLE_SQL)
         for version in (1, 2):
             con.execute(
@@ -282,6 +300,83 @@ def _build_pre_v3_db(db_path: Path) -> None:
         con.commit()
     finally:
         con.close()
+    # Guard the fixture itself: if a future schema change makes these columns
+    # present from the start, the test would silently stop exercising the race.
+    con = sqlite3.connect(db_path)
+    try:
+        present = {r[1] for r in con.execute("PRAGMA table_info(events)")}
+    finally:
+        con.close()
+    assert not {"revisit_after", "supersedes", "stale_when"} & present, (
+        "fixture is not pre-v3; the migration race is no longer being exercised"
+    )
+
+
+def test_stale_pre_lock_read_does_not_rerun_the_migration(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The race, made deterministic.
+
+    The threaded test below reproduces this only sometimes — the window is
+    genuinely narrow — so it is a smoke check, not the guard. This is the
+    guard: it forces the exact interleaving the bug needs.
+
+    `apply_migrations` reads "which versions are applied?" before taking any
+    write lock. If another process applies the migration in between, that read
+    is stale. Here the first read is pinned to a stale snapshot while the
+    database really does get migrated underneath, which is precisely what a
+    losing process saw. Correct behavior is to notice under the lock and skip;
+    the bug re-ran the `ALTER TABLE` and died on `duplicate column name`.
+    """
+    from selvedge import migrations as migrations_mod
+
+    db_path = tmp_path / "stale-read.db"
+    _build_pre_v3_db(db_path)
+
+    # Another process gets there first and fully migrates the store.
+    SelvedgeStorage(db_path)
+
+    # Pin BOTH pre-lock reads to the stale view a losing process had: the
+    # applied-set, and the bootstrap probe that asks "is the column already
+    # there?". Each returns its stale answer once — the pre-lock evaluation —
+    # and the truth thereafter, which is exactly what the loser observed after
+    # blocking on the writer lock.
+    real_get_applied = migrations_mod.get_applied_versions
+    real_column_exists = migrations_mod._column_exists
+    applied_calls = {"n": 0}
+    stale_columns: set[str] = set()
+
+    def stale_first_applied(conn):
+        applied_calls["n"] += 1
+        if applied_calls["n"] == 1:
+            return {1, 2}
+        return real_get_applied(conn)
+
+    def stale_first_column(conn, table, column):
+        if column not in stale_columns:
+            stale_columns.add(column)
+            return False
+        return real_column_exists(conn, table, column)
+
+    monkeypatch.setattr(migrations_mod, "get_applied_versions", stale_first_applied)
+    monkeypatch.setattr(migrations_mod, "_column_exists", stale_first_column)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        migrations_mod.apply_migrations(conn)   # must not raise
+    finally:
+        conn.close()
+
+    assert applied_calls["n"] >= 2, "the applied-set was never re-read under the lock"
+
+    con = sqlite3.connect(db_path)
+    try:
+        applied = {r[0] for r in con.execute("SELECT version FROM schema_migrations")}
+        columns = {r[1] for r in con.execute("PRAGMA table_info(events)")}
+    finally:
+        con.close()
+    assert applied == {1, 2, 3, 4}
+    assert {"revisit_after", "supersedes", "stale_when"} <= columns
 
 
 @pytest.mark.parametrize("trial", range(4))

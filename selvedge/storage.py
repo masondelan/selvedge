@@ -100,6 +100,17 @@ CREATE TABLE IF NOT EXISTS path_migrations (
 
 CREATE_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_entity_path   ON events(entity_path);",
+    # The exact-or-dotted-prefix read below `prior_attempts`, `blame` and the
+    # PreToolUse hook is `entity_path = ? OR entity_path LIKE ?`. SQLite's
+    # default LIKE is case-insensitive, so it can only use a NOCASE-collated
+    # index for the prefix half — against the BINARY `idx_entity_path` above
+    # it falls back to scanning every row. This index is what keeps the
+    # hook's per-call cost flat as the store grows; without it the hook's p50
+    # goes 68ms at 10k events to ~4.9s at 890k. Do NOT replace the LIKE with
+    # a >=/< range or GLOB to avoid it: those are case-SENSITIVE and would
+    # change which rows match.
+    "CREATE INDEX IF NOT EXISTS idx_entity_path_nocase "
+    "ON events(entity_path COLLATE NOCASE);",
     "CREATE INDEX IF NOT EXISTS idx_timestamp     ON events(timestamp);",
     "CREATE INDEX IF NOT EXISTS idx_project       ON events(project);",
     "CREATE INDEX IF NOT EXISTS idx_change_type   ON events(change_type);",
@@ -1439,9 +1450,8 @@ class SelvedgeStorage:
         ]
         params: list = []
         if entity_path:
-            canonical = canonicalize_entity_path(entity_path)
             clauses.append("(entity_path = ? OR entity_path LIKE ? ESCAPE '\\')")
-            params.extend([canonical, f"{_escape_like(canonical)}.%"])
+            params.extend([entity_path, f"{_escape_like(entity_path)}.%"])
         if project:
             clauses.append("project = ?")
             params.append(project)

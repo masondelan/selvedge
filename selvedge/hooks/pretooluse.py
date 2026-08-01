@@ -382,14 +382,35 @@ def _project_root(db_path: Path, cwd: Path) -> Path:
 
 
 def _relative_to(path_str: str, root: Path) -> str:
-    """Best-effort ``root``-relative form of ``path_str`` for glob matching."""
+    """Best-effort ``root``-relative form of ``path_str`` for glob matching.
+
+    Returns ``""`` — which matches no watch glob — when the path resolves
+    outside ``root``. A path in another checkout is not this project's entity,
+    and letting it through meant an edit elsewhere could be gated against this
+    project's history.
+
+    Note this deliberately does not use ``lstrip("./")``: ``str.lstrip`` strips
+    any leading run of the given *characters*, not a prefix, so ``../x`` became
+    ``x`` and ``.hidden/schema.sql`` became ``hidden/schema.sql`` — a different
+    entity from the one ``canonicalize_entity_path`` stores, which made
+    enforcement silently inert for dotfile paths.
+    """
     try:
         p = Path(path_str)
         if p.is_absolute():
-            return str(p.resolve().relative_to(root.resolve()))
+            resolved = p.resolve()
+            root_resolved = root.resolve()
+            if resolved == root_resolved or root_resolved in resolved.parents:
+                return str(resolved.relative_to(root_resolved))
+            return ""
     except (ValueError, OSError):
-        pass
-    return path_str.lstrip("./")
+        return ""
+
+    # Relative path: normalize, then reject anything that escapes the root.
+    normalized = os.path.normpath(path_str)
+    if normalized == ".." or normalized.startswith(f"..{os.sep}"):
+        return ""
+    return "" if normalized == "." else normalized
 
 
 # ---------------------------------------------------------------------------

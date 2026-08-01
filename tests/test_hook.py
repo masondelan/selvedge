@@ -649,3 +649,59 @@ def test_selvedge_remediation_command_is_not_blocked(reverted, command):
     """The command the block message tells the agent to run must be runnable."""
     decision = hook.evaluate(_bash_payload(reverted, command))
     assert decision.action == "allow", f"remediation self-blocked: {command}"
+
+
+# ---------------------------------------------------------------------------
+# Path resolution must stay inside the project
+#
+# `_relative_to` ended in `path_str.lstrip("./")`, which strips any leading run
+# of `.` and `/` CHARACTERS rather than a `./` prefix — so `../x` and even an
+# absolute path in another checkout were rewritten into project-relative-
+# looking strings that then matched the watch globs. It also disagreed with
+# `canonicalize_entity_path` on dotfiles, making enforcement silently inert
+# for an entity stored as `.hidden/schema.sql`.
+# ---------------------------------------------------------------------------
+
+
+def _matches_default_globs(path: str) -> bool:
+    return any(
+        hook._glob_to_regex(g).match(path) for g in hook.DEFAULT_WATCH_GLOBS
+    )
+
+
+def test_relative_to_strips_only_a_leading_dot_slash(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    assert hook._relative_to("./migrations/x.sql", root) == "migrations/x.sql"
+
+
+def test_relative_to_preserves_dotfile_paths(tmp_path):
+    """`.hidden/x` must not become `hidden/x` — that is a different entity."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    assert hook._relative_to(".hidden/schema.sql", root) == ".hidden/schema.sql"
+
+
+@pytest.mark.parametrize("outside", [
+    "../other/migrations/x.sql",
+    "../../etc/migrations/x.sql",
+])
+def test_relative_to_does_not_pull_parent_paths_into_the_project(tmp_path, outside):
+    root = tmp_path / "proj"
+    root.mkdir()
+    result = hook._relative_to(outside, root)
+    assert not _matches_default_globs(result), (
+        f"{outside!r} -> {result!r} still matches a watch glob"
+    )
+
+
+def test_absolute_path_in_another_checkout_is_not_project_relative(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    other = tmp_path / "repoB" / "migrations" / "003.sql"
+    other.parent.mkdir(parents=True)
+    other.write_text("-- x\n")
+    result = hook._relative_to(str(other), root)
+    assert not _matches_default_globs(result), (
+        f"out-of-root absolute path {result!r} matched a watch glob"
+    )

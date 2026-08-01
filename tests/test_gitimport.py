@@ -394,3 +394,66 @@ def test_agent_trace_round_trip(runner, repo, tmp_path):
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# Revert detection must be anchored, not a substring sweep
+#
+# `_REVERT_RE` matched "revert" anywhere in a subject or body, so an ordinary
+# commit that merely mentions the word seeded `revert` events on every file it
+# touched. A seeded false "reverted" verdict gates the enforcement hook on
+# innocent entities — the exact outcome the module docstring says this parser
+# exists to avoid.
+# ---------------------------------------------------------------------------
+
+
+def _repo_with(tmp_path: Path, commits: list[tuple[str, str, str]]) -> Path:
+    """Build a repo from (filename, contents, message) triples."""
+    repo = tmp_path / "anchored"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    for i, (name, contents, message) in enumerate(commits):
+        (repo / name).write_text(contents)
+        _commit_all(repo, message, f"2026-02-0{i + 1}T10:00:00+00:00")
+    return repo
+
+
+def _reverted_paths(repo: Path) -> set[str]:
+    return {
+        e.entity_path
+        for e in collect_revert_events(repo)
+        if e.change_type == "revert"
+    }
+
+
+def test_commit_merely_mentioning_revert_is_not_a_rollback(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, [
+        ("app.py", "x = 1\n", "feat(ui): add a revert button to the toolbar"),
+        ("README.md", "docs\n", "docs: explain how to revert a migration"),
+    ])
+    assert _reverted_paths(repo) == set()
+
+
+def test_git_revert_style_subject_is_a_rollback(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, [
+        ("app.py", "x = 1\n", "feat: add sso tokens"),
+        ("app.py", "", 'Revert "feat: add sso tokens"'),
+    ])
+    assert "app.py" in _reverted_paths(repo)
+
+
+def test_this_reverts_commit_body_is_a_rollback(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, [
+        ("app.py", "x = 1\n", "feat: add sso tokens"),
+        ("app.py", "", "undo the token work\n\nThis reverts commit "
+                       "0123456789abcdef0123456789abcdef01234567."),
+    ])
+    assert "app.py" in _reverted_paths(repo)
+
+
+def test_conventional_prefix_before_revert_still_counts(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, [
+        ("app.py", "x = 1\n", "feat: add sso tokens"),
+        ("app.py", "", "fix: revert the sso token rollout"),
+    ])
+    assert "app.py" in _reverted_paths(repo)

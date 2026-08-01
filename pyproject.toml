@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Version Control",
 ]
 dependencies = [
@@ -95,11 +96,14 @@ testpaths = ["tests"]
 [tool.coverage.run]
 branch = true
 source = ["selvedge"]
-# Test files are excluded from coverage so the gate measures product code only.
-omit = ["selvedge/_version.py"]
+# `source` already scopes coverage to the package, so nothing needs omitting.
+# (This previously listed selvedge/_version.py, which does not exist — the
+# entry was vestigial and no exemptions were actually in effect.)
+omit = []
 
 [tool.coverage.report]
-# CI gate — keep this in lockstep with the --cov-fail-under flag in test.yml.
+# CI gate. test.yml runs plain `pytest --cov=selvedge`, so this value is the
+# only threshold in play — there is no --cov-fail-under flag to keep in step.
 fail_under = 85
 show_missing = true
 skip_covered = false

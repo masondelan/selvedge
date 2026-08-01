@@ -615,14 +615,6 @@ def blame(
             populated["metadata"] = json.loads(md) if md else {}
         except json.JSONDecodeError:
             populated["metadata"] = {}
-    # The active-memory (v0.3.8) and supersede (v0.3.9.1) columns are
-    # NULLABLE — pre-migration rows read back as NULL. Coalesce to "" so the
-    # schema's "string" contract holds.
-    for nullable in (
-        "revisit_after", "expires_when", "supersedes", "constraint", "stale_when",
-    ):
-        if populated.get(nullable) is None:
-            populated[nullable] = ""
     # Derived decision state: entity-level status plus whether THIS event
     # has been overridden by a later supersede.
     decision = storage.get_decision_status(entity_path)
@@ -1003,7 +995,8 @@ _tighten_descriptions()
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
+    """Console-script entry point: start the MCP server on stdio."""
     # Configure structured logging once per process. Verbosity is controlled
     # by SELVEDGE_LOG_LEVEL (default WARNING).
     configure_logging()

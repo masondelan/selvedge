@@ -450,3 +450,78 @@ def test_quoted_identifiers_still_parse():
     sql = 'ALTER TABLE "users" ADD COLUMN "email" TEXT;\n'
     events = _parse_sql_text(sql, source="006.sql")
     assert [(e.entity_path, e.change_type) for e in events] == [("users.email", "add")]
+
+
+# ---------------------------------------------------------------------------
+# Entity identity (review issue #27)
+# ---------------------------------------------------------------------------
+
+
+def test_schema_qualified_create_table_records_the_table_not_the_schema():
+    """`public.users` is the default spelling in Postgres dumps."""
+    events = _parse_sql_text(
+        "CREATE TABLE public.users (id SERIAL PRIMARY KEY, email TEXT NOT NULL);",
+        source="001.sql",
+    )
+    paths = [(e.entity_path, e.change_type) for e in events]
+    assert ("users", "create") in paths, f"table recorded under the wrong entity: {paths}"
+    assert ("users.email", "add") in paths, f"column events lost: {paths}"
+
+
+def test_schema_qualified_add_column_is_not_dropped():
+    events = _parse_sql_text(
+        "ALTER TABLE public.users ADD COLUMN phone TEXT;", source="002.sql"
+    )
+    assert [(e.entity_path, e.change_type) for e in events] == [
+        ("users.phone", "add")
+    ]
+
+
+def test_three_part_qualified_name_uses_the_last_segment():
+    events = _parse_sql_text(
+        "ALTER TABLE mydb.dbo.users ADD COLUMN nickname TEXT;", source="003.sql"
+    )
+    assert [e.entity_path for e in events] == ["users.nickname"]
+
+
+def test_unqualified_names_are_unchanged():
+    events = _parse_sql_text(
+        "ALTER TABLE users ADD COLUMN age INTEGER;", source="004.sql"
+    )
+    assert [e.entity_path for e in events] == ["users.age"]
+
+
+def test_index_add_and_remove_share_one_entity():
+    """The pair must be able to close an attempt, so both use the index name."""
+    events = _parse_sql_text(
+        "CREATE INDEX idx_users_email ON users (email);\n"
+        "DROP INDEX idx_users_email;\n",
+        source="005.sql",
+    )
+    by_type = {e.change_type: e.entity_path for e in events}
+    assert by_type["index_add"] == "idx_users_email"
+    assert by_type["index_remove"] == "idx_users_email"
+
+
+def test_index_add_records_its_table_in_the_reasoning():
+    """Folding the table into reasoning keeps it discoverable after the move."""
+    events = _parse_sql_text(
+        "CREATE INDEX idx_users_email ON users (email);", source="006.sql"
+    )
+    assert "users" in events[0].reasoning
+
+
+def test_sql_and_alembic_agree_on_index_identity(tmp_path):
+    sql_events = _parse_sql_text(
+        "CREATE INDEX ix_orders_total ON orders (total);", source="s.sql"
+    )
+    alembic = tmp_path / "abc_add_index.py"
+    alembic.write_text(
+        "def upgrade():\n"
+        "    op.create_index('ix_orders_total', 'orders', ['total'])\n"
+    )
+    alb_events = parse_alembic_file(alembic)
+    sql_idx = [e for e in sql_events if e.change_type == "index_add"]
+    alb_idx = [e for e in alb_events if e.change_type == "index_add"]
+    assert sql_idx and alb_idx
+    assert sql_idx[0].entity_path == alb_idx[0].entity_path == "ix_orders_total"

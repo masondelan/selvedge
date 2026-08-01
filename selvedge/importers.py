@@ -103,47 +103,55 @@ def _pick_parser(f: Path, fmt: str) -> Callable[..., list[ChangeEvent]]:
 
 # Patterns match the most common DDL forms found in raw SQL migration files.
 # Case-insensitive, whitespace-tolerant.
+#
+# Table references may be schema-qualified (`public.users`, the default
+# spelling in Postgres dumps) or three-part (`mydb.dbo.users`). The optional
+# qualifier is consumed and only the LAST segment is captured, so the entity
+# is the table — matching the Alembic parser, which already ignores `schema=`.
+# Without this, `CREATE TABLE public.users (...)` recorded an entity named
+# "public" and lost every column event, and `ALTER TABLE public.users ADD
+# COLUMN` matched nothing at all and was dropped silently.
 
 _SQL_CREATE_TABLE = re.compile(
-    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`'\"]?(\w+)[`'\"]?",
+    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?",
     re.IGNORECASE,
 )
 _SQL_DROP_TABLE = re.compile(
-    r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?[`'\"]?(\w+)[`'\"]?",
+    r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?",
     re.IGNORECASE,
 )
 _SQL_ADD_COLUMN = re.compile(
-    r"ALTER\s+TABLE\s+[`'\"]?(\w+)[`'\"]?\s+ADD\s+(?:COLUMN\s+)?[`'\"]?(\w+)[`'\"]?\s+([^,;]+)",
+    r"ALTER\s+TABLE\s+[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?\s+ADD\s+(?:COLUMN\s+)?[`'\"]?(\w+)[`'\"]?\s+([^,;]+)",
     re.IGNORECASE,
 )
 _SQL_DROP_COLUMN = re.compile(
-    r"ALTER\s+TABLE\s+[`'\"]?(\w+)[`'\"]?\s+DROP\s+(?:COLUMN\s+)?[`'\"]?(\w+)[`'\"]?",
+    r"ALTER\s+TABLE\s+[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?\s+DROP\s+(?:COLUMN\s+)?[`'\"]?(\w+)[`'\"]?",
     re.IGNORECASE,
 )
 _SQL_RENAME_COLUMN = re.compile(
-    r"ALTER\s+TABLE\s+[`'\"]?(\w+)[`'\"]?\s+RENAME\s+(?:COLUMN\s+)?[`'\"]?(\w+)[`'\"]?"
+    r"ALTER\s+TABLE\s+[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?\s+RENAME\s+(?:COLUMN\s+)?[`'\"]?(\w+)[`'\"]?"
     r"\s+TO\s+[`'\"]?(\w+)[`'\"]?",
     re.IGNORECASE,
 )
 _SQL_ALTER_COLUMN = re.compile(
-    r"ALTER\s+TABLE\s+[`'\"]?(\w+)[`'\"]?\s+(?:ALTER|MODIFY)\s+(?:COLUMN\s+)?[`'\"]?(\w+)[`'\"]?",
+    r"ALTER\s+TABLE\s+[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?\s+(?:ALTER|MODIFY)\s+(?:COLUMN\s+)?[`'\"]?(\w+)[`'\"]?",
     re.IGNORECASE,
 )
 _SQL_CREATE_INDEX = re.compile(
-    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?\w+\s+ON\s+[`'\"]?(\w+)[`'\"]?",
+    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?[`'\"]?(\w+)[`'\"]?\s+ON\s+[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?",
     re.IGNORECASE,
 )
 _SQL_DROP_INDEX = re.compile(
-    r"DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?[`'\"]?(\w+)[`'\"]?",
+    r"DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?",
     re.IGNORECASE,
 )
 _SQL_RENAME_TABLE = re.compile(
-    r"ALTER\s+TABLE\s+[`'\"]?(\w+)[`'\"]?\s+RENAME\s+(?:TO\s+)?[`'\"]?(\w+)[`'\"]?",
+    r"ALTER\s+TABLE\s+[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?\s+RENAME\s+(?:TO\s+)?[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?",
     re.IGNORECASE,
 )
 
 _SQL_CREATE_TABLE_HEAD = re.compile(
-    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`'\"]?(\w+)[`'\"]?\s*\(",
+    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`'\"]?(?:\w+[`'\"]?\s*\.\s*[`'\"]?)*(\w+)[`'\"]?\s*\(",
     re.IGNORECASE,
 )
 
@@ -460,13 +468,19 @@ def _parse_sql_text(sql: str, source: str = "", project: str = "") -> list[Chang
         # CREATE INDEX
         m = _SQL_CREATE_INDEX.search(stmt)
         if m:
-            table = m.group(1)
+            index_name, table = m.group(1), m.group(2)
+            # Recorded on the INDEX, not the table. DROP INDEX only ever names
+            # the index, so recording the add against the table meant the pair
+            # lived on two different entities and could never close an
+            # attempt — `prior_attempts` reported a dropped index as still
+            # active. The table is folded into the reasoning so it stays
+            # discoverable. This also matches the Alembic parser.
             events.append(ChangeEvent(
-                entity_path=table,
+                entity_path=index_name,
                 entity_type="index",
                 change_type="index_add",
                 diff=diff_line,
-                reasoning=source,
+                reasoning=f"on {table} ({source})" if source else f"on {table}",
                 project=project,
             ))
             continue

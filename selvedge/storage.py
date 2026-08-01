@@ -990,7 +990,8 @@ class SelvedgeStorage:
         tried → reverted → re-opened trail readable straight off the diff
         output without a second query.
         """
-        prefix_pattern = f"{_escape_like(entity_path)}.%"
+        canonical = canonicalize_entity_path(entity_path)
+        prefix_pattern = f"{_escape_like(canonical)}.%"
         with self._session() as conn:
             rows = conn.execute(
                 """
@@ -999,7 +1000,7 @@ class SelvedgeStorage:
                 ORDER BY timestamp DESC
                 LIMIT ?
                 """,
-                (entity_path, prefix_pattern, limit),
+                (canonical, prefix_pattern, limit),
             ).fetchall()
             results = [_coalesce_event_nullables(dict(r)) for r in rows]
             ids = [r["id"] for r in results]
@@ -1017,7 +1018,15 @@ class SelvedgeStorage:
         return results
 
     def get_blame(self, entity_path: str) -> dict | None:
-        """Return the most recent event for an exact entity path."""
+        """Return the most recent event for an exact entity path.
+
+        The query path is canonicalized the same way the write path is, so
+        ``blame("./src/auth.py")`` finds what ``log_change`` stored as
+        ``src/auth.py`` — the shipped agent prompt tells agents to run
+        ``prior_attempts`` and then ``blame`` on the same string, and those
+        two must not disagree about what an entity is.
+        """
+        canonical = canonicalize_entity_path(entity_path)
         with self._session() as conn:
             row = conn.execute(
                 """
@@ -1026,7 +1035,7 @@ class SelvedgeStorage:
                 ORDER BY timestamp DESC
                 LIMIT 1
                 """,
-                (entity_path,),
+                (canonical,),
             ).fetchone()
         return _coalesce_event_nullables(dict(row)) if row else None
 
@@ -1046,8 +1055,9 @@ class SelvedgeStorage:
             clauses.append("timestamp >= ?")
             params.append(since)
         if entity_path:
+            canonical = canonicalize_entity_path(entity_path)
             clauses.append("(entity_path = ? OR entity_path LIKE ? ESCAPE '\\')")
-            params.extend([entity_path, f"{_escape_like(entity_path)}.%"])
+            params.extend([canonical, f"{_escape_like(canonical)}.%"])
         if project:
             clauses.append("project = ?")
             params.append(project)
@@ -1450,8 +1460,9 @@ class SelvedgeStorage:
         ]
         params: list = []
         if entity_path:
+            canonical = canonicalize_entity_path(entity_path)
             clauses.append("(entity_path = ? OR entity_path LIKE ? ESCAPE '\\')")
-            params.extend([entity_path, f"{_escape_like(entity_path)}.%"])
+            params.extend([canonical, f"{_escape_like(canonical)}.%"])
         if project:
             clauses.append("project = ?")
             params.append(project)

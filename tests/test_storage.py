@@ -543,6 +543,57 @@ def test_migration_adds_changeset_id_column(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Entity-path canonicalization on the READ path
+#
+# Writes canonicalize via ``_normalize_for_storage``; ``get_prior_attempts``
+# and ``get_decision_status`` canonicalize their query too. These three reads
+# did not, so an agent that ran ``prior_attempts <path>`` and then
+# ``blame <path>`` on the SAME string got a hit followed by a miss.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "queried",
+    ["./src/auth.py", "src//auth.py", "src\\auth.py"],
+)
+def test_blame_finds_non_canonical_query_path(storage, queried):
+    storage.log_event(ChangeEvent(entity_path="src/auth.py", change_type="add"))
+    row = storage.get_blame(queried)
+    assert row is not None
+    assert row["entity_path"] == "src/auth.py"
+
+
+@pytest.mark.parametrize(
+    "queried",
+    ["./src/auth.py", "src//auth.py", "src\\auth.py"],
+)
+def test_entity_history_finds_non_canonical_query_path(storage, queried):
+    storage.log_event(ChangeEvent(entity_path="src/auth.py", change_type="add"))
+    assert [r["entity_path"] for r in storage.get_entity_history(queried)] == [
+        "src/auth.py"
+    ]
+
+
+@pytest.mark.parametrize(
+    "queried",
+    ["./src/auth.py", "src//auth.py", "src\\auth.py"],
+)
+def test_get_history_finds_non_canonical_query_path(storage, queried):
+    storage.log_event(ChangeEvent(entity_path="src/auth.py", change_type="add"))
+    assert [
+        r["entity_path"] for r in storage.get_history(entity_path=queried)
+    ] == ["src/auth.py"]
+
+
+def test_canonical_read_still_matches_dotted_children(storage):
+    """Canonicalizing the query must not narrow the dotted-prefix match."""
+    storage.log_event(ChangeEvent(entity_path="users", change_type="add"))
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add"))
+    paths = {r["entity_path"] for r in storage.get_entity_history("users")}
+    assert paths == {"users", "users.email"}
+
+
+# ---------------------------------------------------------------------------
 # Index coverage for the exact-or-dotted-prefix read
 #
 # ``idx_entity_path`` is BINARY-collated but SQLite's default LIKE is

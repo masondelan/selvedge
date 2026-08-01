@@ -51,6 +51,20 @@ def _seed_legacy(db_path: Path, paths: list[str]) -> None:
     con.close()
 
 
+def _raw_paths(db_path: Path) -> set[str]:
+    """Read entity_path values straight off the table.
+
+    The public reads canonicalize their query argument, so they cannot be
+    used to assert what is *literally* stored — these tests are specifically
+    about the on-disk spelling, which only a raw SELECT can see.
+    """
+    con = sqlite3.connect(db_path)
+    try:
+        return {r[0] for r in con.execute("SELECT entity_path FROM events")}
+    finally:
+        con.close()
+
+
 @pytest.fixture
 def storage(tmp_path: Path) -> SelvedgeStorage:
     db = tmp_path / "m.db"
@@ -64,7 +78,7 @@ def test_dry_run_is_the_default_and_writes_nothing(storage):
     assert report["rows_to_rewrite"] == 2
     assert report["rows_rewritten"] == 0
     # Nothing changed on disk: the legacy spellings are still present.
-    assert storage.get_blame("./src/auth.py::login") is not None
+    assert "./src/auth.py::login" in _raw_paths(storage.db_path)
     assert storage.get_last_path_migration() is None
 
 
@@ -82,7 +96,7 @@ def test_apply_rewrites_rows(storage):
     assert report["applied"] is True
     assert report["rows_rewritten"] == 2
     # Canonical path now holds both events; messy spellings are gone.
-    assert storage.get_blame("./src/auth.py::login") is None
+    assert _raw_paths(storage.db_path) == {"src/auth.py::login", "users.email"}
     assert len(storage.get_entity_history("src/auth.py::login")) == 2
 
 

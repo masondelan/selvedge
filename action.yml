@@ -59,22 +59,38 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
+    # Inputs are passed through `env:` and referenced as quoted shell
+    # variables, never interpolated into the script text. `${{ }}` expansion
+    # is textual and happens BEFORE the shell parses the line, so a caller
+    # wiring a dynamic value into any of these — a workflow_dispatch input, a
+    # workflow_call parameter — could otherwise inject commands that run with
+    # THEIR GITHUB_TOKEN in scope. This action is published for third-party
+    # use, so it does not trust its inputs regardless of who sets them.
     - name: Install Selvedge
       shell: bash
-      run: pip install "selvedge${{ inputs.selvedge-version }}"
+      env:
+        SELVEDGE_VERSION_SPEC: ${{ inputs.selvedge-version }}
+      run: pip install "selvedge${SELVEDGE_VERSION_SPEC}"
 
     - name: Run coverage check
       id: run
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        DB_PATH: ${{ inputs.db-path }}
+        SINCE: ${{ inputs.since }}
+        WINDOW: ${{ inputs.window }}
+        LIMIT: ${{ inputs.limit }}
+        FAIL_UNDER: ${{ inputs.fail-under }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        if [ -n "${{ inputs.db-path }}" ]; then
-          export SELVEDGE_DB="${{ inputs.db-path }}"
+        if [ -n "$DB_PATH" ]; then
+          export SELVEDGE_DB="$DB_PATH"
         fi
-        python "${{ github.action_path }}/scripts/coverage_check.py" \
-          --since "${{ inputs.since }}" \
-          --window "${{ inputs.window }}" \
-          --limit "${{ inputs.limit }}" \
+        python "$ACTION_PATH/scripts/coverage_check.py" \
+          --since "$SINCE" \
+          --window "$WINDOW" \
+          --limit "$LIMIT" \
           --json | tee selvedge-coverage.json
-        python "${{ github.action_path }}/scripts/coverage_gate.py" \
-          selvedge-coverage.json "${{ inputs.fail-under }}"
+        python "$ACTION_PATH/scripts/coverage_gate.py" \
+          selvedge-coverage.json "$FAIL_UNDER"

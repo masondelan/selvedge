@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Publish features to GHCR
-        uses: devcontainers/action@v1
+        uses: devcontainers/action@1082abd5d2bf3a11abccba70eef98df068277772  # v1
         with:
           publish-features: "true"
           base-path-to-features: "./features/src"

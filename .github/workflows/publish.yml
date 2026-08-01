@@ -36,7 +36,7 @@ jobs:
         run: echo "num=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
 
       - name: Generate changelog from git log
         id: changelog
@@ -53,7 +53,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3
         with:
           name: Selvedge ${{ github.ref_name }}
           body: |
@@ -110,9 +110,21 @@ jobs:
           echo "Timed out waiting for PyPI to serve $VERSION" >&2
           exit 1
 
+      # Pinned and checksum-verified. This binary is executed in a job that
+      # holds `id-token: write` for the io.github.masondelan/* MCP Registry
+      # namespace, and it runs automatically on every tag push with no human
+      # in between — so a replaced `releases/latest` asset would have been
+      # handed a valid token to publish under our namespace. runs-on is
+      # ubuntu-latest, so the platform is known and the uname dance is gone.
       - name: Install mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.0
+          MCP_PUBLISHER_SHA256: 1370446bbe74d562608e8005a6ccce02d146a661fbd78674e11cc70b9618d6cf
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
 
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc

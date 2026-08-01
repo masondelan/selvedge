@@ -1680,6 +1680,67 @@ website-sync PR is friction. Automating that away gets more urgent as
 a result; the manual cadence stops being acceptable past ~v0.3.8 if
 the work hasn't been built.
 
+### The hook fails open on writes it cannot recognize — accepted
+
+Added 2026-08-01 after a full code-quality review.
+
+The PreToolUse gate can be walked past. A review reproduced all of these
+against the shipped binary: writing through a symlink whose target is a
+watched path, `python -c "open('migrations/x.sql','w')..."`, a heredoc into
+a watched file, and building the path from shell variables so no literal
+path token appears in the command. The v0.3.9.2 write-intent gate adds
+another class: a write performed by a command not on the writer list.
+
+**This is accepted, and it is the deliberate direction of the trade.** The
+module's stated posture is precision over recall — it must never block a
+tool call it does not have real evidence about. A missed write costs
+nothing but a missed prompt; a false block stops an agent mid-task, and
+the same review found three separate ways the gate was already producing
+false blocks (read-only Bash commands, a self-blocking remediation
+message, and phantom `reverted` verdicts from the SQL and git importers).
+Every one of those was worse for users than any of the bypasses.
+
+**What this means in practice**: the hook is a *nudge with teeth*, not a
+security control. It is not a sandbox and must never be described as one —
+anyone who can run Bash in the session can trivially write to any file.
+Its job is to catch the honest case where an agent is about to redo
+something that was already tried and reverted. Reviewers should reject any
+change that trades a false-block risk for tighter bypass coverage, and any
+copy that implies enforcement is complete.
+
+### Reasoning text is stored verbatim in a store that gets committed
+
+Added 2026-08-01 after a full code-quality review.
+
+Selvedge's value proposition is capturing *why* a change was made, in the
+agent's own words, at the moment it happens — and its distribution model
+is committing `.selvedge/selvedge.db` so a team shares one history. Those
+two facts together mean any secret that appears in a `reasoning` or `diff`
+string is committed to git, and stays in history after deletion.
+
+Nothing currently prevents this. `check_reasoning_quality` inspects length
+and genericness, not content; `doctor` and `verify` have no check for it;
+and `selvedge init` actively tells the user to commit `.selvedge/`. The
+canonical `entity_path` example in the tool docstrings is
+`env/STRIPE_SECRET_KEY`, which steers agents toward exactly the entities
+whose values are secrets. A review scanned the project's own committed
+store — 64 events, 12 secret and PII patterns — and found zero hits, so
+the risk is real but latent, not realized.
+
+**The verbatim capture itself is not negotiable** — sanitized or
+paraphrased reasoning would defeat the product. What is accepted is only
+that the *current* mitigation is documentation. The graded plan, cheapest
+first: say so plainly in `README.md` and `SECURITY.md`; add a
+warn-never-reject secret-shape check to the existing `warnings` list on
+`log_change`; add a `doctor` row that scans stored reasoning and diffs.
+The v0.3.10 `redaction_patterns` work is the durable endpoint. None of
+these require a new dependency, a new result type, or an LLM hop.
+
+**Discipline**: any feature that widens what gets captured automatically
+(richer diffs, transcript import, tool-output capture) must state in its
+PR description what it does about this. Widening capture without widening
+the mitigation is the failure mode.
+
 ### Maintainer-capacity check
 
 v0.3.5 → v0.4.2 spans roughly a year of solo-maintainer effort under

@@ -27,6 +27,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -402,3 +403,56 @@ def test_marketplace_lists_plugin_at_repo_root():
     plugin = json.loads((_REPO_ROOT / ".claude-plugin" / "plugin.json").read_text())
     entry = next(p for p in mp["plugins"] if p["name"] == plugin["name"])
     assert entry["source"] == "./"
+
+
+# ---------------------------------------------------------------------------
+# Packaging surfaces that had no test (review issue #25)
+# ---------------------------------------------------------------------------
+
+
+def test_server_version_flag_exits_without_serving():
+    """`selvedge-server --version` must print and exit, not start serving.
+
+    Checking that a pinned install resolved is the natural reason to run this,
+    and it used to silently start the MCP server — which reads as a hang.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.argv=['selvedge-server','--version'];"
+         " from selvedge.server import main; main()"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0
+    # stdout is the MCP frame channel and must stay empty.
+    assert result.stdout == ""
+    assert _VERSION in result.stderr
+
+
+def test_server_rejects_unknown_arguments():
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.argv=['selvedge-server','--nope'];"
+         " from selvedge.server import main; main()"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+
+
+def test_npm_readme_documents_pypi_version_field():
+    """The npmjs.com landing page must describe the field the shim reads."""
+    readme = (_REPO_ROOT / "npm" / "README.md").read_text()
+    assert "pypiVersion" in readme
+    assert "pinned to this npm package's own version" not in readme
+
+
+def test_mcpbignore_does_not_exclude_the_manifest_icon():
+    """manifest.json references docs/icon.png, so docs/ can't be blanket-excluded."""
+    import json as _json
+
+    manifest = _json.loads((_REPO_ROOT / "manifest.json").read_text())
+    icon = manifest.get("icon", "")
+    assert icon, "manifest declares no icon"
+    ignore = (_REPO_ROOT / ".mcpbignore").read_text().splitlines()
+    assert f"!{icon}" in ignore, f"{icon} is referenced by manifest.json but not un-ignored"
+    assert "docs/" not in ignore, "blanket docs/ exclusion would drop the icon"

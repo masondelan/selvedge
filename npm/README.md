@@ -39,7 +39,7 @@ If none of those exist it exits 1 with install guidance on stderr. The shim writ
 
 ### Version pinning
 
-The PyPI version is pinned to this npm package's own version (`0.3.9` → `selvedge==0.3.9`) so `npx selvedge-mcp` is reproducible. Override with the `SELVEDGE_VERSION` env var:
+The PyPI version is pinned by this package's `pypiVersion` field — **not** by its own npm `version`, which is an independent semver line (npm cannot express a four-segment PEP 440 version). So `npx selvedge-mcp` is reproducible and always fetches the pinned Selvedge release. Override with the `SELVEDGE_VERSION` env var:
 
 ```bash
 SELVEDGE_VERSION=latest npx -y selvedge-mcp   # track the newest PyPI release

@@ -106,6 +106,12 @@ mcp = FastMCP(
     ),
 )
 
+#: Upper bound on every `limit` parameter. The fields carried `ge=1` but no
+#: ceiling, so `limit=10**19` reached sqlite3 and raised OverflowError — a raw
+#: exception where this surface's convention is an error payload. Well above
+#: any real page size.
+_MAX_LIMIT = 1000
+
 _storage: SelvedgeStorage | None = None
 
 
@@ -558,7 +564,7 @@ def diff(
     ],
     limit: Annotated[
         int,
-        Field(default=20, ge=1, description="Maximum number of events to return."),
+        Field(default=20, ge=1, le=_MAX_LIMIT, description="Maximum number of events to return."),
     ] = 20,
 ) -> list[dict]:
     """Get change history for a codebase entity, newest first.
@@ -667,7 +673,7 @@ def history(
     ] = "",
     limit: Annotated[
         int,
-        Field(default=50, ge=1, description="Maximum number of results."),
+        Field(default=50, ge=1, le=_MAX_LIMIT, description="Maximum number of results."),
     ] = 50,
 ) -> list[dict]:
     """Filtered change history across all entities, newest first.
@@ -743,7 +749,7 @@ def search(
     ],
     limit: Annotated[
         int,
-        Field(default=20, ge=1, description="Maximum number of results."),
+        Field(default=20, ge=1, le=_MAX_LIMIT, description="Maximum number of results."),
     ] = 20,
 ) -> list[dict]:
     """Full-text search across entity paths, diffs, reasoning, and agents.
@@ -818,6 +824,7 @@ def prior_attempts(
         Field(
             default=10080,
             ge=1,
+            le=_MAX_LIMIT,
             description=(
                 "Proximity window in minutes for the add->remove revert "
                 "heuristic. An attempt removed within this many minutes is "
@@ -828,7 +835,7 @@ def prior_attempts(
     ] = 10080,
     limit: Annotated[
         int,
-        Field(default=20, ge=1, description="Maximum number of results."),
+        Field(default=20, ge=1, le=_MAX_LIMIT, description="Maximum number of results."),
     ] = 20,
 ) -> list[dict]:
     """Prior change attempts on an entity, each with an inferred outcome.
@@ -929,7 +936,7 @@ def stale_decisions(
     ] = "",
     limit: Annotated[
         int,
-        Field(default=20, ge=1, description="Maximum number of results."),
+        Field(default=20, ge=1, le=_MAX_LIMIT, description="Maximum number of results."),
     ] = 20,
 ) -> list[dict]:
     """Decisions due for a revisit — past their date, or with a triggered stale condition.

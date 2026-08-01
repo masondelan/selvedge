@@ -284,7 +284,8 @@ def init(path):
 
 
 @cli.command()
-def status():
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON.")
+def status(as_json):
     """Show a summary of recent Selvedge activity."""
     storage = get_storage()
     total = storage.count()
@@ -293,6 +294,22 @@ def status():
     hook_failure = last_hook_failure()
 
     db_path = get_db_path()
+
+    if as_json:
+        # `status` is the command the quickstart leads with and the shape a
+        # CI or dashboard job wants, so it gets --json like every other read
+        # command. Every field always populated, never null — same convention
+        # as the MCP result types.
+        click.echo(json.dumps({
+            "db_path": str(db_path),
+            "total_events": total,
+            "missing_git_commit": missing_commit,
+            "last_hook_failure": hook_failure or "",
+            "recent": recent,
+            "diagnosis": [] if recent else _diagnose_empty_state(storage),
+        }, indent=2))
+        return
+
     console.print(f"\n[bold]Selvedge[/bold]  [dim]{db_path}[/dim]")
     console.print(f"  [bold]{total}[/bold] total events logged")
     if missing_commit:

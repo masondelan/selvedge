@@ -452,3 +452,35 @@ def test_uppercase_m_is_not_a_silent_alias_for_minutes():
         normalize_revisit_after("6M")
     with pytest.raises(ValueError):
         parse_time_string("6M")
+
+
+# ---------------------------------------------------------------------------
+# Oversized inputs must follow the error-dict convention, not raise (issue #28)
+# ---------------------------------------------------------------------------
+
+
+def test_oversized_search_query_does_not_raise(storage):
+    """SQLite's LIKE pattern limit must not surface as a raw OperationalError.
+
+    Realistic trigger: an agent pastes a large diff into a search. Before the
+    clamp this raised `LIKE or GLOB pattern too complex` at ~50,000 chars.
+    """
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add",
+                                  reasoning="billing"))
+    assert storage.search("A" * 60_000) == []
+    assert storage.search("A" * 49_999) == []
+
+
+def test_oversized_prior_attempts_description_does_not_raise(storage):
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add",
+                                  reasoning="billing"))
+    assert storage.get_prior_attempts(
+        query="A" * 60_000, min_confidence="proximity_low"
+    ) == []
+
+
+def test_search_clamp_does_not_change_ordinary_results(storage):
+    """The clamp must be invisible for any realistic query length."""
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add",
+                                  reasoning="added for SMS 2FA verification"))
+    assert len(storage.search("SMS 2FA")) == 1

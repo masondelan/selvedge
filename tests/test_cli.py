@@ -946,3 +946,31 @@ def test_cli_log_counts_toward_log_change_coverage(runner, tmp_path, monkeypatch
     stats = SelvedgeStorage(db).get_tool_stats()
     assert stats["log_change_calls"] == 1
     assert stats["log_change_ratio"] > 0
+
+
+def test_status_json_is_parseable_and_never_null(runner, tmp_path, monkeypatch):
+    """`status` is a read command, so it gets --json like every other one."""
+    db = tmp_path / "st.db"
+    monkeypatch.setenv("SELVEDGE_DB", str(db))
+    storage = SelvedgeStorage(db)
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add"))
+
+    result = runner.invoke(cli, ["status", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["total_events"] == 1
+    for key in ("db_path", "total_events", "missing_git_commit",
+                "last_hook_failure", "recent", "diagnosis"):
+        assert key in payload, f"missing key {key}"
+        assert payload[key] is not None, f"{key} is null"
+
+
+def test_status_json_on_empty_store_carries_the_diagnosis(runner, tmp_path, monkeypatch):
+    db = tmp_path / "empty.db"
+    monkeypatch.setenv("SELVEDGE_DB", str(db))
+    SelvedgeStorage(db)
+    result = runner.invoke(cli, ["status", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["recent"] == []
+    assert isinstance(payload["diagnosis"], list)

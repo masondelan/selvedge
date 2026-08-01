@@ -168,6 +168,21 @@ no_implicit_optional = true
 check_untyped_defs = true
 disallow_untyped_decorators = true
 
+# Ratchet step 1: require signatures everywhere except the Click command
+# callbacks in `selvedge.cli`. Measured — this costs zero errors today, and it
+# stops new untyped functions landing in the 26 modules that are already clean.
+# Step 2 is annotating cli.py's ~31 callbacks, which is mechanical (every one
+# is `no-untyped-def`, none needs inference) and belongs in its own change.
+[[tool.mypy.overrides]]
+module = "selvedge.*"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = "selvedge.cli"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
 [[tool.mypy.overrides]]
 module = "mcp.*"
 ignore_missing_imports = true

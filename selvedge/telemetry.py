@@ -46,6 +46,7 @@ Full documentation: ``docs/telemetry.md``.
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import platform
@@ -296,20 +297,28 @@ def _send(payload: dict[str, object], *, timeout: float = SEND_TIMEOUT_SECONDS) 
         return False
 
 
+#: How long interpreter exit waits for an in-flight heartbeat. Well under
+#: the send timeout, and paid at most once per 24h.
+_PING_JOIN_SECONDS = 0.5
+
+
 def _run_ping(source: str) -> None:
     """Thread body — gate, stamp, build, send. All exceptions swallowed."""
     try:
         if not should_send():
             return
-        # Stamp before sending: a failing endpoint must not turn every
-        # invocation into a fresh network attempt.
-        state = _read_state()
-        state["last_ping_epoch"] = time.time()
-        _write_state(state)
-
         payload = build_payload(source)
         if payload is not None:
             _send(payload)
+        # Stamp AFTER the attempt, unconditionally — the rate limit still
+        # holds against a dead endpoint (this line runs whether or not _send
+        # succeeded, since _send swallows its own errors), but a ping that
+        # never left the machine no longer suppresses the next 24 hours of
+        # them. Stamping first meant the CLI recorded a heartbeat on
+        # essentially every run while sending one on almost none.
+        state = _read_state()
+        state["last_ping_epoch"] = time.time()
+        _write_state(state)
     except Exception:
         return
 
@@ -334,6 +343,13 @@ def ping_async(source: str) -> None:
     try:
         t = threading.Thread(target=_run_ping, args=(source,), name="selvedge-telemetry", daemon=True)
         t.start()
+        # Daemon threads are killed at interpreter exit, and a short CLI run
+        # exits long before a TLS handshake completes — measured, only about
+        # 1 run in 20 ever reached the socket. Give it a bounded chance to
+        # finish. The join is paid at most once per 24h (the rate limit gates
+        # everything else) and is far below the send timeout, so a hung
+        # endpoint still cannot delay the user's command meaningfully.
+        atexit.register(lambda: t.join(timeout=_PING_JOIN_SECONDS))
     except RuntimeError:
         # Some sandboxes disallow thread creation. Fine — no ping.
         return

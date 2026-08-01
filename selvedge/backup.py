@@ -31,7 +31,17 @@ KEEP_LAST = 7
 BACKUP_FILENAME_FMT = "selvedge-%Y%m%d-%H%M%S.db"
 
 # Line written to the project ``.gitignore`` on init and on first backup.
-GITIGNORE_LINE = ".selvedge/backups/"
+#: Paths under `.selvedge/` that must never be committed. The store itself is
+#: committed by design; these two are not. `hook_sessions/` holds agent session
+#: ids, and `backups/` holds full database snapshots.
+#:
+#: Checked and appended PER LINE, not all-or-nothing: a repo initialized before
+#: `hook_sessions/` was added already has the backups line, and an
+#: all-or-nothing check would early-return and never add the second one.
+GITIGNORE_LINES = (".selvedge/backups/", ".selvedge/hook_sessions/")
+
+#: Retained for backwards compatibility with anything importing the old name.
+GITIGNORE_LINE = GITIGNORE_LINES[0]
 
 
 @dataclass(frozen=True)
@@ -165,13 +175,14 @@ def _rotate(backups_dir: Path, keep_last: int) -> list[Path]:
 
 def ensure_gitignore_entry(project_root: Path) -> bool:
     """
-    Append the backups gitignore line to ``project_root/.gitignore`` if missing.
+    Append any missing Selvedge gitignore lines to ``project_root/.gitignore``.
 
-    Returns True when the file was modified (or created), False when the
+    Returns True when the file was modified (or created), False when every
     line was already present or no ``.gitignore`` existed and one couldn't
     be reasonably created (project_root missing).
 
-    Idempotent: re-running on a repo that already has the line is a no-op.
+    Idempotent, and incremental: a repo that already has the backups line
+    still picks up ``hook_sessions/``, because each line is checked on its own.
     """
     if not project_root.is_dir():
         return False
@@ -184,19 +195,22 @@ def ensure_gitignore_entry(project_root: Path) -> bool:
             return False
         # Match the bare line; tolerate surrounding whitespace.
         lines = {ln.strip() for ln in existing.splitlines()}
-        if GITIGNORE_LINE in lines or f"/{GITIGNORE_LINE}" in lines:
+        missing = [
+            line for line in GITIGNORE_LINES
+            if line not in lines and f"/{line}" not in lines
+        ]
+        if not missing:
             return False
         # Preserve trailing newline behavior — append on its own line.
         suffix = "" if existing.endswith("\n") else "\n"
-        gitignore.write_text(
-            f"{existing}{suffix}{GITIGNORE_LINE}\n", encoding="utf-8"
-        )
+        addition = "".join(f"{line}\n" for line in missing)
+        gitignore.write_text(f"{existing}{suffix}{addition}", encoding="utf-8")
         return True
 
     # No .gitignore — create a minimal one. Init also calls this on fresh
     # repos; first-backup-on-existing-repo paths also land here when the
     # repo never had a .gitignore.
-    gitignore.write_text(f"{GITIGNORE_LINE}\n", encoding="utf-8")
+    gitignore.write_text("".join(f"{line}\n" for line in GITIGNORE_LINES), encoding="utf-8")
     return True
 
 

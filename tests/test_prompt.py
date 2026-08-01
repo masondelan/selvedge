@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from selvedge import prompt
 from selvedge.prompt import (
     _BLOCK_RE,
     PROMPT_BLOCK,
@@ -273,3 +274,46 @@ def test_install_preserves_trailing_newline_convention(
     # In all scenarios the file should end with exactly one newline
     # after the closing sentinel.
     assert final.endswith(SENTINEL_END + "\n")
+
+
+# ---------------------------------------------------------------------------
+# The managed block must not swallow surrounding user content
+#
+# `_BLOCK_RE` was an unanchored `START .*? END` with DOTALL, and the update
+# path replaced `existing[match.start():match.end()]`. A stray START anywhere
+# earlier in the file — a team documenting the convention in prose, or a merge
+# that dropped one END — made the match span from that stray marker all the way
+# to the real END, deleting everything in between. Silently: the wizard
+# reported "updated"/ok.
+# ---------------------------------------------------------------------------
+
+
+PRECIOUS = "Never run rm -rf. Deploy only from main."
+
+
+def test_unpaired_start_sentinel_does_not_delete_user_content(tmp_path):
+    path = tmp_path / "CLAUDE.md"
+    path.write_text(
+        f"# Team rules\n\n"
+        f"Our Selvedge block lives between {prompt.SENTINEL_START} and its end marker.\n\n"
+        f"## IMPORTANT USER CONTENT\n{PRECIOUS}\n"
+    )
+    prompt.install_to_file(path)   # run 1 — appends
+    prompt.install_to_file(path)   # run 2 — took the "update in place" path
+    after = path.read_text()
+    assert PRECIOUS in after, "run 2 deleted user content between the stray marker and the block"
+    assert "## IMPORTANT USER CONTENT" in after
+
+
+def test_second_block_is_not_left_stale(tmp_path):
+    """Two managed blocks must converge, not report 'unchanged' forever."""
+    path = tmp_path / "CLAUDE.md"
+    stale = f"{prompt.SENTINEL_START}\nOLD BLOCK v1 instructions\n{prompt.SENTINEL_END}"
+    # Two managed blocks: someone appended the prompt by hand, twice.
+    path.write_text(f"# Rules\n\n{stale}\n\n{PRECIOUS}\n\n{stale}\n")
+    prompt.install_to_file(path)
+    prompt.install_to_file(path)
+    after = path.read_text()
+    assert "OLD BLOCK v1 instructions" not in after, "stale duplicate block survived"
+    assert after.count(prompt.SENTINEL_START) == 1
+    assert PRECIOUS in after

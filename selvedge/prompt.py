@@ -36,8 +36,18 @@ SENTINEL_END = "<!-- selvedge:end -->"
 #: A pre-compiled regex that matches the existing block (including the
 #: sentinels and any whitespace between them). DOTALL so ``.`` covers
 #: newlines.
+#:
+#: The body is a tempered dot — it cannot cross another ``SENTINEL_START`` —
+#: so a match always begins at the start marker *nearest* its end marker. With
+#: a plain ``.*?`` a stray start sentinel earlier in the file (a team
+#: documenting the convention in prose, or a merge that dropped one end marker)
+#: made the match span from that stray marker to the real end, and the
+#: update-in-place path then deleted every line in between, silently, while
+#: reporting success.
 _BLOCK_RE = re.compile(
-    re.escape(SENTINEL_START) + r".*?" + re.escape(SENTINEL_END),
+    re.escape(SENTINEL_START)
+    + r"(?:(?!" + re.escape(SENTINEL_START) + r").)*?"
+    + re.escape(SENTINEL_END),
     re.DOTALL,
 )
 
@@ -196,14 +206,24 @@ def install_to_file(path: Path, *, write_backup: bool = True) -> tuple[str, Path
     existing = path.read_text()
     backup_path: Path | None = None
 
-    # Existing Selvedge block? Update in place.
-    match = _BLOCK_RE.search(existing)
-    if match:
-        if match.group(0) == new_block:
+    # Existing Selvedge block(s)? Update the first in place and drop any
+    # duplicates. A file can end up with two blocks when someone appends the
+    # prompt manually and later runs the wizard; matching only the first left
+    # the second stale forever, and once the first matched the current text
+    # the function reported "unchanged" while the agent went on reading two
+    # contradictory rule sets.
+    matches = list(_BLOCK_RE.finditer(existing))
+    if matches:
+        if len(matches) == 1 and matches[0].group(0) == new_block:
             return ("unchanged", None)
         if write_backup:
             backup_path = _write_backup(path, existing)
-        updated = existing[: match.start()] + new_block + existing[match.end() :]
+        first = matches[0]
+        updated = existing[: first.start()] + new_block + existing[first.end() :]
+        # Remove the remainder, rebuilt against the updated text so offsets
+        # from the original string are never reused.
+        for extra in reversed(list(_BLOCK_RE.finditer(updated))[1:]):
+            updated = updated[: extra.start()] + updated[extra.end() :]
         path.write_text(updated)
         return ("updated", backup_path)
 

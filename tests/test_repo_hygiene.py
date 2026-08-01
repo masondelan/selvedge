@@ -97,3 +97,63 @@ def test_sdist_ships_exactly_the_enumerated_set():
         "docs/telemetry.md",
         "pyproject.toml",
     ], f"sdist contents drifted: {non_package}"
+
+
+def test_action_inputs_never_interpolated_into_shell():
+    """`action.yml` must pass inputs through `env:`, never into `run:` text.
+
+    `${{ }}` expansion is textual and happens before the shell parses the
+    line, so an input interpolated into a script is a command-injection hole
+    in the *caller's* runner, with their GITHUB_TOKEN in scope. This action is
+    published for third-party use, so it cannot trust its inputs.
+    """
+    root = Path(__file__).resolve().parent.parent
+    lines = (root / "action.yml").read_text().splitlines()
+
+    # No YAML parser here on purpose — PyYAML is not a declared dependency and
+    # this does not need one. Track the `run:` blocks by indentation: a block
+    # opens on a `run:` key and closes at the next line indented no further.
+    offenders: list[str] = []
+    run_indent: int | None = None
+    for i, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if run_indent is not None and indent <= run_indent:
+            run_indent = None
+        if run_indent is not None and "${{" in line:
+            offenders.append(f"action.yml:{i}: {line.strip()}")
+        if re.match(r"\s*run:\s*[|>]?\s*$", line) or re.match(r"\s*run:\s+\S", line):
+            if "${{" in line:
+                offenders.append(f"action.yml:{i}: {line.strip()}")
+            run_indent = indent
+    assert not offenders, f"steps interpolate expressions into run:: {offenders}"
+
+
+def test_third_party_actions_are_pinned_to_commit_shas():
+    """Mutable tags in privileged jobs are a supply-chain hole.
+
+    `publish.yml` holds `contents: write` and OIDC `id-token: write` for the
+    MCP Registry namespace, and fires automatically on tag push.
+    """
+    root = Path(__file__).resolve().parent.parent
+    unpinned: list[str] = []
+    for wf in (root / ".github" / "workflows").glob("*.yml"):
+        for i, line in enumerate(wf.read_text().splitlines(), 1):
+            m = re.search(r"uses:\s*([\w.-]+/[\w.-]+)@(\S+)", line)
+            if not m:
+                continue
+            owner, ref = m.group(1), m.group(2)
+            if owner.startswith("actions/"):
+                continue  # first-party, tag-pinned by convention
+            if not re.fullmatch(r"[0-9a-f]{40}", ref):
+                unpinned.append(f"{wf.name}:{i} {owner}@{ref}")
+    assert not unpinned, f"third-party actions not pinned to a SHA: {unpinned}"
+
+
+def test_mcp_publisher_download_is_pinned_and_verified():
+    """The binary that logs in with OIDC must be pinned and checksummed."""
+    root = Path(__file__).resolve().parent.parent
+    publish = (root / ".github" / "workflows" / "publish.yml").read_text()
+    assert "releases/latest/download" not in publish, "mcp-publisher is unpinned"
+    assert "sha256sum -c" in publish, "mcp-publisher download is not checksum-verified"

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: ["main"]
 
+# The suite only ever reads the checkout. Declared explicitly so these jobs
+# stop inheriting whatever the repository default token scope happens to be.
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest

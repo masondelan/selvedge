@@ -138,7 +138,7 @@ def test_parse_time_iso_passes_through_normalized():
     """An ISO timestamp is parsed and normalized to UTC Z-suffix form."""
     result = parse_time_string("2025-06-01T10:00:00+05:00")
     # 10:00 +05:00 == 05:00 UTC
-    assert result == "2025-06-01T05:00:00Z"
+    assert result == "2025-06-01T05:00:00.000000Z"
 
 
 def test_parse_time_empty_raises():
@@ -223,13 +223,18 @@ def test_mixed_timezone_timestamps_sort_chronologically(storage):
 
 
 def test_normalize_timestamp_z_suffix():
-    """All stored timestamps end with 'Z' for clean string ordering."""
-    assert normalize_timestamp("2025-01-01T10:00:00+00:00") == "2025-01-01T10:00:00Z"
-    assert normalize_timestamp("2025-01-01T10:00:00Z") == "2025-01-01T10:00:00Z"
+    """All stored timestamps end with 'Z' and are fixed-width.
+
+    Both halves matter for string ordering: the 'Z' suffix keeps offsets out
+    of the sort, and the always-present microseconds keep every timestamp the
+    same length, so lexicographic order equals chronological order.
+    """
+    assert normalize_timestamp("2025-01-01T10:00:00+00:00") == "2025-01-01T10:00:00.000000Z"
+    assert normalize_timestamp("2025-01-01T10:00:00Z") == "2025-01-01T10:00:00.000000Z"
     # Naive timestamps treated as UTC
-    assert normalize_timestamp("2025-01-01T10:00:00") == "2025-01-01T10:00:00Z"
+    assert normalize_timestamp("2025-01-01T10:00:00") == "2025-01-01T10:00:00.000000Z"
     # Offset is converted
-    assert normalize_timestamp("2025-01-01T10:00:00-08:00") == "2025-01-01T18:00:00Z"
+    assert normalize_timestamp("2025-01-01T10:00:00-08:00") == "2025-01-01T18:00:00.000000Z"
 
 
 # ---------------------------------------------------------------------------
@@ -388,3 +393,43 @@ def test_cli_log_rejects_invalid_change_type(tmp_path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(cli, ["log", "users.email", "banana"])
     assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# Timestamp width must be uniform, or lexicographic order lies
+#
+# Every ORDER BY in the store sorts timestamps as TEXT. `normalize_timestamp`
+# omitted the fractional part when microseconds were 0, and '.' (0x2E) sorts
+# below 'Z' (0x5A) — so a second-precision timestamp sorted AFTER a
+# microsecond-precision one in the same second. Both precisions occur
+# systematically: git (`%aI`) and imported Agent Trace records are
+# second-precision, `utc_now_iso()` is microsecond-precision.
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_timestamp_is_fixed_width():
+    from selvedge.timeutil import normalize_timestamp
+
+    a = normalize_timestamp("2026-07-20T12:00:00Z")
+    b = normalize_timestamp("2026-07-20T12:00:00.500000Z")
+    assert len(a) == len(b), f"{a!r} and {b!r} sort as text but differ in width"
+    assert a < b, "chronological order must equal lexicographic order"
+
+
+def test_blame_returns_the_newest_event_across_mixed_precision(tmp_path):
+    """A second-precision event must not out-sort a later sub-second one."""
+    storage = SelvedgeStorage(tmp_path / "mixed.db")
+    storage.log_event(ChangeEvent(
+        entity_path="users.card_token",
+        change_type="remove",
+        timestamp="2026-07-20T12:00:00Z",
+        reasoning="Reverted: PCI scope.",
+    ))
+    storage.log_event(ChangeEvent(
+        entity_path="users.card_token",
+        change_type="supersede",
+        timestamp="2026-07-20T12:00:00.500000Z",
+        reasoning="Re-opened deliberately with a tokenizing vault.",
+    ))
+    assert storage.get_blame("users.card_token")["change_type"] == "supersede"
+    assert storage.get_decision_status("users.card_token")["status"] == "reopened"

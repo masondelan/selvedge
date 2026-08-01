@@ -1120,7 +1120,13 @@ class SelvedgeStorage:
         return [dict(r) for r in rows]
 
     def search(self, query: str, limit: int = 20) -> list[dict]:
-        """Full-text search across entity_path, diff, and reasoning."""
+        """Full-text search across entity_path, diff, reasoning, and agent.
+
+        Deliberately does NOT match ``change_type``. It used to, undocumented,
+        which meant a query like "revert" or "migrate" returned every event of
+        that type rather than the events whose reasoning discusses one — a
+        confidently wrong answer with nothing in the docs to explain it.
+        """
         pattern = f"%{_escape_like(query)}%"
         with self._session() as conn:
             rows = conn.execute(
@@ -1129,12 +1135,11 @@ class SelvedgeStorage:
                 WHERE entity_path LIKE ? ESCAPE '\\'
                    OR diff        LIKE ? ESCAPE '\\'
                    OR reasoning   LIKE ? ESCAPE '\\'
-                   OR change_type LIKE ? ESCAPE '\\'
                    OR agent       LIKE ? ESCAPE '\\'
                 ORDER BY timestamp DESC
                 LIMIT ?
                 """,
-                (pattern, pattern, pattern, pattern, pattern, limit),
+                (pattern, pattern, pattern, pattern, limit),
             ).fetchall()
         return [_coalesce_event_nullables(dict(r)) for r in rows]
 

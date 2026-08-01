@@ -618,3 +618,23 @@ def test_entity_prefix_read_does_not_full_scan(storage):
         ).fetchall()
     detail = " | ".join(r["detail"] for r in plan)
     assert "SCAN events" not in detail, f"entity-path read full-scans: {detail}"
+
+
+def test_entity_prefix_is_dotted_not_raw_string(storage):
+    """Pin the semantics the MCP descriptions now state.
+
+    `entity_path` prefix matching is on DOTTED segments, not raw string
+    prefixes — `diff`/`history` described it as a "path prefix", so an agent
+    asking for the history of `src/` or `src/auth.py` got a confident empty
+    answer instead of an error.
+    """
+    for path in ("src/auth.py", "src/auth.py::login", "users", "users.email"):
+        storage.log_event(ChangeEvent(entity_path=path, change_type="add"))
+
+    assert storage.get_entity_history("src/") == []
+    assert [r["entity_path"] for r in storage.get_entity_history("src/auth.py")] == [
+        "src/auth.py"
+    ]
+    assert {r["entity_path"] for r in storage.get_entity_history("users")} == {
+        "users", "users.email",
+    }

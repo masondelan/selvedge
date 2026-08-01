@@ -238,6 +238,60 @@ def parse_sql_file(path: Path, project: str = "") -> list[ChangeEvent]:
     return _parse_sql_text(text, source=f"imported from {path.name}", project=project)
 
 
+def _mask_sql_noise(sql: str) -> str:
+    """
+    Blank out comments and string literals, preserving offsets and newlines.
+
+    The statement splitter below walks semicolons, and the DDL patterns match
+    raw text — so without this a ``;`` inside a comment or a quoted string
+    ends a statement, and commented-out DDL parses as real. That is not a
+    cosmetic parser nit: a phantom ``remove`` event makes an entity read as
+    ``reverted``, which is the signal the PreToolUse hook blocks edits on.
+
+    Masked characters become spaces (newlines are kept) so every surviving
+    character stays at its original offset and the statement text the caller
+    slices out is unchanged apart from the removed noise.
+
+    Only single quotes are treated as string delimiters. Double quotes and
+    backticks are *identifier* quoting in SQL (``ALTER TABLE "users"``), which
+    the DDL patterns match on, so they are left intact.
+    """
+    out = list(sql)
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == "-" and sql.startswith("--", i):
+            j = sql.find("\n", i)
+            j = n if j == -1 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+        elif ch == "/" and sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            j = n if j == -1 else j + 2
+            for k in range(i, j):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j
+        elif ch == "'":
+            j = i + 1
+            while j < n:
+                if sql[j] == "'":
+                    if j + 1 < n and sql[j + 1] == "'":  # '' escape
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            for k in range(i, min(j, n)):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j
+        else:
+            i += 1
+    return "".join(out)
+
+
 def _parse_sql_text(sql: str, source: str = "", project: str = "") -> list[ChangeEvent]:
     """
     Parse raw SQL text and return ChangeEvents.
@@ -247,8 +301,10 @@ def _parse_sql_text(sql: str, source: str = "", project: str = "") -> list[Chang
     """
     events: list[ChangeEvent] = []
 
-    # Walk statement by statement (split on semicolons)
-    for raw_stmt in sql.split(";"):
+    # Walk statement by statement (split on semicolons). Comments and string
+    # literals are blanked first so a ``;`` inside either can't split a
+    # statement and commented-out DDL is never parsed as real.
+    for raw_stmt in _mask_sql_noise(sql).split(";"):
         stmt = raw_stmt.strip()
         if not stmt:
             continue

@@ -1,6 +1,11 @@
 """Tests for selvedge.importers — SQL DDL and Alembic migration parsers."""
 
-from selvedge.importers import import_path, parse_alembic_file, parse_sql_file
+from selvedge.importers import (
+    _parse_sql_text,
+    import_path,
+    parse_alembic_file,
+    parse_sql_file,
+)
 
 # ---------------------------------------------------------------------------
 # SQL parser — CREATE / DROP TABLE
@@ -394,3 +399,54 @@ def upgrade():
     assert len(events) == 2
     assert events[0].change_type == "create"
     assert events[1].entity_path == "t.id"
+
+
+# ---------------------------------------------------------------------------
+# SQL noise must not be parsed as DDL
+#
+# The statement splitter walked `sql.split(";")` over raw text, so a `;` inside
+# a comment or a string literal ended a statement and commented-out DDL was
+# parsed as real. That is not a cosmetic parser nit: a phantom `remove` event
+# makes `get_decision_status` report a live entity as "reverted", which is
+# exactly the signal the PreToolUse hook blocks an agent's edit on.
+# ---------------------------------------------------------------------------
+
+
+def test_line_comment_ddl_is_not_parsed():
+    sql = (
+        "-- NOTE: we are NOT doing this yet:\n"
+        "-- ALTER TABLE users DROP COLUMN email;\n"
+        "ALTER TABLE users ADD COLUMN email_verified BOOLEAN;\n"
+    )
+    events = _parse_sql_text(sql, source="002_notes.sql")
+    assert [(e.entity_path, e.change_type) for e in events] == [
+        ("users.email_verified", "add")
+    ]
+
+
+def test_block_comment_ddl_is_not_parsed():
+    sql = "/* DROP TABLE users; */\nALTER TABLE users ADD COLUMN phone TEXT;\n"
+    events = _parse_sql_text(sql, source="003.sql")
+    assert [(e.entity_path, e.change_type) for e in events] == [
+        ("users.phone", "add")
+    ]
+
+
+def test_semicolon_inside_string_literal_does_not_split():
+    sql = "INSERT INTO settings VALUES ('msg', 'hello; DROP TABLE users');\n"
+    assert _parse_sql_text(sql, source="004.sql") == []
+
+
+def test_comment_after_real_ddl_still_parses_the_ddl():
+    sql = "ALTER TABLE users ADD COLUMN nickname TEXT;  -- display only\n"
+    events = _parse_sql_text(sql, source="005.sql")
+    assert [(e.entity_path, e.change_type) for e in events] == [
+        ("users.nickname", "add")
+    ]
+
+
+def test_quoted_identifiers_still_parse():
+    """Double quotes and backticks are identifier quoting, not string literals."""
+    sql = 'ALTER TABLE "users" ADD COLUMN "email" TEXT;\n'
+    events = _parse_sql_text(sql, source="006.sql")
+    assert [(e.entity_path, e.change_type) for e in events] == [("users.email", "add")]

@@ -433,3 +433,22 @@ def test_blame_returns_the_newest_event_across_mixed_precision(tmp_path):
     ))
     assert storage.get_blame("users.card_token")["change_type"] == "supersede"
     assert storage.get_decision_status("users.card_token")["status"] == "reopened"
+
+
+def test_uppercase_m_is_not_a_silent_alias_for_minutes():
+    """`6M` must not mean six MINUTES.
+
+    `re.IGNORECASE` on the relative grammar made uppercase `M` match the
+    minutes branch, so `--since 6M` showed six minutes of history and a
+    decision logged with `revisit_after="6M"` fell due six minutes later and
+    was permanently overdue from then on. `M` is the one letter where
+    case-insensitivity collides with a different unit — `90D` still works.
+    """
+    from selvedge.timeutil import normalize_revisit_after, parse_time_string
+
+    assert normalize_revisit_after("90D") == "90d"      # still case-insensitive
+    assert normalize_revisit_after("6MO") == "6mo"
+    with pytest.raises(ValueError):
+        normalize_revisit_after("6M")
+    with pytest.raises(ValueError):
+        parse_time_string("6M")

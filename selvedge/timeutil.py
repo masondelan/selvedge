@@ -13,7 +13,23 @@ from datetime import datetime, timedelta, timezone
 
 # Relative time pattern. The 'mo'/'mon' alternatives must precede 'm' so the
 # regex matches them first — '5mo' is months, '5m' is minutes.
+#
+# Units are matched case-INSENSITIVELY except for a bare 'M'. Uppercase is a
+# convenience everywhere else ('90D' is '90d'), but 'M' is the one letter where
+# it collides with a different unit: '6M' is the near-universal spelling for
+# six months, and IGNORECASE silently resolved it to six MINUTES. That made
+# `--since 6M` show six minutes of history, and a decision logged with
+# `revisit_after="6M"` fall due six minutes later and stay permanently overdue.
+# Better to fail loudly and let the caller write '6mo' or '6m'.
 _RELATIVE_RE = re.compile(r"(\d+)(mo|mon|h|d|m|y)$", re.IGNORECASE)
+_AMBIGUOUS_UPPER_M = re.compile(r"^\d+M$")
+
+
+def _relative_match(s: str) -> re.Match[str] | None:
+    """Match the relative grammar, rejecting the ambiguous bare uppercase 'M'."""
+    if _AMBIGUOUS_UPPER_M.fullmatch(s):
+        return None
+    return _RELATIVE_RE.fullmatch(s)
 
 
 def _relative_delta(n: int, unit: str) -> timedelta:
@@ -91,7 +107,7 @@ def parse_time_string(since: str) -> str:
     if not s:
         raise ValueError("time string is empty")
 
-    m = _RELATIVE_RE.fullmatch(s)
+    m = _relative_match(s)
     if m:
         n, unit = int(m.group(1)), m.group(2).lower()
         cutoff = datetime.now(timezone.utc) - _relative_delta(n, unit)
@@ -120,7 +136,7 @@ def parse_window_minutes(value: str) -> int:
         raise ValueError("window is empty")
     if s.isdigit():
         return int(s)
-    m = _RELATIVE_RE.fullmatch(s)
+    m = _relative_match(s)
     if not m:
         raise ValueError(
             f"could not parse window {value!r} as a duration "
@@ -149,7 +165,7 @@ def normalize_revisit_after(value: str) -> str:
     s = value.strip()
     if not s:
         return ""
-    if _RELATIVE_RE.fullmatch(s):
+    if _relative_match(s):
         return s.lower()
     try:
         return normalize_timestamp(s)
@@ -173,7 +189,7 @@ def resolve_revisit_due(timestamp: str, revisit_after: str) -> datetime:
     s = revisit_after.strip()
     if not s:
         raise ValueError("revisit_after is empty")
-    m = _RELATIVE_RE.fullmatch(s)
+    m = _relative_match(s)
     if m:
         n, unit = int(m.group(1)), m.group(2).lower()
         base = _parse_aware(normalize_timestamp(timestamp))

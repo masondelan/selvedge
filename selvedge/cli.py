@@ -1051,7 +1051,15 @@ def blame(entity_path, as_json):
     row = storage.get_blame(entity_path)
 
     if not row:
-        console.print(f"[yellow]No history found for '{entity_path}'[/yellow]")
+        # Under --json the miss must still be JSON on stdout. `console` is
+        # stdout, so printing Rich markup here made `blame` the one command
+        # in the CLI whose --json output didn't parse — on the miss case,
+        # which is the common one, and which the shipped agent prompt tells
+        # agents to reach for.
+        if as_json:
+            click.echo(json.dumps({"error": f"No history found for '{entity_path}'"}))
+        else:
+            console.print(f"[yellow]No history found for '{entity_path}'[/yellow]")
         sys.exit(1)
 
     if as_json:
@@ -1792,6 +1800,12 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
         sys.exit(2)
 
     storage = get_storage()
+    # Record on the shared coverage counter, mirroring the MCP `log_change`
+    # tool. Without this `selvedge stats` counted CLI *reads* in the
+    # denominator but no CLI *writes* in the numerator, so a correctly-logged
+    # CLI workflow reported 0% log_change coverage and the report advised the
+    # user to do the very thing they had just done.
+    storage.record_tool_call("log_change", entity_path=entity_path, agent=agent or "cli")
     try:
         if rename_from:
             events = storage.log_rename(
@@ -1925,6 +1939,7 @@ def supersede_cmd(entity_path, reasoning, constraint, stale_when, supersedes, ag
       selvedge supersede users.sso_token -r "..." --supersedes 3fa2b1c0-...
     """
     storage = get_storage()
+    storage.record_tool_call("log_change", entity_path=entity_path, agent=agent or "cli")
     try:
         stored = storage.log_supersede(
             entity_path,

@@ -540,3 +540,30 @@ def test_migration_adds_changeset_id_column(tmp_path):
     e = ChangeEvent(entity_path="users.email", change_type="add", changeset_id="test-cs")
     stored = storage.log_event(e)
     assert stored.changeset_id == "test-cs"
+
+
+# ---------------------------------------------------------------------------
+# Index coverage for the exact-or-dotted-prefix read
+#
+# ``idx_entity_path`` is BINARY-collated but SQLite's default LIKE is
+# case-insensitive, so the LIKE-prefix optimization cannot use it and the
+# hottest read in the product degrades to a full scan. This is a structural
+# guard (same spirit as test_migrations_perf's page_count assertion) — a
+# wall-clock threshold would be unfalsifiable on fast hardware.
+# ---------------------------------------------------------------------------
+
+
+def test_entity_prefix_read_does_not_full_scan(storage):
+    storage.log_event(ChangeEvent(entity_path="users.email", change_type="add"))
+    with storage._session() as conn:
+        plan = conn.execute(
+            """
+            EXPLAIN QUERY PLAN
+            SELECT * FROM events
+            WHERE entity_path = ? OR entity_path LIKE ? ESCAPE '\\'
+            ORDER BY timestamp ASC
+            """,
+            ("users.email", "users.email.%"),
+        ).fetchall()
+    detail = " | ".join(r["detail"] for r in plan)
+    assert "SCAN events" not in detail, f"entity-path read full-scans: {detail}"

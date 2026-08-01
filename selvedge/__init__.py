@@ -30,7 +30,7 @@ from .validation import (
     check_reasoning_quality,
 )
 
-__version__ = "0.3.9.2"
+__version__ = "0.3.9.3"
 
 __all__ = [
     # Version

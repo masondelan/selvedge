@@ -109,6 +109,38 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.9.3
+
+**Fixes a broken install, and lands a full code-quality pass.** `mcp` 2.0.0
+(released 2026-07-28) removed `mcp.server.fastmcp`, and Selvedge declared
+`mcp>=1.0.0` with no upper bound — so any `pip install selvedge` after that date
+pulled 2.0.0 and `selvedge-server` failed at import. This release pins the
+dependency. **If your server stopped starting, this is why — upgrade.**
+
+It ships alongside a review that put nine independent passes over the codebase
+and then tried to *disprove* every finding before acting on it. Seventeen
+confirmed defects fixed. The ones you would actually have noticed:
+
+- **The enforcement hook stopped blocking things it shouldn't.** Reading a
+  tracked file — `cat`, `git diff`, `pytest`, `ruff check` — was blocked, and
+  the remediation the error message told you to run was blocked by the same
+  gate, so there was no way out from the CLI. Two more paths fed the same
+  false blocks: a commented-out line of SQL counted as a real deletion, and any
+  commit message merely containing the word "revert" marked every file it
+  touched as reverted.
+- **Lookups got fast at scale.** The main entity read was scanning every row —
+  measured 7.4 ms → 0.35 ms at 100k events, and the hook had been taking
+  seconds on large stores.
+- **`selvedge setup` can no longer delete parts of your `CLAUDE.md`**, an
+  interrupted backup can no longer destroy your last good one, and upgrading
+  while two Selvedge processes are running no longer crashes with an error that
+  looked like database corruption.
+
+Tests went 739 → 826. No schema change and no tool-surface change, so this is
+**drop-in for anyone on 0.3.9.x**.
+
+---
+
 ## What's new in v0.3.9.2
 
 **The Claude Code plugin is first-class now — not scaffolding.** Two commands,
@@ -131,56 +163,6 @@ enforcement hook** wired in by default, and four slash commands —
 `selvedge prompt` installs, so the plugin and the hand-written prompt can't
 drift. No store, schema, or tool-surface change — this is packaging, not new
 behavior. **Drop-in for anyone on 0.3.9.x.**
-
----
-
-## What's new in v0.3.9.1
-
-**The dev.to feedback release.** Five improvements publicly promised in the
-comment threads of
-[the launch post](https://dev.to/masondelan/my-ai-agent-tried-to-ship-a-mistake-wed-already-reverted-4737),
-all landed. Append-only store and zero-LLM core, unchanged. **Drop-in
-upgrade for anyone on 0.3.9** (the v4 migration is metadata-only, instant at
-any size).
-
-**Reverted is no longer a permanent ban.** A reverted decision can become
-correct again — so re-open it *explicitly*, without rewriting history:
-
-```bash
-selvedge supersede payments.card_token \
-  --reasoning "Provider now vaults card data — the PCI constraint is gone."
-```
-
-`prior_attempts` / `blame` / `diff` then read the full trail — **tried →
-reverted → re-opened** — with a clear current-status line. Decisions can now
-also carry a queryable `constraint` (the principle that drove them) and a
-`stale_when` condition; when a later change event matches the condition,
-`stale_decisions` flags the decision **"review suggested"** (surfacing only —
-no automatic un-retiring, ever).
-
-**The prior_attempts check is now enforceable.** `selvedge setup` installs a
-Claude Code PreToolUse hook that blocks schema/migration edits until
-`prior_attempts` has been checked this session — and puts the prior reasoning
-*in the block message*, so the agent gets the skipped context for free.
-Fail-open by contract (a miss or error always allows), `--dry-run` and
-`SELVEDGE_HOOK_DISABLE=1` included.
-
-**Your pre-Selvedge reverts count too.** `selvedge import --from-git` walks
-git history (revert-message commits + file deletions) and seeds
-`change_type="revert"` events, idempotently — so the mistakes your repo
-already made once gate the hook and `prior_attempts` from day one.
-
-**And recall that survives renames** (optional):
-
-```bash
-pip install "selvedge[semantic]" && selvedge index
-selvedge prior-attempts --fuzzy "tokenized payment credentials"
-# finds the users.card_token revert even though you asked about payment tokens
-```
-
-Local static embeddings (model2vec, ~30 MB, no torch), clearly-labeled fuzzy
-matches, substring fallback when the extra isn't installed. Core never
-imports it. Full details in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 

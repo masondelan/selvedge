@@ -6,9 +6,13 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.3.9.3] — 2026-08-01
 
-**A full code-quality pass.** Nine parallel reviews across correctness,
+**Unbreaks `pip install selvedge`, plus a full code-quality pass.** `mcp` 2.0.0
+(2026-07-28) removed `mcp.server.fastmcp`, and Selvedge declared `mcp>=1.0.0`
+with no upper bound — so every fresh install since then resolved 2.0.0 and
+`selvedge-server` died at import. That pin is the reason to take this release.
+It arrives alongside a full code-quality pass. Nine parallel reviews across correctness,
 concurrency, security, performance, API consistency, test quality, code health
 and packaging, with every finding put through an adversarial verification pass
 before it was acted on. Seventeen confirmed defects fixed; the rest filed. No

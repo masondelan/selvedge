@@ -547,10 +547,10 @@ def diff(
         str,
         Field(
             description=(
-                "Entity path or path prefix. Prefix matching is supported: "
-                "'users' returns history for the users table AND all its columns "
-                "('users.email', 'users.created_at', etc.). Use a more specific "
-                "path to narrow the result."
+                "Entity path, or a DOTTED prefix of one: 'users' also covers "
+                "'users.email'. Not a raw string prefix — 'src/' matches "
+                "nothing, and 'src/auth.py' does not cover "
+                "'src/auth.py::login'."
             ),
         ),
     ],
@@ -655,7 +655,13 @@ def history(
     ] = "",
     entity_path: Annotated[
         str,
-        Field(default="", description="Filter to a specific entity or path prefix."),
+        Field(
+            default="",
+            description=(
+                "Filter to an entity, or a DOTTED prefix of one ('users' also "
+                "covers 'users.email'). Not a raw string prefix."
+            ),
+        ),
     ] = "",
     project: Annotated[
         str,

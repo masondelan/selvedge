@@ -474,3 +474,28 @@ def test_stale_decisions_filters_by_project_and_agent():
     assert {r["entity_path"] for r in stale_decisions(project="web")} == {"orders"}
     assert {r["entity_path"] for r in stale_decisions(agent="claude-code")} == {"users"}
     assert {r["entity_path"] for r in stale_decisions(entity_path="orders")} == {"orders"}
+
+
+def test_search_does_not_match_on_change_type(tmp_path, monkeypatch):
+    from selvedge.models import ChangeEvent
+    from selvedge.storage import SelvedgeStorage
+
+    """`search` covers the four columns it documents, not change_type.
+
+    The SQL also matched `change_type`, which no docstring or schema
+    mentioned, so searching for a word that happens to be a change type
+    returned every event of that type. An agent searching "revert" to find
+    discussion of a rollback got every revert-typed event in the store
+    instead, with nothing in the docs explaining why.
+    """
+    monkeypatch.setenv("SELVEDGE_DB", str(tmp_path / "s.db"))
+    storage = SelvedgeStorage(tmp_path / "s.db")
+    for i in range(3):
+        storage.log_event(ChangeEvent(
+            entity_path=f"users.col{i}", change_type="add",
+            reasoning="unrelated billing work",
+        ))
+    assert storage.search("add") == []
+    # The documented columns still match.
+    assert len(storage.search("billing")) == 3
+    assert len(storage.search("users.col1")) == 1

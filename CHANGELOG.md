@@ -17,6 +17,30 @@ internal, so this is a drop-in for anyone on 0.3.9.x.
 
 ### Fixed
 
+- **`pip install selvedge` works again.** `mcp>=1.0.0` had no upper bound, so a
+  fresh install resolved `mcp` 2.0.0 (released 2026-07-28), which removed
+  `mcp.server.fastmcp` — `selvedge-server` failed at import. Pinned to `<2.0.0`;
+  the 2.x migration is tracked separately.
+- **`.selvedge/config.toml` is honored on Python 3.10.** `tomllib` is stdlib
+  only from 3.11 and the `tomli` fallback was never declared, so a production
+  install on the declared floor silently ignored the file — including a user
+  narrowing the hook's watch globs, who then kept getting blocked on files they
+  had explicitly opted out of.
+- **Schema-qualified DDL records the right entity.** `CREATE TABLE public.users`
+  recorded an entity named `public` and lost every column event;
+  `ALTER TABLE public.users ADD COLUMN` matched nothing and was dropped
+  silently. Both are the default spelling in Postgres dumps.
+- **`CREATE INDEX` and `DROP INDEX` share one entity**, so an index add can
+  finally be closed by its own removal — they were recorded against the table
+  and the index name respectively, so `prior_attempts` reported a dropped index
+  as still active.
+- **The telemetry heartbeat actually sends.** It stamped its 24-hour rate limit
+  *before* sending and the daemon thread died at interpreter exit first —
+  measured, 1 run in 20 reached the socket while 20 in 20 wrote the stamp.
+- **`.selvedge/hook_sessions/` is gitignored** (it carries agent session ids);
+  only `backups/` was covered.
+- **Oversized inputs return the documented error shape** instead of raising a
+  raw `sqlite3.OperationalError` or `OverflowError`.
 - **The hook no longer blocks read-only commands.** The Bash gate treated every
   path-shaped token as a write, so `cat`, `git diff`, `git log`, `pytest`,
   `ruff check` and `mypy` against a watched path all blocked. Worse, the
@@ -103,9 +127,29 @@ internal, so this is a drop-in for anyone on 0.3.9.x.
 - Coverage `omit` no longer lists a file that does not exist, and the
   `Python :: 3.13` classifier matches what CI has been testing all along.
 
+### Security
+
+- **The published composite action no longer interpolates its inputs into
+  shell scripts.** All six `${{ inputs.* }}` references sat directly in `run:`
+  text, and `${{ }}` expansion is textual and pre-shell — so a consumer wiring
+  a dynamic value in could inject commands that run in *their* runner with
+  *their* `GITHUB_TOKEN` in scope. They now pass through `env:` as quoted
+  shell variables.
+- **`mcp-publisher` is pinned and checksum-verified.** It was fetched from a
+  `releases/latest` URL and executed in a job holding OIDC `id-token: write`
+  for the MCP Registry namespace, automatically on every tag push, with no
+  human between the download and the privileged call. Third-party actions are
+  pinned to commit SHAs, and `test.yml` declares least-privilege permissions.
+- **The npm shim validates `SELVEDGE_VERSION`.** On Windows a `.cmd`/`.bat`
+  runner is spawned with `shell: true`, and Node does not escape arguments in
+  shell mode, so a value of `1.0 & calc` in a shared `.mcp.json` would execute
+  the injected command.
+
 ### Added
 
-- `tests/` grew from 739 to 801, concentrated on guards a mutation pass showed
+- **`selvedge status --json`** — the last read command without it, while the
+  docs and the shipped agent prompt both say to add `--json` to any read.
+- `tests/` grew from 739 to 826, concentrated on guards a mutation pass showed
   were executed but unasserted, plus the first multi-writer test of the
   pending-migration path and the first structural (`EXPLAIN QUERY PLAN`) index
   guard.

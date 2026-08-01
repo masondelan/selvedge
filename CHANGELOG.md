@@ -6,6 +6,113 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+**A full code-quality pass.** Nine parallel reviews across correctness,
+concurrency, security, performance, API consistency, test quality, code health
+and packaging, with every finding put through an adversarial verification pass
+before it was acted on. Seventeen confirmed defects fixed; the rest filed. No
+schema change and no tool-surface change — every fix below is behavioral or
+internal, so this is a drop-in for anyone on 0.3.9.x.
+
+### Fixed
+
+- **The hook no longer blocks read-only commands.** The Bash gate treated every
+  path-shaped token as a write, so `cat`, `git diff`, `git log`, `pytest`,
+  `ruff check` and `mypy` against a watched path all blocked. Worse, the
+  remediation the block message prints — `selvedge prior-attempts '<path>'` —
+  is itself a Bash command containing that path, so following the instruction
+  produced the same block, with no CLI-only way out (the advertised
+  `SELVEDGE_HOOK_DISABLE=1` does nothing when written into the command, since
+  the hook reads its own process environment). A Bash call now counts as
+  touching a path only when the command plausibly writes to one.
+- **The hook stops treating other repositories' files as yours.** `_relative_to`
+  ended in `lstrip("./")`, which strips leading *characters* rather than a
+  prefix — so `../x` became `x`, an absolute path in another checkout became a
+  relative-looking one, and `.hidden/schema.sql` became `hidden/schema.sql`.
+  That last one made enforcement silently inert for dotfile paths, because the
+  hook and `canonicalize_entity_path` disagreed about the entity's identity.
+- **Commented-out DDL no longer creates phantom history.** The SQL importer
+  split on bare `;` over raw text, so `-- ALTER TABLE users DROP COLUMN email;`
+  in a comment produced a real `remove` event, and the column then read as
+  `reverted` — which gates the hook. Same for `/* ... */` and for a semicolon
+  inside a string literal.
+- **`import --from-git` no longer invents rollbacks.** Any commit whose message
+  merely contained "revert" seeded `revert` events on every file it touched, so
+  `feat(ui): add a revert button to the toolbar` marked `app.py` reverted.
+  Detection is now anchored on git's own conventions.
+- **`blame`, `diff` and `history` find entities logged under a different
+  spelling.** Writes canonicalized `entity_path` but these three reads compared
+  the caller's raw string against the stored value, so the workflow Selvedge
+  itself installs — `prior_attempts <entity>`, then `blame <entity>` — returned
+  a hit followed by two misses on a `./`-prefixed path.
+- **Concurrent upgrades no longer crash.** `apply_migrations` decided a
+  migration was pending outside any write lock and used a deferred `BEGIN`, so
+  N processes opening a database with the same migration pending all re-ran the
+  `ALTER TABLE`; the losers died with `duplicate column name`, which is not a
+  lock error and so escaped the retry ladder and the `SelvedgeStorage`
+  constructor. Measured at 3 of 6 trials with 8 contenders before the fix.
+- **An interrupted backup can no longer destroy your last good one.**
+  `VACUUM INTO` wrote straight to the final `selvedge-*.db` name with no
+  cleanup on failure, so a truncated snapshot was reported by `doctor` as a
+  healthy recent backup and consumed a rotation slot — evicting the only
+  restorable file.
+- **Timestamps are fixed-width, so ordering is correct.** Omitting the
+  fractional part at zero microseconds meant `...12:00:00Z` sorted *after*
+  `...12:00:00.500000Z`, because `.` sorts below `Z`. Mixed precision is
+  routine: git and Agent Trace imports are second-precision. The visible
+  symptom was `blame` returning the older event and a re-opened decision
+  reading back as `reverted`.
+- **`selvedge setup` no longer deletes surrounding content from `CLAUDE.md`.**
+  A stray `<!-- selvedge:start -->` earlier in the file — someone documenting
+  the convention, or a merge that dropped an end marker — made the managed
+  block match span back to it, silently removing everything in between.
+  Duplicate blocks now converge instead of leaving a stale one in place.
+- **`6M` no longer means six minutes.** Case-insensitive unit matching resolved
+  the usual spelling of "six months" to minutes, so `--since 6M` showed six
+  minutes and a `revisit_after` of `6M` fell due immediately and stayed
+  overdue. `90D` still works; only the ambiguous bare `M` is rejected.
+- **`blame --json` emits JSON on a miss** instead of Rich markup on stdout —
+  it was the one command in the CLI whose `--json` output could fail to parse.
+- **`selvedge log` and `selvedge supersede` count toward `selvedge stats`.**
+  CLI reads fed the coverage denominator while CLI writes fed nothing, so a
+  correctly-logged CLI session reported 0% coverage and the report advised the
+  user to do what they had just done.
+- **`search` covers the four columns it documents.** It also matched
+  `change_type`, undocumented, so searching "revert" returned every
+  revert-typed event rather than events discussing one.
+- **`diff` and `history` describe `entity_path` accurately.** They called it a
+  "path prefix"; it is a dotted-segment prefix, so `src/` matched nothing and
+  `src/auth.py` did not cover `src/auth.py::login` — a confident empty answer
+  to "what happened to this file?".
+- **`SECURITY.md` no longer claims nothing leaves your machine.** The
+  default-on PyPI version check made that false. The narrower claim — no code,
+  paths, diffs, or reasoning text ever leaves, and the two outbound requests
+  carry none of it — is both true and stronger.
+
+### Changed
+
+- **Performance: the entity-path read is indexed.** `entity_path = ? OR
+  entity_path LIKE ?` — the query behind `prior_attempts`, `blame`, `diff`,
+  `history` and the hook — was full-scanning `events`, because `idx_entity_path`
+  is BINARY-collated and SQLite's default `LIKE` is case-insensitive, so the
+  planner could never use it. A NOCASE-collated index gives it a MULTI-INDEX OR.
+  Measured 7.409 ms → 0.347 ms per query at 100k events; end-to-end hook p50 had
+  been ~4.9 s at 890k events. Installs itself on existing databases; no
+  migration needed.
+- Coverage `omit` no longer lists a file that does not exist, and the
+  `Python :: 3.13` classifier matches what CI has been testing all along.
+
+### Added
+
+- `tests/` grew from 739 to 801, concentrated on guards a mutation pass showed
+  were executed but unasserted, plus the first multi-writer test of the
+  pending-migration path and the first structural (`EXPLAIN QUERY PLAN`) index
+  guard.
+- Two accepted risks written into the cross-cutting register with their
+  reasoning: the hook's fail-open posture on unrecognized writes, and verbatim
+  reasoning text living in a store that gets committed.
+
 ## [0.3.9.2] — 2026-07-23
 
 **The Claude Code plugin, from scaffolding to first-class.** v0.3.7 registered

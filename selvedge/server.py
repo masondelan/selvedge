@@ -32,12 +32,14 @@ Convention notes for v0.3.3+:
 
 import inspect
 import json
+import sys
 from typing import Annotated, TypedDict
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from . import __version__
 from .config import get_db_path
 from .logging_config import configure_logging
 from .models import ChangeEvent
@@ -996,7 +998,36 @@ _tighten_descriptions()
 
 
 def main() -> None:
-    """Console-script entry point: start the MCP server on stdio."""
+    """Console-script entry point: start the MCP server on stdio.
+
+    Handles ``--version`` / ``--help`` before starting, because the natural
+    way to check that a pinned install resolved — ``uvx --from
+    selvedge==X selvedge-server --version`` — otherwise silently starts
+    serving, which looks like a hang when stdin is a terminal.
+    """
+    argv = sys.argv[1:]
+    if argv:
+        # stderr, never stdout: stdout is the MCP frame channel.
+        if argv[0] in ("-V", "--version"):
+            print(f"selvedge-server {__version__}", file=sys.stderr)
+            sys.exit(0)
+        if argv[0] in ("-h", "--help"):
+            print(
+                f"selvedge-server {__version__}\n\n"
+                "Runs the Selvedge MCP server over stdio. Takes no arguments —\n"
+                "MCP hosts launch it directly. For the CLI, use `selvedge --help`.\n\n"
+                "  -V, --version   print the version and exit\n"
+                "  -h, --help      print this message and exit\n",
+                file=sys.stderr,
+            )
+            sys.exit(0)
+        print(
+            f"selvedge-server: unexpected argument {argv[0]!r} "
+            "(this binary takes none; see --help)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     # Configure structured logging once per process. Verbosity is controlled
     # by SELVEDGE_LOG_LEVEL (default WARNING).
     configure_logging()

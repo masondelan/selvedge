@@ -49,7 +49,11 @@ infra/
 
 # Internal docs that shouldn't ship to end users
 CLAUDE.md
-docs/
+# `manifest.json` references docs/icon.png, so the directory cannot be excluded
+# wholesale — running the real packer would drop the icon and leave the
+# manifest pointing at a file that is not in the archive.
+docs/*
+!docs/icon.png
 launch/
 scripts/
 tests/

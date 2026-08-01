@@ -56,3 +56,44 @@ def test_no_internal_artifacts_are_tracked():
         "internal-only artifacts are tracked — they must be gitignored, not "
         f"committed (they would leak to GitHub and the PyPI sdist): {offenders}"
     )
+
+
+def test_sdist_ships_exactly_the_enumerated_set():
+    """The sdist include list must mean what its comment claims.
+
+    Hatchling reads these patterns with gitignore semantics, where an
+    unanchored pattern matches at any depth — so bare `selvedge/` also matched
+    `features/src/selvedge/` and bare `README.md` matched every README in the
+    tree. Six unlisted files were shipping to PyPI as a result. This asserts
+    the artifact, not the config, so the guarantee survives a pattern edit.
+    """
+    import subprocess
+    import sys
+    import tarfile
+    import tempfile
+
+    repo_root = Path(__file__).resolve().parent.parent
+    with tempfile.TemporaryDirectory() as out:
+        proc = subprocess.run(
+            [sys.executable, "-m", "build", "--sdist", "--outdir", out, str(repo_root)],
+            capture_output=True, text=True, timeout=600,
+        )
+        if proc.returncode != 0:
+            pytest.skip(f"sdist build unavailable: {proc.stderr[-200:]}")
+        tarball = next(Path(out).glob("*.tar.gz"))
+        names = [n.split("/", 1)[1] for n in tarfile.open(tarball).getnames() if "/" in n]
+
+    non_package = sorted(n for n in names if not n.startswith("selvedge/") and n)
+    # `.gitignore` is added by hatchling's sdist builder itself and cannot be
+    # excluded from the target — listing it here is describing the builder,
+    # not endorsing an extra file.
+    assert non_package == [
+        ".gitignore",
+        "LICENSE",
+        "PKG-INFO",
+        "README.md",
+        "docs/coding-agents.md",
+        "docs/getting-started.md",
+        "docs/telemetry.md",
+        "pyproject.toml",
+    ], f"sdist contents drifted: {non_package}"

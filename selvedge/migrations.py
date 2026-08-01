@@ -206,7 +206,27 @@ def apply_migrations(conn: sqlite3.Connection) -> list[int]:
             # Make sure no implicit transaction is open before we BEGIN.
             if conn.in_transaction:
                 conn.commit()
-            conn.execute("BEGIN")
+            # BEGIN IMMEDIATE, not BEGIN. A deferred BEGIN takes no write lock
+            # until the first write, so N processes opening a database with the
+            # same migration pending would all pass the checks above, all reach
+            # the ALTER TABLE, and every loser would fail with "duplicate column
+            # name" after the winner committed. That is not a lock error, so the
+            # retry decorator never saw it and it propagated out of the
+            # SelvedgeStorage constructor — which the PreToolUse hook builds on
+            # every gated tool call, making it a third contender.
+            conn.execute("BEGIN IMMEDIATE")
+            # Re-check under the lock: another process may have applied this
+            # migration between our pre-lock read and acquiring the write lock.
+            if migration.version in get_applied_versions(conn) or (
+                migration.bootstrap_check is not None
+                and migration.bootstrap_check(conn)
+            ):
+                conn.rollback()
+                logger.debug(
+                    "selvedge.migrations: v%d applied by another process; skipping",
+                    migration.version,
+                )
+                continue
             for stmt in migration.statements:
                 conn.execute(stmt)
             conn.execute(

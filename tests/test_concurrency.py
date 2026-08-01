@@ -244,3 +244,84 @@ def test_session_rolls_back_on_error(tmp_path: Path) -> None:
             raise RuntimeError("boom")
     # The row should NOT have been committed
     assert storage.count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Concurrent open of an UN-UPGRADED database
+#
+# Every test above pre-initializes the schema before spawning workers, so
+# `apply_migrations` short-circuits and its BEGIN is never entered
+# concurrently. The path that matters in production is the opposite one: a
+# user upgrades the package, and the next N agent processes (CLI, MCP server,
+# and the PreToolUse hook, which constructs storage on every gated tool call)
+# all open a database with migrations still pending.
+# ---------------------------------------------------------------------------
+
+
+def _build_pre_v3_db(db_path: Path) -> None:
+    """Simulate a v0.3.7-shaped store: migrations {1,2} applied, v3/v4 pending."""
+    from selvedge.migrations import SCHEMA_MIGRATIONS_TABLE_SQL
+    from selvedge.storage import CREATE_TABLE_SQL
+
+    con = sqlite3.connect(db_path)
+    try:
+        con.executescript(CREATE_TABLE_SQL)
+        present = {r[1] for r in con.execute("PRAGMA table_info(events)")}
+        for col in (
+            "revisit_after", "expires_when", "supersedes", "constraint", "stale_when",
+        ):
+            if col in present:
+                con.execute(f'ALTER TABLE events DROP COLUMN "{col}"')
+        con.execute(SCHEMA_MIGRATIONS_TABLE_SQL)
+        for version in (1, 2):
+            con.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) "
+                "VALUES (?, ?, ?)",
+                (version, f"v{version}", "2026-01-01T00:00:00Z"),
+            )
+        con.commit()
+    finally:
+        con.close()
+
+
+@pytest.mark.parametrize("trial", range(4))
+def test_concurrent_open_of_pending_migration_db(tmp_path: Path, trial: int) -> None:
+    """N processes opening a pending-migration DB must all succeed.
+
+    Before the BEGIN IMMEDIATE fix this failed on roughly half of trials, with
+    up to 7 of 8 threads raising ``duplicate column name: revisit_after`` —
+    the losers evaluated "is this migration applied?" outside the write lock,
+    then re-ran the ALTER TABLE after the winner had already committed it.
+    The error is not a lock error, so the retry decorator never saw it and it
+    propagated straight out of the SelvedgeStorage constructor.
+    """
+    db_path = tmp_path / f"pending-{trial}.db"
+    _build_pre_v3_db(db_path)
+
+    n_threads = 8
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(n_threads)
+
+    def worker() -> None:
+        barrier.wait()
+        try:
+            SelvedgeStorage(db_path)
+        except BaseException as exc:  # noqa: BLE001 - recording for the assert
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"{len(errors)}/{n_threads} opens failed: {errors[0]!r}"
+
+    con = sqlite3.connect(db_path)
+    try:
+        applied = {r[0] for r in con.execute("SELECT version FROM schema_migrations")}
+        columns = {r[1] for r in con.execute("PRAGMA table_info(events)")}
+    finally:
+        con.close()
+    assert applied == {1, 2, 3, 4}
+    assert {"revisit_after", "supersedes", "stale_when"} <= columns

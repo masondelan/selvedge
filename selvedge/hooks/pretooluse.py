@@ -58,7 +58,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # SQL DDL extractors are reused so the hook derives the SAME dotted
 # table.column / table entities the migration importer stores from git
@@ -225,6 +225,63 @@ def _resolve_db_path(cwd: Path) -> Path | None:
 # ---------------------------------------------------------------------------
 
 
+# Commands that write to a path given as an argument. Anything not listed is
+# assumed read-only, which is the safe default here: a miss allows the edit,
+# and this module accepts misses (see the precision-over-recall note above).
+# A false BLOCK is the failure mode this list exists to prevent.
+_WRITE_COMMANDS = frozenset({
+    "tee", "cp", "mv", "rm", "install", "truncate", "dd", "patch", "touch",
+    "ln", "mkdir", "chmod", "chown", "alembic", "psql", "sqlite3", "mysql",
+})
+
+# `git <subcommand>` that can modify the working tree.
+_GIT_WRITE_SUBCOMMANDS = frozenset({
+    "checkout", "restore", "apply", "rm", "mv", "clean", "reset", "stash",
+    "switch", "revert", "cherry-pick", "merge", "rebase", "pull",
+})
+
+# Shell operators that separate one command from the next.
+_SEGMENT_SEPARATORS = frozenset({";", "&&", "||", "|", "&"})
+
+
+def _has_write_intent(tokens: list[str]) -> bool:
+    """Whether a tokenized Bash command plausibly writes to a file.
+
+    Redirection anywhere counts. Otherwise each pipeline segment is judged by
+    its executable: a known writer, `sed -i`, or a mutating `git` subcommand.
+    A `selvedge` invocation never counts — it is the tool the block message
+    tells the agent to run, and gating it makes the remediation unreachable.
+    """
+    if any(t in (">", ">>") for t in tokens):
+        return True
+
+    segment: list[str] = []
+    for token in [*tokens, ";"]:
+        if token in _SEGMENT_SEPARATORS:
+            if segment:
+                # Skip leading VAR=value assignments to find the executable.
+                argv = list(segment)
+                while argv and "=" in argv[0] and not argv[0].startswith("-"):
+                    argv.pop(0)
+                if argv:
+                    exe = PurePosixPath(argv[0]).name
+                    if exe in _WRITE_COMMANDS:
+                        return True
+                    if exe == "sed" and any(a.startswith("-i") for a in argv[1:]):
+                        return True
+                    if exe == "git":
+                        for arg in argv[1:]:
+                            if arg.startswith("-"):
+                                continue
+                            if arg in _GIT_WRITE_SUBCOMMANDS:
+                                return True
+                            break
+            segment = []
+        else:
+            segment.append(token)
+    return False
+
+
 def _candidate_paths(tool_name: str, tool_input: dict) -> list[str]:
     """File paths this tool call touches, best-effort."""
     if tool_name in _EDIT_TOOLS:
@@ -238,6 +295,14 @@ def _candidate_paths(tool_name: str, tool_input: dict) -> list[str]:
             tokens = shlex.split(command)
         except ValueError:
             tokens = command.split()
+        # A Bash call only counts as touching a path if it plausibly WRITES
+        # to one. Without this, `cat`/`git diff`/`pytest`/`ruff check` on a
+        # watched file all blocked — false positives, which this design
+        # forbids — and so did `selvedge prior-attempts '<path>'`, the very
+        # command the block message prints as the way out. That was a
+        # livelock with no CLI-only escape.
+        if not _has_write_intent(tokens):
+            return []
         # Path-shaped tokens only; option flags and bare words are noise.
         return [t for t in tokens if "/" in t or "." in t][:200]
     return []

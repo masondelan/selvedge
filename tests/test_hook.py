@@ -574,3 +574,78 @@ def test_wizard_no_claude_code_no_hook_step(tmp_path):
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# The Bash gate must require write intent
+#
+# The gate treated every path-shaped token in a Bash command as "touched", so
+# reading, linting or testing a watched file was blocked. That is a false
+# BLOCK, which the module docstring forbids — this design accepts misses, not
+# false positives. Worse, the block message's own remediation
+# (`selvedge prior-attempts '<path>'`) is itself a Bash command containing the
+# path, so following the instruction produced the same block: a livelock with
+# no CLI-only escape.
+# ---------------------------------------------------------------------------
+
+_WATCHED = "migrations/0001_add_tokens.sql"
+
+
+def _bash_payload(project, command, session_id="sess-bash-intent"):
+    return {
+        "session_id": session_id,
+        "cwd": str(project),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+
+
+@pytest.fixture
+def reverted(project):
+    _seed_reverted(_storage(project), _WATCHED)
+    return project
+
+
+@pytest.mark.parametrize("command", [
+    f"cat {_WATCHED}",
+    f"less {_WATCHED}",
+    f"head -50 {_WATCHED}",
+    f"wc -l {_WATCHED}",
+    f"grep -n token {_WATCHED}",
+    f"git diff {_WATCHED}",
+    f"git log --oneline -- {_WATCHED}",
+    f"git show HEAD -- {_WATCHED}",
+    f"ruff check {_WATCHED}",
+    f"pytest {_WATCHED}",
+])
+def test_read_only_bash_command_allows(reverted, command):
+    decision = hook.evaluate(_bash_payload(reverted, command))
+    assert decision.action == "allow", f"read-only command blocked: {command}"
+
+
+@pytest.mark.parametrize("command", [
+    f"git checkout HEAD~1 -- {_WATCHED}",
+    f"echo x > {_WATCHED}",
+    f"cat tmpl >> {_WATCHED}",
+    f"sed -i '' s/a/b/ {_WATCHED}",
+    f"cp other.sql {_WATCHED}",
+    f"mv other.sql {_WATCHED}",
+    f"rm {_WATCHED}",
+    f"curl -s http://x | tee {_WATCHED}",
+    f"git apply p.patch && cat {_WATCHED}",
+])
+def test_write_bash_command_still_blocks(reverted, command):
+    decision = hook.evaluate(_bash_payload(reverted, command))
+    assert decision.action == "block", f"write command slipped through: {command}"
+
+
+@pytest.mark.parametrize("command", [
+    f"selvedge prior-attempts '{_WATCHED}'",
+    f"selvedge blame {_WATCHED}",
+    f"selvedge supersede '{_WATCHED}' --reasoning x",
+])
+def test_selvedge_remediation_command_is_not_blocked(reverted, command):
+    """The command the block message tells the agent to run must be runnable."""
+    decision = hook.evaluate(_bash_payload(reverted, command))
+    assert decision.action == "allow", f"remediation self-blocked: {command}"

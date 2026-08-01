@@ -12,9 +12,10 @@ The entire payload (schema v1)::
     {
       "schema": 1,
       "install_id": "<random UUID, generated at enable time>",
-      "version": "0.3.9.1",
+      "version": "<the installed Selvedge version>",
       "python": "3.12",
       "os": "darwin",
+      "arch": "arm64",
       "source": "cli" | "server"
     }
 

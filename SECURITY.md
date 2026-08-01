@@ -26,7 +26,11 @@ You will receive an acknowledgement within 72 hours.
 Selvedge is a local-only tool:
 
 - All data lives in a SQLite file under `.selvedge/` next to your code
-  (or `~/.selvedge/` as a fallback). Nothing leaves your machine.
+  (or `~/.selvedge/` as a fallback). No code, paths, diffs, or reasoning text
+  ever leaves your machine. Two outbound requests exist, neither carrying any
+  of that: a version check against PyPI, on by default
+  (`SELVEDGE_NO_UPDATE_CHECK=1` disables it), and an anonymous heartbeat that
+  is off unless you enable it (see `docs/telemetry.md`).
 - No network listeners. An opt-in HTTP layer is planned for v0.4.0;
   until then there is no remote attack surface.
 - No LLM calls in core — output is templated and deterministic.

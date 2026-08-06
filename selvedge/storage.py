@@ -1261,6 +1261,48 @@ class SelvedgeStorage:
         with self._session() as conn:
             return conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
 
+    def get_reverted_entities(self, limit: int = 5) -> list[dict]:
+        """Entities whose standing verdict is *reverted*, most recent first.
+
+        Powers the session-start digest's wedge section. Derived from the
+        append-only log the same way `get_decision_status` derives it — an
+        entity counts as reverted when its latest event is a removal, so a
+        later `supersede` correctly drops it off this list.
+        """
+        placeholders = ",".join("?" for _ in _REMOVAL_CHANGE_TYPES)
+        with self._session() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT e.entity_path, e.reasoning, e.timestamp, e.change_type
+                FROM events e
+                JOIN (
+                    SELECT entity_path, MAX(timestamp) AS latest
+                    FROM events GROUP BY entity_path
+                ) last
+                  ON e.entity_path = last.entity_path AND e.timestamp = last.latest
+                WHERE e.change_type IN ({placeholders})
+                ORDER BY e.timestamp DESC
+                LIMIT ?
+                """,
+                (*sorted(_REMOVAL_CHANGE_TYPES), limit),
+            ).fetchall()
+        return [_coalesce_event_nullables(dict(r)) for r in rows]
+
+    def get_session_logged_paths(self, session_id: str) -> set[str]:
+        """Entity paths this session already has events for.
+
+        Used by the PreCompact reminder to subtract what is already captured,
+        so the hook only names work that would actually be lost.
+        """
+        if not session_id:
+            return set()
+        with self._session() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT entity_path FROM events WHERE session_id = ?",
+                (session_id,),
+            ).fetchall()
+        return {r["entity_path"] for r in rows}
+
     def count_truncated(self) -> int:
         """How many events carry a truncation marker (v0.3.10).
 

@@ -1934,7 +1934,7 @@ def backfill_commit(commit_hash, window, quiet):
 
 @cli.command()
 @click.option("--format", "fmt",
-              type=click.Choice(["json", "csv", "agent-trace"]), default="json",
+              type=click.Choice(["json", "csv", "agent-trace", "markdown"]), default="json",
               show_default=True, help="Output format")
 @click.option("--since", "-s", default="", help=_SINCE_HELP)
 @click.option("--entity", "-e", default="", help="Filter to entity path prefix")
@@ -1947,16 +1947,24 @@ def backfill_commit(commit_hash, window, quiet):
 @click.option("--output", "-o", default="-",
               help="Output file path (default: stdout)")
 def export(fmt, since, entity, project, limit, ndjson, collapse, output):
-    """Export change history to JSON, CSV, or Agent Trace.
+    """Export change history to JSON, CSV, Markdown, or Agent Trace.
 
     \b
     Examples:
       selvedge export                            # all events as JSON to stdout
       selvedge export --format csv -o out.csv   # CSV file
       selvedge export --since 30d --entity users
+      selvedge export --format markdown -o DECISIONS.md
       selvedge export --format agent-trace -o trace.json
       selvedge export --format agent-trace --ndjson -o trace.ndjson
       selvedge export --format agent-trace --collapse-by-session -o trace.json
+
+    \b
+    The markdown format renders a deterministic, human-readable digest
+    grouped by entity, with reverted decisions first. Commit it next to
+    `.selvedge/` so the captured reasoning is reviewable in a diff — a
+    binary store is not. Regenerating with no new events produces a
+    zero-line diff.
 
     \b
     The agent-trace format emits Agent Trace v0.1.0 records
@@ -1989,6 +1997,10 @@ def export(fmt, since, entity, project, limit, ndjson, collapse, output):
         else:
             header = export_preamble()[SELVEDGE_NS]
             content = json.dumps({**header, "records": records}, indent=2)
+    elif fmt == "markdown":
+        from .exporters.markdown import render_markdown
+
+        content = render_markdown(rows)
     elif fmt == "json":
         content = json.dumps(rows, indent=2)
     else:

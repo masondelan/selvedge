@@ -187,6 +187,11 @@ SETTINGS: dict[str, SettingSpec] = {
         "Fallback age in days for `stale_decisions` when a decision carries "
         "no explicit revisit_after. 0 = off (the default).",
     ),
+    "digest_max_bytes": SettingSpec(
+        4096, "SELVEDGE_DIGEST_MAX_BYTES", "int",
+        "Hard cap on the session-start digest injected into agent context. "
+        "0 disables the digest entirely.",
+    ),
     "redaction_patterns": SettingSpec(
         [], "SELVEDGE_REDACTION_PATTERNS", "str_list",
         "Extra secret-shaped regexes to warn about at log_change time. "

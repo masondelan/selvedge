@@ -269,31 +269,48 @@ def _desired_hook_entry() -> dict:
     }
 
 
-def install_pretooluse_hook(
+#: The delivery hooks (v0.3.10). Unlike the gate these are not tool-scoped,
+#: so they carry no matcher — the harness fires them once per event.
+SESSION_START_COMMAND = "selvedge-hook sessionstart"
+PRE_COMPACT_COMMAND = "selvedge-hook precompact"
+
+#: event name -> (command, matcher or None). One table so the installer, the
+#: wizard and the plugin manifest can't drift on which hooks exist.
+SELVEDGE_HOOKS: dict[str, tuple[str, str | None]] = {
+    "PreToolUse": (HOOK_COMMAND, HOOK_MATCHER),
+    "SessionStart": (SESSION_START_COMMAND, None),
+    "PreCompact": (PRE_COMPACT_COMMAND, None),
+}
+
+
+def install_hook_entry(
     settings_path: Path,
+    event: str,
     *,
     write_backup: bool = True,
 ) -> ConfigWriteResult:
-    """Idempotently merge the Selvedge PreToolUse hook into ``settings_path``.
+    """Idempotently merge one Selvedge hook into ``settings_path``.
 
     Targets the project's ``.claude/settings.json`` (Claude Code's checked-in
     project settings). Behavior matrix mirrors :func:`install_mcp_entry`:
 
       - File doesn't exist → create with just our hook       → ``"created"``
-      - No ``hooks.PreToolUse`` selvedge entry → append ours → ``"added"``
-      - A PreToolUse entry already runs ``selvedge-hook pretooluse``
-        → no-op                                              → ``"unchanged"``
+      - No matching selvedge entry → append ours             → ``"added"``
+      - An entry already runs our command → no-op            → ``"unchanged"``
       - Malformed JSON / non-object shapes → ``"error"`` (no write)
 
     A ``.bak`` is written before any modification when ``write_backup=True``.
     Existing non-Selvedge hooks are never touched — we only ever append.
     """
-    desired = _desired_hook_entry()
+    command, matcher = SELVEDGE_HOOKS[event]
+    desired: dict = {"hooks": [{"type": "command", "command": command}]}
+    if matcher is not None:
+        desired = {"matcher": matcher, **desired}
 
     if not settings_path.exists():
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(
-            json.dumps({"hooks": {"PreToolUse": [desired]}}, indent=2) + "\n"
+            json.dumps({"hooks": {event: [desired]}}, indent=2) + "\n"
         )
         return ConfigWriteResult("created", settings_path)
 
@@ -319,23 +336,50 @@ def install_pretooluse_hook(
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         hooks = {}
-    pretooluse = hooks.get("PreToolUse")
-    if not isinstance(pretooluse, list):
-        pretooluse = []
+    existing = hooks.get(event)
+    if not isinstance(existing, list):
+        existing = []
 
-    for entry in pretooluse:
+    for entry in existing:
         if not isinstance(entry, dict):
             continue
         for hook in entry.get("hooks", []) or []:
-            if isinstance(hook, dict) and HOOK_COMMAND in str(hook.get("command", "")):
+            if isinstance(hook, dict) and command in str(hook.get("command", "")):
                 return ConfigWriteResult("unchanged", settings_path)
 
     backup_path = _write_backup(settings_path, raw) if write_backup else None
-    pretooluse.append(desired)
-    hooks["PreToolUse"] = pretooluse
+    existing.append(desired)
+    hooks[event] = existing
     data["hooks"] = hooks
     settings_path.write_text(json.dumps(data, indent=2) + "\n")
     return ConfigWriteResult("added", settings_path, backup_path)
+
+
+def install_pretooluse_hook(
+    settings_path: Path, *, write_backup: bool = True
+) -> ConfigWriteResult:
+    """Install the PreToolUse gate. Thin wrapper kept for its callers."""
+    return install_hook_entry(settings_path, "PreToolUse", write_backup=write_backup)
+
+
+def install_delivery_hooks(
+    settings_path: Path, *, write_backup: bool = True
+) -> list[tuple[str, ConfigWriteResult]]:
+    """Install the SessionStart and PreCompact delivery hooks (v0.3.10).
+
+    Returns one ``(event, result)`` pair per hook so the wizard can report
+    each independently — one of them failing should not obscure the other
+    succeeding.
+    """
+    results = []
+    for event in ("SessionStart", "PreCompact"):
+        results.append(
+            (event, install_hook_entry(settings_path, event, write_backup=write_backup))
+        )
+        # Only the first write needs a backup; a second would overwrite the
+        # pre-modification copy with an already-modified one.
+        write_backup = False
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +503,40 @@ def run_wizard(
                     backup_path=result.backup_path,
                 )
             )
+
+    # --- Step 1c: delivery hooks (Claude Code only, v0.3.10) ---
+    # The counterpart to the gate. The gate covers the case where there is
+    # something to veto; these cover the case where there isn't — a session
+    # starting with no idea the store exists, and a compaction about to
+    # destroy reasoning that was never written down. Both are read-only,
+    # quiet when they have nothing to say, and neither can block anything.
+    if install_enforcement_hook and any(a.name == "claude-code" for a in agents):
+        settings_path = project / ".claude" / "settings.json"
+        if not confirm(
+            f"Install the Selvedge delivery hooks into {settings_path}? "
+            "(session-start digest of reverted/due decisions, and a "
+            "pre-compaction reminder to log unrecorded changes)",
+            True,
+        ):
+            outcome.add(
+                StepResult("Delivery hooks", "skipped", detail="user declined")
+            )
+        else:
+            delivery_status: dict[str, Literal["ok", "noop", "error"]] = {
+                "created": "ok",
+                "added": "ok",
+                "unchanged": "noop",
+                "error": "error",
+            }
+            for event, res in install_delivery_hooks(settings_path):
+                outcome.add(
+                    StepResult(
+                        f"{event} hook",
+                        delivery_status.get(res.action, "error"),
+                        detail=res.detail or str(res.path),
+                        backup_path=res.backup_path,
+                    )
+                )
 
     # --- Step 2: selvedge init in the project ---
     if init_project_dir:

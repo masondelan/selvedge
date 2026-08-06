@@ -22,16 +22,28 @@ import sys
 _DISABLE_ENV = "SELVEDGE_HOOK_DISABLE"
 
 _USAGE = """\
-usage: selvedge-hook pretooluse [--dry-run]
+usage: selvedge-hook <pretooluse|sessionstart|precompact> [--dry-run]
 
-Claude Code PreToolUse gate: blocks Edit/Write/Bash calls that touch
-schema/migration paths until prior_attempts has been queried for the
-affected entities this session. Reads the hook payload on stdin.
+  pretooluse    Gate. Blocks Edit/Write/Bash calls touching schema or
+                migration paths until prior_attempts has been queried for
+                the affected entities this session.
+  sessionstart  Delivery. Injects a compact digest at session start —
+                decisions due for revisit, reverted entities, recent
+                changesets. Silent when there is nothing to say.
+  precompact    Delivery. Before context compaction destroys this session's
+                reasoning, reminds the agent to log_change what it hasn't.
+                Advisory only; never blocks compaction.
 
-  --dry-run   evaluate and print the decision as JSON; always exit 0
+Each reads its hook payload on stdin.
+
+  --dry-run   evaluate and print what would be emitted; always exit 0
 
 Bypass with SELVEDGE_HOOK_DISABLE=1. Install via `selvedge setup`.
 """
+
+#: Subcommand -> module holding its `run(argv)`. Imported lazily, one at a
+#: time, so a hook never pays for its siblings' imports.
+_HOOKS = ("pretooluse", "sessionstart", "precompact")
 
 
 def main() -> None:
@@ -40,18 +52,21 @@ def main() -> None:
     if not argv or argv[0] in ("-h", "--help"):
         print(_USAGE)
         sys.exit(0)
-    if argv[0] == "pretooluse":
+    if argv[0] in _HOOKS:
         # The bypass has to short-circuit HERE, not inside `evaluate()`. The
         # documented escape hatch used to be checked after every import had
         # already run, so setting it saved nothing measurable — the whole cost
         # is import, not logic. `--dry-run` deliberately falls through so it
-        # still reports the decision the hook would have made.
+        # still reports what the hook would have done.
         if os.environ.get(_DISABLE_ENV) == "1" and "--dry-run" not in argv:
             sys.exit(0)
 
-        from .pretooluse import run
+        # Imported by name, one hook per process, so each pays only for its
+        # own module.
+        from importlib import import_module
 
-        sys.exit(run(argv[1:]))
+        module = import_module(f".{argv[0]}", __package__)
+        sys.exit(module.run(argv[1:]))
     print(_USAGE, file=sys.stderr)
     print(f"error: unknown hook {argv[0]!r}", file=sys.stderr)
     sys.exit(1)

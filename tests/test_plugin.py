@@ -526,3 +526,47 @@ def test_shim_latest_unpins(tmp_path):
     called = marker.read_text()
     assert "--from selvedge " in called or called.rstrip().endswith("selvedge-server")
     assert "selvedge==" not in called, f"latest should unpin: {called!r}"
+
+
+def test_plugin_registers_every_selvedge_hook():
+    """The plugin manifest and the settings installer must agree.
+
+    Two independent copies of "which hooks exist" — `hooks/hooks.json` for the
+    plugin install path and `setup.SELVEDGE_HOOKS` for the wizard path — is
+    exactly the shape that drifts. This pins them together.
+    """
+    import json
+    from pathlib import Path
+
+    from selvedge.setup import SELVEDGE_HOOKS
+
+    root = Path(__file__).resolve().parent.parent
+    manifest = json.loads((root / "hooks" / "hooks.json").read_text())
+    assert set(manifest["hooks"]) == set(SELVEDGE_HOOKS), (
+        "hooks/hooks.json and selvedge.setup.SELVEDGE_HOOKS disagree on which "
+        "hooks Selvedge ships"
+    )
+
+    for event, entries in manifest["hooks"].items():
+        command, matcher = SELVEDGE_HOOKS[event]
+        subcommand = command.split()[-1]
+        launched = entries[0]["hooks"][0]["command"]
+        assert launched.endswith(f"selvedge-plugin-hook {subcommand}"), (
+            f"{event} launches {launched!r}, not the {subcommand} subcommand"
+        )
+        # Tool-scoped hooks carry a matcher; session-scoped ones must not.
+        assert ("matcher" in entries[0]) is (matcher is not None)
+
+
+def test_plugin_hook_subcommands_are_real():
+    """Every command in the manifest must be a subcommand the CLI dispatches."""
+    import json
+    from pathlib import Path
+
+    from selvedge.hooks.cli import _HOOKS
+
+    root = Path(__file__).resolve().parent.parent
+    manifest = json.loads((root / "hooks" / "hooks.json").read_text())
+    for entries in manifest["hooks"].values():
+        subcommand = entries[0]["hooks"][0]["command"].split()[-1]
+        assert subcommand in _HOOKS, f"{subcommand!r} is not a selvedge-hook subcommand"

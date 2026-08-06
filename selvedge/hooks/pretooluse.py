@@ -99,6 +99,11 @@ _SESSION_FILE_MAX_AGE = timedelta(days=7)
 _MAX_ENTITY_CANDIDATES = 40
 _MAX_BLOCKED_REPORTED = 3
 
+# Cap on watched entities remembered per session for the PreCompact
+# reminder. The reminder is a prompt, not a report — a session that
+# touched 200 migrations does not need all 200 named back at it.
+_MAX_TOUCHED_TRACKED = 50
+
 # table.column-shaped tokens in diff text. Lowercase-only on purpose (DB
 # naming convention); the right-hand side excludes file extensions so
 # "auth.py" or "schema.sql" never becomes a phantom column entity.
@@ -476,13 +481,72 @@ def _session_window_start(state_dir: Path, session_id: str, now: datetime) -> da
 
     window_start = now - _SESSION_BACK_SLACK
     try:
-        session_file.write_text(
-            json.dumps({"session_id": session_id, "window_start": window_start.isoformat()}),
-            encoding="utf-8",
+        # Merge rather than overwrite: `record_touched_entities` writes
+        # `touched_entities` into this same file earlier in the same
+        # invocation, and a blind write here would erase it — leaving the
+        # PreCompact reminder with nothing to point at.
+        existing: dict = {}
+        if session_file.is_file():
+            try:
+                loaded = json.loads(session_file.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    existing = loaded
+            except (OSError, ValueError):
+                existing = {}
+        existing.update(
+            {"session_id": session_id, "window_start": window_start.isoformat()}
         )
+        session_file.write_text(json.dumps(existing), encoding="utf-8")
     except OSError:
         pass  # state is an optimization; failing to persist must not block
     return window_start
+
+
+def record_touched_entities(
+    state_dir: Path, session_id: str, entities: list[str]
+) -> None:
+    """Remember which watched entities this session touched.
+
+    Read back by the PreCompact hook, which needs to name entities that were
+    edited but never logged. Written only on the watched path — past the
+    "no watched path touched" early return — so an ordinary source edit still
+    costs nothing.
+
+    Best-effort: this is a convenience for a later advisory reminder, so a
+    failed write must never affect the gate's verdict.
+    """
+    if not entities:
+        return
+    path = state_dir / f"{session_id}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        if not isinstance(data, dict):
+            data = {}
+        known = data.get("touched_entities")
+        merged = list(known) if isinstance(known, list) else []
+        for entity in entities:
+            if entity not in merged:
+                merged.append(entity)
+        data["touched_entities"] = merged[:_MAX_TOUCHED_TRACKED]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except (OSError, ValueError, TypeError):
+        return
+
+
+def read_touched_entities(state_dir: Path, session_id: str) -> list[str]:
+    """Watched entities recorded for this session, oldest first."""
+    path = state_dir / f"{session_id}.json"
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    touched = data.get("touched_entities") if isinstance(data, dict) else None
+    if not isinstance(touched, list):
+        return []
+    return [t for t in touched if isinstance(t, str) and t]
 
 
 def _queried_this_session(
@@ -594,6 +658,14 @@ def evaluate(payload: dict, *, now: datetime | None = None) -> Decision:
     # Past the early return, so this is a watched edit that genuinely needs
     # the store. `..storage` is the single most expensive import in the tree.
     from ..storage import SelvedgeStorage
+
+    # Remember what this session touched, for the PreCompact reminder. Only
+    # reached on the watched path, so the common case is unaffected.
+    record_touched_entities(
+        db_path.parent / "hook_sessions",
+        _sanitize_session_id(payload.get("session_id")),
+        entities,
+    )
 
     storage = SelvedgeStorage(db_path)
     blocked: list[dict] = []

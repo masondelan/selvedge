@@ -509,3 +509,54 @@ def test_wizard_claude_writes_project_mcp_json_not_home(
     assert data["mcpServers"]["selvedge"]["command"] == "selvedge-server"
     # The stale home-dir path must NOT be written.
     assert not (fake_home / ".claude" / "config.json").exists()
+
+
+def test_install_delivery_hooks_adds_both_events(tmp_path):
+    """SessionStart and PreCompact land as separate, independent entries."""
+    import json
+
+    from selvedge.setup import install_delivery_hooks
+
+    settings = tmp_path / ".claude" / "settings.json"
+    results = install_delivery_hooks(settings)
+
+    assert [event for event, _ in results] == ["SessionStart", "PreCompact"]
+    assert all(r.action in ("created", "added") for _, r in results)
+
+    data = json.loads(settings.read_text())
+    assert "sessionstart" in json.dumps(data["hooks"]["SessionStart"])
+    assert "precompact" in json.dumps(data["hooks"]["PreCompact"])
+    # Not tool-scoped — a matcher here would be meaningless.
+    assert "matcher" not in data["hooks"]["SessionStart"][0]
+
+
+def test_install_delivery_hooks_is_idempotent(tmp_path):
+    from selvedge.setup import install_delivery_hooks
+
+    settings = tmp_path / ".claude" / "settings.json"
+    install_delivery_hooks(settings)
+    second = install_delivery_hooks(settings)
+    assert all(r.action == "unchanged" for _, r in second)
+
+
+def test_delivery_hooks_never_clobber_an_existing_settings_file(tmp_path):
+    """Only ever append — someone else's hooks must survive untouched."""
+    import json
+
+    from selvedge.setup import install_delivery_hooks
+
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "hooks": {"SessionStart": [{"hooks": [
+            {"type": "command", "command": "someone-elses-tool"}]}]},
+        "unrelatedKey": {"keep": True},
+    }))
+
+    install_delivery_hooks(settings)
+    data = json.loads(settings.read_text())
+
+    assert data["unrelatedKey"] == {"keep": True}
+    commands = json.dumps(data["hooks"]["SessionStart"])
+    assert "someone-elses-tool" in commands
+    assert "sessionstart" in commands

@@ -621,6 +621,22 @@ def test_description_sync_across_manifests():
     )
 
 
+def test_canonical_description_fits_the_mcp_registry_limit():
+    """The MCP Registry rejects a description over 100 characters.
+
+    Learned the hard way on v0.3.10: PyPI accepted a 225-character summary and
+    the registry answered `422 {"message": "expected length <= 100"}`, so the
+    package published and its registry entry did not. The cap is external and
+    unnegotiable, so it belongs in a test rather than in someone's memory.
+    """
+    canonical = _canonical_description()
+    assert len(canonical) <= 100, (
+        f"canonical description is {len(canonical)} chars; the MCP Registry "
+        "rejects anything over 100, which fails `publish-mcp-registry` AFTER "
+        "PyPI has already published — i.e. unfixable without a new version"
+    )
+
+
 def test_manifest_long_description_contains_the_canonical_line():
     """`manifest.json` may elaborate — it may not say something different."""
     import json

@@ -1,7 +1,7 @@
 {
   "name": "selvedge",
   "version": "0.3.10",
-  "description": "Decision provenance for AI-coded codebases: know what your agents already tried and rejected. Captures the why behind every change as an append-only, queryable audit trail — a git blame for decisions, with no LLM in the path.",
+  "description": "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected.",
   "author": {
     "name": "Mason Delan",
     "url": "https://github.com/masondelan"

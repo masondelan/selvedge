@@ -1,13 +1,31 @@
 name: Publish to PyPI + create GitHub Release
 
 # Triggers when you push a version tag: git tag v0.2.0 && git push --tags
+#
+# `workflow_dispatch` exists for one specific failure: the registry publish
+# failing *after* PyPI has already succeeded. That happened on v0.3.10 (a
+# description over the registry's 100-char cap), and it is unrecoverable by
+# re-running the tag — PyPI rejects a re-upload of an existing version, and
+# the tag's tree still holds the bad `server.json`. The dispatch path
+# re-publishes the registry entry alone, from the default branch, so a fix
+# committed to `main` can be shipped without inventing a version number.
 on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version already on PyPI to (re-)publish to the MCP Registry, e.g. 0.3.10'
+        required: true
+        type: string
 
 jobs:
   publish:
+    # Tag pushes only. A dispatch is for re-publishing the registry entry for
+    # a version PyPI already has, so re-running this would only fail on
+    # "file already exists".
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -73,8 +91,14 @@ jobs:
   publish-mcp-registry:
     runs-on: ubuntu-latest
     # The registry's ownership check reads the README of the latest release
-    # on PyPI, so this must only run after the PyPI publish succeeds.
+    # on PyPI, so on a tag push this must only run after the PyPI publish
+    # succeeds. On a dispatch the version is already on PyPI by definition,
+    # and `publish` is skipped — hence `always()` plus the explicit result
+    # check rather than a bare `needs:`.
     needs: publish
+    if: >-
+      always() &&
+      (github.event_name == 'workflow_dispatch' || needs.publish.result == 'success')
     permissions:
       contents: read
       id-token: write  # OIDC login to the MCP Registry (io.github.masondelan/* namespace)
@@ -82,14 +106,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # On dispatch, take the default branch: the whole point is to ship a
+          # `server.json` fix that the tag's tree does not have.
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "num=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "num=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
 
       # Belt-and-suspenders: server.json carries the version in two places
       # (top-level and packages[0]). The version-bump checklist updates both,
       # but sync them from the tag anyway so a missed bump can't publish a
       # stale version.
-      - name: Sync server.json versions from tag
+      - name: Sync server.json versions
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${{ steps.v.outputs.num }}
           jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.json.tmp
           mv server.json.tmp server.json
 
@@ -97,7 +134,7 @@ jobs:
       # the registry's ownership check reads pypi.org directly.
       - name: Wait for PyPI to serve the new version
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${{ steps.v.outputs.num }}
           for i in $(seq 1 30); do
             SERVED=$(curl -s https://pypi.org/pypi/selvedge/json | jq -r .info.version)
             if [ "$SERVED" = "$VERSION" ]; then

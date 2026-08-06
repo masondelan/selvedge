@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.masondelan/selvedge",
   "title": "Selvedge",
-  "description": "Decision provenance for AI-coded codebases: know what your agents already tried and rejected. Captures the why behind every change as an append-only, queryable audit trail — a git blame for decisions, with no LLM in the path.",
+  "description": "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected.",
   "version": "0.3.10",
   "websiteUrl": "https://selvedge.sh",
   "repository": {

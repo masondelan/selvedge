@@ -13,7 +13,13 @@ block (reason on stderr). See :mod:`selvedge.hooks.pretooluse`.
 
 from __future__ import annotations
 
+import os
 import sys
+
+# Duplicated from `.pretooluse.DISABLE_ENV` rather than imported, because
+# importing it would load the module this check exists to avoid loading.
+# `test_disable_env_name_matches_pretooluse` pins the two together.
+_DISABLE_ENV = "SELVEDGE_HOOK_DISABLE"
 
 _USAGE = """\
 usage: selvedge-hook pretooluse [--dry-run]
@@ -35,6 +41,14 @@ def main() -> None:
         print(_USAGE)
         sys.exit(0)
     if argv[0] == "pretooluse":
+        # The bypass has to short-circuit HERE, not inside `evaluate()`. The
+        # documented escape hatch used to be checked after every import had
+        # already run, so setting it saved nothing measurable — the whole cost
+        # is import, not logic. `--dry-run` deliberately falls through so it
+        # still reports the decision the hook would have made.
+        if os.environ.get(_DISABLE_ENV) == "1" and "--dry-run" not in argv:
+            sys.exit(0)
+
         from .pretooluse import run
 
         sys.exit(run(argv[1:]))

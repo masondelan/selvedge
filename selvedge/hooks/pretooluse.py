@@ -56,23 +56,18 @@ import re
 import shlex
 import sys
 import time
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
-# SQL DDL extractors are reused so the hook derives the SAME dotted
-# table.column / table entities the migration importer stores from git
-# history — otherwise a raw `ALTER TABLE users ADD COLUMN sso_token` edit
-# (no literal dot) yields no entity and the hook can't gate the very
-# scenario it exists for: re-adding a reverted DB column.
-from ..importers import (
-    _SQL_ADD_COLUMN,
-    _SQL_CREATE_TABLE,
-    _SQL_DROP_COLUMN,
-    _SQL_DROP_TABLE,
-)
-from ..storage import SelvedgeStorage, _paths_related, canonicalize_entity_path
-from ..timeutil import normalize_timestamp
+# Nothing heavy at module scope. This module runs in a fresh process on EVERY
+# gated tool call, and in the ~99% case it decides "nothing to do here" in
+# well under a millisecond — so anything imported unconditionally is pure tax
+# on the common path. `..importers`, `..storage` and `..timeutil` are imported
+# inside the three functions that actually need them, all of which run only
+# after the `if not touched:` early return in `evaluate()`.
+if TYPE_CHECKING:  # pragma: no cover — type-checking only, never at runtime
+    from ..storage import SelvedgeStorage
 
 DISABLE_ENV = "SELVEDGE_HOOK_DISABLE"
 
@@ -116,13 +111,40 @@ _FILE_EXTENSIONS = frozenset({
 })
 
 
-@dataclass
 class Decision:
-    """The hook's verdict for one tool call, testable without a process."""
+    """The hook's verdict for one tool call, testable without a process.
 
-    action: str  # "allow" | "block"
-    reason: str = ""  # stderr text on block; short note on allow
-    blocked_entities: list[str] = field(default_factory=list)
+    Hand-written rather than a ``@dataclass`` on purpose: the decorator pulls
+    in ``dataclasses`` → ``inspect``, ~2 ms of import the hook would pay on
+    every gated tool call to save nine lines here.
+    """
+
+    __slots__ = ("action", "reason", "blocked_entities")
+
+    def __init__(
+        self,
+        action: str,  # "allow" | "block"
+        reason: str = "",  # stderr text on block; short note on allow
+        blocked_entities: list[str] | None = None,
+    ) -> None:
+        self.action = action
+        self.reason = reason
+        self.blocked_entities = blocked_entities if blocked_entities is not None else []
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Decision):
+            return NotImplemented
+        return (
+            self.action == other.action
+            and self.reason == other.reason
+            and self.blocked_entities == other.blocked_entities
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"Decision(action={self.action!r}, reason={self.reason!r}, "
+            f"blocked_entities={self.blocked_entities!r})"
+        )
 
     def to_dict(self) -> dict:
         """JSON shape printed by ``--dry-run``. Every field always present."""
@@ -343,6 +365,17 @@ def _entity_tokens(text: str) -> list[str]:
     # SQL DDL first — highest precision, and the case the importer records
     # from git history (ADD/DROP COLUMN → table.column; CREATE/DROP TABLE →
     # table). Matching the importer's parsers keeps hook and store in step.
+    #
+    # Imported here rather than at module scope: this runs only after a
+    # watched path has actually been touched, so the unwatched-edit path
+    # never pays for `..importers`.
+    from ..importers import (
+        _SQL_ADD_COLUMN,
+        _SQL_CREATE_TABLE,
+        _SQL_DROP_COLUMN,
+        _SQL_DROP_TABLE,
+    )
+
     for m in _SQL_ADD_COLUMN.finditer(text):
         _add(f"{m.group(1)}.{m.group(2)}")
     for m in _SQL_DROP_COLUMN.finditer(text):
@@ -456,6 +489,11 @@ def _queried_this_session(
     storage: SelvedgeStorage, entities: list[str], window_start: datetime
 ) -> bool:
     """True if prior_attempts was queried for any related entity in-window."""
+    # Reached only on the block path, where a reverted decision was already
+    # found — so the import cost lands on the rare call, not the common one.
+    from ..storage import _paths_related, canonicalize_entity_path
+    from ..timeutil import normalize_timestamp
+
     since = normalize_timestamp(window_start.astimezone(timezone.utc).isoformat())
     queried = storage.get_tool_query_paths("prior_attempts", since=since)
     return any(
@@ -552,6 +590,10 @@ def evaluate(payload: dict, *, now: datetime | None = None) -> Decision:
     entities = [_relative_to(p, root) for p in touched]
     entities += [t for t in _entity_tokens(_diff_text(tool_name, tool_input))]
     entities = entities[:_MAX_ENTITY_CANDIDATES]
+
+    # Past the early return, so this is a watched edit that genuinely needs
+    # the store. `..storage` is the single most expensive import in the tree.
+    from ..storage import SelvedgeStorage
 
     storage = SelvedgeStorage(db_path)
     blocked: list[dict] = []

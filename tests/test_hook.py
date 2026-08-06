@@ -14,6 +14,7 @@ revert may block.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -705,3 +706,109 @@ def test_absolute_path_in_another_checkout_is_not_project_relative(tmp_path):
     assert not _matches_default_globs(result), (
         f"out-of-root absolute path {result!r} matched a watch glob"
     )
+
+
+# ---------------------------------------------------------------------------
+# Import cost
+#
+# The hook spawns a fresh process on every gated tool call, and in the ~99%
+# case decides "nothing to do" in under a millisecond. Wall-clock assertions
+# on a shared CI runner are too noisy to be a gate, so the durable guard is
+# structural: assert which modules the common path is allowed to load.
+# ---------------------------------------------------------------------------
+
+
+def _modules_after(snippet: str) -> set[str]:
+    """Run `snippet` in a fresh interpreter, return its loaded selvedge modules."""
+    result = subprocess.run(
+        [sys.executable, "-c", snippet + "\nimport sys, json\n"
+         "print(json.dumps([m for m in sys.modules if m.startswith('selvedge')]))"],
+        capture_output=True, text=True, check=True,
+        env={**os.environ, "SELVEDGE_QUIET": "1"},
+    )
+    return set(json.loads(result.stdout.strip().splitlines()[-1]))
+
+
+def test_allow_path_never_imports_the_ddl_parsers(tmp_path):
+    """`..importers` is only needed once a watched path has been touched.
+
+    It sat at module scope, so every unwatched edit — the overwhelming
+    majority — paid for the SQL DDL extractors it would never call.
+    """
+    loaded = _modules_after(
+        "from selvedge.hooks.pretooluse import evaluate\n"
+        "evaluate({'tool_name': 'Edit', 'tool_input': {'file_path': 'src/app.py'},\n"
+        f"          'cwd': {str(tmp_path)!r}, 'session_id': 's'}})"
+    )
+    assert "selvedge.importers" not in loaded, (
+        "the unwatched-edit path imported the SQL DDL parsers; they belong "
+        f"below the `if not touched:` early return. loaded={sorted(loaded)}"
+    )
+
+
+def test_decision_is_not_a_dataclass():
+    """`@dataclass` costs `dataclasses` → `inspect` — ~2 ms, for nine lines.
+
+    Asserting the decorator's absence rather than `inspect not in sys.modules`,
+    because `inspect` legitimately arrives via other modules on the block path;
+    what must not happen is `Decision` being the thing that requires it.
+    """
+    import dataclasses
+
+    assert not dataclasses.is_dataclass(hook.Decision), (
+        "Decision is a dataclass again — that decorator pulls dataclasses → "
+        "inspect on every gated tool call, to save nine lines"
+    )
+    # The hand-written replacement has to keep behaving like one.
+    d = hook.Decision("allow", reason="x")
+    assert d.to_dict() == {"action": "allow", "reason": "x", "blocked_entities": []}
+    assert d == hook.Decision("allow", reason="x")
+    assert d != hook.Decision("block", reason="x")
+    assert hook.Decision("allow").blocked_entities == []
+    # Default must not be shared between instances.
+    hook.Decision("allow").blocked_entities.append("leaked")
+    assert hook.Decision("allow").blocked_entities == []
+
+
+def test_disable_env_short_circuits_before_importing_the_hook():
+    """The documented bypass must skip the imports, not just the logic.
+
+    It used to be checked inside `evaluate()`, after every import had already
+    run — so `SELVEDGE_HOOK_DISABLE=1` measured the same as not setting it.
+    """
+    loaded = _modules_after(
+        "import os, sys\n"
+        "os.environ['SELVEDGE_HOOK_DISABLE'] = '1'\n"
+        "sys.argv = ['selvedge-hook', 'pretooluse']\n"
+        "import selvedge.hooks.cli as c\n"
+        "try:\n"
+        "    c.main()\n"
+        "except SystemExit as e:\n"
+        "    assert e.code == 0, e.code\n"
+    )
+    assert "selvedge.hooks.pretooluse" not in loaded, (
+        "the bypass imported the hook module it exists to skip; the check "
+        f"must run before the import. loaded={sorted(loaded)}"
+    )
+
+
+def test_disable_env_name_matches_pretooluse():
+    """`hooks/cli.py` duplicates the env-var name to avoid importing it."""
+    from selvedge.hooks import cli as hook_cli
+
+    assert hook_cli._DISABLE_ENV == hook.DISABLE_ENV
+
+
+def test_dry_run_still_reports_the_decision_when_disabled(tmp_path):
+    """The bypass short-circuit must not swallow `--dry-run` output."""
+    proc = subprocess.run(
+        [sys.executable, "-m", "selvedge.hooks.cli", "pretooluse", "--dry-run"],
+        input=json.dumps({
+            "tool_name": "Edit", "cwd": str(tmp_path), "session_id": "s",
+            "tool_input": {"file_path": "src/app.py"},
+        }),
+        capture_output=True, text=True,
+        env={**os.environ, "SELVEDGE_HOOK_DISABLE": "1", "SELVEDGE_QUIET": "1"},
+    )
+    assert proc.returncode == 0
+    assert json.loads(proc.stdout)["action"] == "allow"

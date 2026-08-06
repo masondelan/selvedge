@@ -638,3 +638,101 @@ def test_entity_prefix_is_dotted_not_raw_string(storage):
     assert {r["entity_path"] for r in storage.get_entity_history("users")} == {
         "users", "users.email",
     }
+
+
+# ---------------------------------------------------------------------------
+# log_rename / log_supersede — decision fields must survive the write
+#
+# `log_change` accepted, validated, and then dropped `revisit_after`,
+# `constraint` and `stale_when` on the rename and supersede branches (and
+# `diff` on supersede). Fixing it in storage rather than in each caller is
+# what makes the MCP tool and the CLI inherit the same behaviour.
+# ---------------------------------------------------------------------------
+
+
+def test_log_rename_carries_decision_fields_on_the_surviving_path(storage):
+    """The fields land on the create-on-new-path event, and only there.
+
+    A rename is a natural moment to record "revisit this in 90 days" — it is
+    usually part of a restructuring someone intends to revisit. Putting the
+    fields on the surviving entity (not the old path's rename marker) means
+    `stale` reports one row rather than two, and the revisit nudge reads a
+    satisfied value.
+    """
+    rename_event, create_event = storage.log_rename(
+        old_path="src/auth.py::login",
+        new_path="src/auth/session.py::login",
+        entity_type="function",
+        revisit_after="90d",
+        constraint="login must stay in one module",
+        stale_when="package layout changed",
+    )
+
+    assert create_event.revisit_after == "90d"
+    assert create_event.constraint == "login must stay in one module"
+    assert create_event.stale_when == "package layout changed"
+
+    # The old path is a tombstone; duplicating the decision there would make
+    # every rename surface twice in `stale`.
+    assert rename_event.revisit_after == ""
+    assert rename_event.constraint == ""
+    assert rename_event.stale_when == ""
+
+
+def test_log_rename_decision_fields_round_trip_through_storage(storage):
+    storage.log_rename(
+        old_path="src/old.py::f",
+        new_path="src/new.py::f",
+        revisit_after="90d",
+        constraint="must stay one module",
+        stale_when="package layout changed",
+    )
+    row = storage.get_entity_history("src/new.py::f")[0]
+    assert row["revisit_after"] == "90d"
+    assert row["constraint"] == "must stay one module"
+    assert row["stale_when"] == "package layout changed"
+
+
+def test_log_supersede_carries_diff_and_revisit_after(storage):
+    storage.log_event(ChangeEvent(entity_path="pay.token", change_type="add"))
+    storage.log_event(ChangeEvent(entity_path="pay.token", change_type="remove"))
+
+    stored = storage.log_supersede(
+        "pay.token",
+        diff="ALTER TABLE pay ADD COLUMN token TEXT;",
+        reasoning="Re-opening: the PCI concern was resolved by tokenizing upstream.",
+        revisit_after="180d",
+    )
+
+    assert stored.diff == "ALTER TABLE pay ADD COLUMN token TEXT;"
+    assert stored.revisit_after == "180d"
+
+    row = storage.get_entity_history("pay.token")[0]
+    assert row["diff"] == "ALTER TABLE pay ADD COLUMN token TEXT;"
+    assert row["revisit_after"] == "180d"
+
+
+def test_renamed_entity_with_revisit_after_surfaces_in_stale(storage):
+    """The point of recording the field: it has to reach `stale`.
+
+    Uses the changeset-activity signal rather than a tool call, because a due
+    date alone never surfaces — `get_stale_decisions` requires evidence the
+    entity is still in play.
+    """
+    storage.log_rename(
+        old_path="src/old.py::f",
+        new_path="src/new.py::f",
+        revisit_after="2020-01-01",
+        changeset_id="restructure-auth",
+        reasoning="Moved login into its own module during the auth restructure.",
+    )
+    # A later sibling in the same changeset is the "feature kept moving" signal.
+    storage.log_event(ChangeEvent(
+        entity_path="src/new.py::helper",
+        change_type="add",
+        changeset_id="restructure-auth",
+    ))
+
+    due = storage.get_stale_decisions()
+    paths = [d["entity_path"] for d in due]
+    assert "src/new.py::f" in paths, f"renamed decision never became due: {due}"

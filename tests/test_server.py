@@ -499,3 +499,46 @@ def test_search_does_not_match_on_change_type(tmp_path, monkeypatch):
     # The documented columns still match.
     assert len(storage.search("billing")) == 3
     assert len(storage.search("users.col1")) == 1
+
+
+def test_log_change_rename_keeps_the_decision_fields():
+    """Regression: these were validated and then dropped on the rename branch.
+
+    The call returned `{"status": "logged", "warnings": []}` — no signal at
+    all — while the decision it was recording never reached the store, so it
+    could never surface in `stale_decisions`.
+    """
+    result = log_change(
+        entity_path="src/new.py::f",
+        change_type="rename",
+        rename_from="src/old.py::f",
+        revisit_after="90d",
+        constraint="must stay one module",
+        stale_when="package layout changed",
+    )
+    assert result["status"] == "logged"
+
+    survivor = blame("src/new.py::f")
+    assert survivor["revisit_after"] == "90d"
+    assert survivor["constraint"] == "must stay one module"
+    assert survivor["stale_when"] == "package layout changed"
+
+
+def test_log_change_supersede_keeps_diff_and_revisit_after():
+    """On supersede the migration text was simply lost."""
+    log_change(entity_path="pay.token", change_type="add")
+    log_change(entity_path="pay.token", change_type="remove", reasoning="PCI scope")
+
+    result = log_change(
+        entity_path="pay.token",
+        change_type="supersede",
+        diff="ALTER TABLE pay ADD COLUMN token TEXT;",
+        reasoning="Provider vaults cards now, so the PCI constraint is gone.",
+        revisit_after="180d",
+    )
+    assert result["status"] == "logged"
+
+    latest = blame("pay.token")
+    assert latest["change_type"] == "supersede"
+    assert latest["diff"] == "ALTER TABLE pay ADD COLUMN token TEXT;"
+    assert latest["revisit_after"] == "180d"

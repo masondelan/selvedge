@@ -494,6 +494,9 @@ def log_change(
                 git_commit=git_commit,
                 project=project,
                 changeset_id=changeset_id,
+                revisit_after=normalized_revisit,
+                constraint=constraint,
+                stale_when=stale_when,
             )
             stored = events[-1]
         elif change_type == "supersede":
@@ -501,9 +504,11 @@ def log_change(
             # reverted event is validated/auto-resolved in one place.
             stored = storage.log_supersede(
                 entity_path,
+                diff=diff,
                 reasoning=reasoning,
                 constraint=constraint,
                 stale_when=stale_when,
+                revisit_after=normalized_revisit,
                 supersedes=supersedes,
                 agent=agent,
                 session_id=session_id,

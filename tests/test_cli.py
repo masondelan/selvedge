@@ -974,3 +974,47 @@ def test_status_json_on_empty_store_carries_the_diagnosis(runner, tmp_path, monk
     payload = json.loads(result.output)
     assert payload["recent"] == []
     assert isinstance(payload["diagnosis"], list)
+
+
+# ---------------------------------------------------------------------------
+# log — decision fields on the rename / supersede branches
+#
+# The CLI rename path had no coverage at all, which is how it drifted the same
+# way the MCP tool did: `✓ Renamed` printed, fields silently dropped.
+# ---------------------------------------------------------------------------
+
+
+def test_log_rename_keeps_the_decision_fields(runner):
+    result = runner.invoke(cli, [
+        "log", "src/new.py::f", "rename",
+        "--rename-from", "src/old.py::f",
+        "--revisit-after", "90d",
+        "--constraint", "must stay one module",
+        "--stale-when", "package layout changed",
+    ])
+    assert result.exit_code == 0
+
+    blamed = runner.invoke(cli, ["blame", "src/new.py::f", "--json"])
+    payload = json.loads(blamed.output)
+    assert payload["revisit_after"] == "90d"
+    assert payload["constraint"] == "must stay one module"
+    assert payload["stale_when"] == "package layout changed"
+
+
+def test_log_supersede_keeps_diff_and_revisit_after(runner):
+    seed(entity="pay.token", change_type="add")
+    seed(entity="pay.token", change_type="remove")
+
+    result = runner.invoke(cli, [
+        "log", "pay.token", "supersede",
+        "--diff", "ALTER TABLE pay ADD COLUMN token TEXT;",
+        "--revisit-after", "180d",
+        "-r", "Provider vaults cards now.",
+    ])
+    assert result.exit_code == 0
+
+    blamed = runner.invoke(cli, ["blame", "pay.token", "--json"])
+    payload = json.loads(blamed.output)
+    assert payload["change_type"] == "supersede"
+    assert payload["diff"] == "ALTER TABLE pay ADD COLUMN token TEXT;"
+    assert payload["revisit_after"] == "180d"

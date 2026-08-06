@@ -567,9 +567,11 @@ class SelvedgeStorage:
         self,
         entity_path: str,
         *,
+        diff: str = "",
         reasoning: str = "",
         constraint: str = "",
         stale_when: str = "",
+        revisit_after: str = "",
         supersedes: str = "",
         agent: str = "",
         session_id: str = "",
@@ -598,6 +600,12 @@ class SelvedgeStorage:
 
         The stored event inherits the superseded event's ``entity_type`` so
         the trail stays coherent. Returns the stored :class:`ChangeEvent`.
+
+        ``diff`` and ``revisit_after`` are accepted here for the same reason
+        the other decision fields are: re-opening a reverted decision is a
+        change like any other, so the migration text that re-applies it and
+        the date to check it again both belong on the event. They were
+        previously accepted by ``log_change``, validated, and then dropped.
         """
         canonical = canonicalize_entity_path(entity_path)
         prefix = f"{_escape_like(canonical)}.%"
@@ -634,6 +642,7 @@ class SelvedgeStorage:
             entity_path=canonical,
             change_type="supersede",
             entity_type=target["entity_type"],
+            diff=diff,
             reasoning=reasoning,
             agent=agent,
             session_id=session_id,
@@ -641,6 +650,7 @@ class SelvedgeStorage:
             project=project,
             changeset_id=changeset_id,
             supersedes=target["id"],
+            revisit_after=revisit_after,
             constraint=constraint,
             stale_when=stale_when,
         )
@@ -660,6 +670,9 @@ class SelvedgeStorage:
         git_commit: str = "",
         project: str = "",
         changeset_id: str = "",
+        revisit_after: str = "",
+        constraint: str = "",
+        stale_when: str = "",
     ) -> list[ChangeEvent]:
         """Record a rename as the dual-event pattern (v0.3.7).
 
@@ -669,6 +682,13 @@ class SelvedgeStorage:
         emit internally, so a later ``blame`` / ``diff`` on the new path
         surfaces the rename history instead of returning empty. Both paths run
         through the shared write chokepoint, so both land canonicalized.
+
+        ``revisit_after`` / ``constraint`` / ``stale_when`` land on the
+        ``create`` event only. The rename event on the old path is a
+        tombstone — the entity that survives the rename is the new path, so
+        duplicating the decision onto both would make one rename surface
+        twice in ``stale`` and leave the nudge reading a value on a path
+        nobody will touch again.
 
         Returns the two stored events ``[rename, create]``, oldest first.
         """
@@ -697,6 +717,9 @@ class SelvedgeStorage:
             project=project,
             changeset_id=changeset_id,
             metadata=json.dumps({"renamed_from": canonical_old}),
+            revisit_after=revisit_after,
+            constraint=constraint,
+            stale_when=stale_when,
         )
         return self.log_event_batch([rename_event, create_event])
 

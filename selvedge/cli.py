@@ -1835,6 +1835,9 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
                 git_commit=commit,
                 project=project,
                 changeset_id=changeset,
+                revisit_after=normalized_revisit,
+                constraint=constraint,
+                stale_when=stale_when,
             )
             stored = events[-1]
         elif change_type == "supersede":
@@ -1843,9 +1846,11 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
             # path the MCP log_change tool takes.
             stored = storage.log_supersede(
                 entity_path,
+                diff=diff_text,
                 reasoning=reasoning,
                 constraint=constraint,
                 stale_when=stale_when,
+                revisit_after=normalized_revisit,
                 supersedes=supersedes,
                 agent=agent,
                 git_commit=commit,

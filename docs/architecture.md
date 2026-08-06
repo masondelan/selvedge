@@ -1056,7 +1056,9 @@ github.com).
 - [ ] **Positioning rollout (release-blocker, v0.3.7 pattern).**
       `docs/positioning.md` (2026-07-26) is the source of truth:
       commit it; reorder the README hero + "How Selvedge compares"
-      (rejected paths lead, determinism the wedge, liveness
+      (rejected paths lead; append-only testimony the wedge;
+      determinism table stakes in the local-first tier — see
+      positioning.md's 2026-08-06 OpenLore update; liveness
       demoted); correct the Git AI mechanism row (agent-invoked
       checkpoint → Git notes, not hooks); disambiguate the two
       AgentDiffs by owner/URL; add the Origin / BlamePrompt URLs
@@ -1115,6 +1117,26 @@ github.com).
   warning that didn't fire; a false warning on every write teaches
   agents to ignore the warnings list.
 
+> **Sequencing after v0.3.10 (noted 2026-08-06, post-OpenLore).**
+> The order below holds, deliberately re-affirmed: **v0.3.11 (2.17)
+> ships next** — staleness is the least-crowded, best-evidenced half
+> of active memory, and OpenLore's `verify_claim(decision-current)`
+> independently converging on decision-currency checking is
+> validation, not preemption. **v0.3.12 (2.18) gains urgency**: its
+> append-only test and CI-verified context-cost bound are exactly
+> the two claims that separate Selvedge from the deterministic
+> newcomer — they should be machine-checkable before comparison copy
+> leans on them. One order decision considered and declined: pulling
+> 2.23 (cross-harness) ahead of cross-repo (2.19/2.20) — OpenLore is
+> not capture-based, so it adds no new capture-coverage pressure;
+> revisit with adoption signal at the v0.3.12 ship. 2.24
+> (SelvedgeBench) stays last before Phase 3, on purpose: the
+> benchmark's memory arm *requires retained failures* — a store that
+> purges rejected decisions structurally cannot power it — so the
+> bench is both the proof of the wedge and the consumer of 2.17's
+> `reject`/`revert` events and 2.18's trust tiers, which must ship
+> first.
+
 ### Phase 2.17 — Active memory v2 / semantic (v0.3.11)
 > The pattern-based half of active memory. The `expires_when` column
 > was added in v0.3.8's schema migration v3 but went unused; this
@@ -1122,6 +1144,12 @@ github.com).
 > change_types and the `prior_attempts` outcome-classifier upgrade
 > that consumes them. No new migration. Theme: *abandoned
 > alternatives are first-class events.*
+>
+> External convergence (2026-08-06): OpenLore ships
+> `verify_claim(decision-current)` — decision-currency checking,
+> independently arrived at. Validates this phase's bet. Selvedge's
+> evaluator stays log-derived (entity events, not parsed code), per
+> the non-goals.
 
 - [ ] **`expires_when` evaluation in `stale_decisions`** — column
       exists since v0.3.8; v0.3.11 ships the evaluator. **Closed
@@ -1240,18 +1268,28 @@ github.com).
       this phase's whole theme. What replicates in the 2026
       literature is cost/latency at accuracy parity, so the
       economics page *is* the evidence surface.
-- [ ] **`dev.selvedge` namespace as a stable contract, proposed
-      upstream.** The v0.3.9 Agent Trace exporter already emits
-      reasoning + entity provenance under
+- [ ] **`dev.selvedge` namespace as a stable contract; upstream
+      proposal parked.** The v0.3.9 Agent Trace exporter already
+      emits reasoning + entity provenance under
       `metadata["dev.selvedge"]`. Document that namespace as a
       versioned public contract in `docs/agent-trace-interop.md`
-      (field-by-field, semver'd), then propose it upstream on
-      `cursor/agent-trace` as a rationale-resolution pattern for
-      the spec's declared gap — Agent Trace records point at a
-      `url` for the conversation and deliberately don't define
-      what lives there; a documented rationale namespace is the
-      complement, from a shipping producer (the existing producer
-      issue #32 is the open thread).
+      (field-by-field, semver'd) — that part stands regardless,
+      for consumers of our own exports. The upstream proposal on
+      `cursor/agent-trace` is **parked as of 2026-08-06**: the
+      spec repo is dormant (10 commits total, last 2026-02-06, no
+      tags or releases ever, still 0.1.0 RFC; producer issue #32
+      unanswered since June). Wake condition: the repo shows life
+      — a release, a tag, or sustained commits. The exporter
+      itself stays shipped; it's additive interop either way.
+- [ ] **`test_append_only.py` — the retention claim,
+      machine-checkable.** Asserts no code path deletes `reject` /
+      `revert` / superseded events except the destructive-gated
+      prune (confirmation prompt + `SELVEDGE_DESTRUCTIVE=1`, from
+      v0.3.10). Added 2026-08-06: the moment append-only retention
+      became the category differentiator (the deterministic
+      newcomer purges rejected decisions after sync — verified at
+      source) is the moment it needs a test. Same theme as the
+      no-network test: the positioning claim, backed by CI.
 
 ##### Git-import provenance + trust tiers
 > Follow-up to the v0.3.9.1 git-import feature, from design feedback on the
@@ -1836,38 +1874,51 @@ github.com).
 
 ## Standards participation (no version assigned)
 
-Three standards surfaces currently define a slot Selvedge's data
-model fills, and none of them has an occupant. Participation is
-public engineering work on external timelines, so it carries no
-version number — but each item below names a concrete artifact, and
-progress gets reviewed at each release alongside the phase plan.
+Standards surfaces where Selvedge's data model fills a slot nobody
+occupies. Participation is public engineering work on external
+timelines, so it carries no version number — but each item names a
+concrete artifact, and progress gets reviewed at each release
+alongside the phase plan. Re-weighted 2026-08-06: one seat is live
+and fed, one is a watch item, one is parked.
 
-- **MCP Enterprise Readiness WG — audit trails.** The MCP 2026
-  roadmap names enterprise readiness as its least-defined priority,
-  scoped verbatim to "audit trails, SSO-integrated authentication,
-  gateway behavior, configuration portability," expected to ship as
-  Extensions (reverse-DNS namespaces) rather than core spec, with a
-  working group publicly recruiting. An append-only, locally-owned
-  change ledger with provenance tiers (Phase 2.18) is directly
-  relevant prior art. Artifact: participate in the WG; track an
-  audit-trail extension proposal under the Extensions framework.
-- **Agent Trace — rationale-resolution namespace.** The spec
-  (v0.1.0, RFC) defines where AI code came from and points at a
-  `url` for the conversation, deliberately declining to define what
-  lives there. Selvedge has shipped `metadata["dev.selvedge"]`
-  since v0.3.9. Artifact: the versioned namespace contract in
-  `docs/agent-trace-interop.md` plus the upstream proposal (Phase
-  2.18 carries both) — a rationale-resolution pattern offered from
-  a shipping producer, on the open producer thread (#32).
-- **OpenTelemetry GenAI — `gen_ai.plan.internal`.** The semantic
-  conventions define a plan span as "the decision phase where an
-  agent formulates a strategy before executing it," with no
-  attribute for the rationale content itself; the repo is in
-  Development status. With MCP deprecating its own logging in favor
-  of OTel, this span is where decision-phase telemetry converges.
-  Artifact: a proposed rationale-content attribute (or a documented
-  mapping from Selvedge events to the span), filed while the
-  conventions are still forming.
+- **OpenTelemetry GenAI — `gen_ai.plan.internal`. The live seat;
+  first priority.** The semantic conventions define a plan span as
+  "the decision phase where an agent formulates a strategy before
+  executing it," with no attribute for the rationale content
+  itself; the repo is in Development status. The 2026-07-28 MCP
+  revision now actively feeds this convergence point: MCP's own
+  Logging capability is deprecated (SEP-2577, migration to stderr
+  or OpenTelemetry) and W3C trace context is adopted via SEP-414.
+  Decision-phase telemetry is consolidating on OTel with the
+  rationale content still unspecified. Artifact: a proposed
+  rationale-content attribute (or a documented mapping from
+  Selvedge events to the span), filed while the conventions are
+  still forming.
+- **MCP enterprise readiness / audit trails — a watch item, not a
+  seat.** The MCP 2026 roadmap names enterprise readiness as its
+  least-defined priority, scoped verbatim to "audit trails,
+  SSO-integrated authentication, gateway behavior, configuration
+  portability," expected to ship as Extensions (reverse-DNS
+  namespaces) rather than core spec. **No working group exists for
+  it** — as of 2026-08-06 the project lists 8 WGs and 6 IGs, none
+  audit-related; the roadmap's "seeking enterprise infrastructure
+  leaders" line never became a formed group. Artifact until that
+  changes: an audit-trail extension sketch under the Extensions
+  framework, drawing on the Phase 2.18 provenance tiers, plus a
+  governance watch — participate if and when a group forms; don't
+  budget hours for a table that doesn't exist.
+- **Agent Trace — rationale-resolution namespace. Parked.** The
+  spec (v0.1.0, RFC) defines where AI code came from and points at
+  a `url` for the conversation, deliberately declining to define
+  what lives there — and the repo is dormant: 10 commits total,
+  the last on 2026-02-06, no tags or releases ever, producer
+  issue #32 unanswered since June. Selvedge has shipped
+  `metadata["dev.selvedge"]` since v0.3.9 and keeps shipping it;
+  the versioned namespace contract in
+  `docs/agent-trace-interop.md` gets written for consumers of our
+  own exports (Phase 2.18). The upstream proposal is parked with a
+  wake condition: the repo shows life (a release, a tag, sustained
+  commits).
 
 ---
 
@@ -2057,13 +2108,28 @@ store — 64 events, 12 secret and PII patterns — and found zero hits, so
 the risk is real but latent, not realized.
 
 **The verbatim capture itself is not negotiable** — sanitized or
-paraphrased reasoning would defeat the product. What is accepted is only
-that the *current* mitigation is documentation. The graded plan, cheapest
-first: say so plainly in `README.md` and `SECURITY.md`; add a
-warn-never-reject secret-shape check to the existing `warnings` list on
-`log_change`; add a `doctor` row that scans stored reasoning and diffs.
-The v0.3.10 `redaction_patterns` work is the durable endpoint. None of
-these require a new dependency, a new result type, or an LLM hop.
+paraphrased reasoning would defeat the product.
+
+**Current mitigation (v0.3.10 — shipped).** No longer documentation. The
+graded plan is delivered: `selvedge/redaction.py` carries a conservative
+built-in set of secret shapes (vendor-prefixed keys, PEM headers, bearer
+tokens, `SECRET=<opaque>` assignments, credentialed connection strings),
+extendable per-project via `redaction_patterns` in `.selvedge/config.toml`.
+It runs at `log_change` write time on both surfaces and reports into the
+existing `warnings` list — **warn, never reject**, because a false positive
+that blocks a write loses the reasoning entirely, which is the failure this
+project exists to prevent. `selvedge doctor` carries the retrospective half:
+a row that scans stored reasoning and diffs, since the write-time check can
+never see what is already committed. Warnings name the *pattern label* only
+and never echo the matched value — echoing it would copy the secret into
+agent context and any transcript. No new dependency, no new result type, no
+LLM hop.
+
+What remains accepted: detection is shape-based and therefore incomplete. A
+secret that doesn't match a known shape still lands verbatim. Bare
+high-entropy strings are deliberately NOT matched — they hit commit SHAs,
+base64 fixtures and UUIDs far more often than secrets, and a warning that
+fires constantly is a warning nobody reads.
 
 **Discipline**: any feature that widens what gets captured automatically
 (richer diffs, transcript import, tool-output capture) must state in its

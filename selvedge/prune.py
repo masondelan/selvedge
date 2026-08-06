@@ -1,10 +1,21 @@
-"""``selvedge prune`` — bound the noise table by trimming old ``tool_calls`` rows.
+"""``selvedge prune`` — bound the store by trimming old rows.
 
-Only ``tool_calls`` is pruned in v0.3.6. The events table is off-limits
-until ``.selvedge/config.toml`` lands in v0.3.10 — the destructive
-events-prune path will require both ``SELVEDGE_DESTRUCTIVE=1`` and an
-interactive confirmation prompt, per the cross-cutting risk register in
-``docs/architecture.md``.
+``tool_calls`` prunes by default on a 90-day window. The **events** table is
+gated behind ``--include-events`` and, per the cross-cutting risk register in
+``docs/architecture.md``, requires BOTH an interactive confirmation AND
+``SELVEDGE_DESTRUCTIVE=1`` in the environment (v0.3.10).
+
+Two gates rather than one because either alone has a known bypass. A
+confirmation prompt is defeated by ``--yes`` in a cron entry — the classic
+footgun, and the reason ``test_cron_footgun_yes_without_destructive_env_errors``
+exists and is named explicitly so a future test-suite cleanup can't quietly
+retire it. An env var alone is defeated by a shell profile that exports it
+once and forgets. Requiring both means a destructive run has to be deliberate
+in two independent places.
+
+``retention_days_events`` defaults to *infinity*: the reasoning behind a
+change is the one thing this tool exists to preserve, so deleting it is
+always opt-in.
 
 Every prune appends one line to ``.selvedge/prune.log`` so the cadence
 is visible later: ``<utc-iso>\\t<count_pruned>\\t<days_threshold>``.
@@ -22,11 +33,16 @@ from pathlib import Path
 from .storage import SelvedgeStorage
 from .timeutil import normalize_timestamp
 
-# Hardcoded for v0.3.6. Becomes ``retention_days_tool_calls`` in
-# ``.selvedge/config.toml`` when the config file lands in v0.3.10. The
-# 90-day default is long enough that the previous month's agents are
-# still in the data, per the Phase 2.12 risk note.
+# Fallback when nothing is configured. The live value comes from
+# ``retention_days_tool_calls`` in ``.selvedge/config.toml`` (v0.3.10); this
+# constant is what that setting defaults to. 90 days is long enough that the
+# previous month's agents are still in the data, per the Phase 2.12 risk note.
 DEFAULT_DAYS = 90
+
+#: Environment gate for anything that deletes events. Deliberately not a CLI
+#: flag: a flag would live in the same command line as ``--yes``, so one
+#: careless cron entry could satisfy both gates at once.
+DESTRUCTIVE_ENV = "SELVEDGE_DESTRUCTIVE"
 
 # Doctor WARNs above this row count in ``tool_calls``. Threshold is
 # intentional — large enough that small projects don't hit it, low
@@ -135,3 +151,87 @@ def last_prune_line(log_path: Path) -> tuple[str, int, int] | None:
         return parts[0], int(parts[1]), int(parts[2])
     except ValueError:
         return None
+
+
+class DestructiveNotPermitted(RuntimeError):
+    """Raised when an events prune is attempted without both gates satisfied.
+
+    An exception rather than a return value on purpose: the caller must not be
+    able to ignore it and proceed to delete.
+    """
+
+
+def destructive_allowed(env: dict | None = None) -> bool:
+    """True when ``SELVEDGE_DESTRUCTIVE=1`` is set in the environment."""
+    import os
+
+    source = os.environ if env is None else env
+    return source.get(DESTRUCTIVE_ENV) == "1"
+
+
+def require_destructive_env(env: dict | None = None) -> None:
+    """Raise unless the environment gate is satisfied.
+
+    Called *after* the interactive confirmation so a cron job that passes
+    ``--yes`` still stops here — which is the whole point of having two gates
+    that live in different places.
+    """
+    if not destructive_allowed(env):
+        raise DestructiveNotPermitted(
+            f"deleting events requires {DESTRUCTIVE_ENV}=1 in the environment, "
+            "in addition to confirmation. This is deliberate: --yes alone must "
+            "never be enough to destroy captured reasoning from a cron job."
+        )
+
+
+def append_events_log_line(
+    log_path: Path,
+    pruned: int,
+    days: int,
+    when: datetime | None = None,
+) -> None:
+    """Append one audit line for an events prune.
+
+    Same tab-separated shape as the tool_calls line with an ``events`` marker,
+    so ``prune.log`` stays one readable file and a destructive run is
+    distinguishable from routine telemetry trimming at a glance.
+    """
+    stamp = (when or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+    if stamp.endswith("+00:00"):
+        stamp = stamp[:-6] + "Z"
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{stamp}\tevents\t{pruned}\t{days}\n")
+    except OSError:
+        return
+
+
+def run_events_prune(
+    db_path: Path,
+    days: int,
+    now: datetime | None = None,
+    env: dict | None = None,
+) -> PruneResult:
+    """Delete events older than ``days``. Both gates must already be satisfied.
+
+    The environment gate is re-checked here rather than trusted from the
+    caller — this function is the last thing between a mistake and deleted
+    reasoning, so it does not take anyone's word for it.
+
+    ``days <= 0`` means unlimited retention and deletes nothing; that is the
+    default, and it is not an error to ask for it.
+    """
+    require_destructive_env(env)
+
+    log_path = prune_log_path(db_path)
+    if days <= 0:
+        append_events_log_line(log_path, 0, days, when=now)
+        return PruneResult(pruned=0, days_threshold=days, cutoff="", log_path=log_path)
+
+    cutoff = compute_cutoff(days, now=now)
+    pruned = SelvedgeStorage(db_path).prune_events(cutoff)
+    append_events_log_line(log_path, pruned, days, when=now)
+    return PruneResult(
+        pruned=pruned, days_threshold=days, cutoff=cutoff, log_path=log_path
+    )

@@ -187,3 +187,47 @@ def check_entity_path_shape(entity_path: str, entity_type: str) -> list[str]:
     if pattern.expected.search(stripped):
         return []
     return [pattern.hint]
+
+
+def apply_event_limits(diff: str, reasoning: str) -> tuple[str, str, list[str]]:
+    """Enforce the configured size bounds and run the secret-shape check.
+
+    Returns ``(diff, reasoning, warnings)`` — the possibly-truncated text plus
+    warnings for the existing ``warnings`` list. Shared by the MCP tool and
+    the CLI so the two write paths can't drift, which is the same reason the
+    read paths went through a presenter layer in v0.3.10.
+
+    Both halves warn rather than reject. Truncation is surfaced at write time
+    so an agent can immediately re-log something concise, rather than
+    discovering months later that the reasoning it recorded stops mid-sentence.
+    """
+    from .config import get_setting
+    from .redaction import check_for_secrets
+    from .storage import truncate_field
+
+    warnings: list[str] = []
+
+    diff_out, diff_dropped = truncate_field(diff, get_setting("diff_bytes"))
+    if diff_dropped:
+        warnings.append(
+            f"diff truncated — {diff_dropped} bytes dropped past the "
+            f"{get_setting('diff_bytes')}-byte diff_bytes limit. Log a summary "
+            "of the change rather than the full patch; the diff itself is "
+            "git's job."
+        )
+
+    reasoning_out, reasoning_dropped = truncate_field(
+        reasoning, get_setting("reasoning_bytes")
+    )
+    if reasoning_dropped:
+        warnings.append(
+            f"reasoning truncated — {reasoning_dropped} bytes dropped past the "
+            f"{get_setting('reasoning_bytes')}-byte reasoning_bytes limit. "
+            "Re-log with the decision and its constraint rather than a "
+            "transcript."
+        )
+
+    warnings += check_for_secrets(
+        reasoning_out, diff_out, get_setting("redaction_patterns")
+    )
+    return diff_out, reasoning_out, warnings

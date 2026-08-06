@@ -25,9 +25,17 @@ from pathlib import Path
 
 from . import backup as backup_mod
 from . import prune as prune_mod
-from .config import get_db_path, resolve_db_path
+from .config import (
+    get_db_path,
+    get_setting,
+    global_config_path,
+    project_config_path,
+    resolve_all_settings,
+    resolve_db_path,
+)
 from .logging_config import LOG_LEVEL_ENV
 from .migrations import MIGRATIONS, get_applied_versions, latest_version
+from .redaction import scan_store_for_secrets
 from .storage import SelvedgeStorage
 
 # The sentinel line `selvedge install-hook` writes into `.git/hooks/post-commit`
@@ -420,6 +428,97 @@ def run_checks() -> list[dict]:
     else:
         checks.append(check_row("Stale decisions", "INFO", "no DB yet"))
 
+    checks.extend(_db_size_checks(resolved.path))
+    checks.extend(_config_precedence_checks())
+    checks.extend(_redaction_scan_checks(resolved.path))
+
     return checks
+
+
+def _db_size_checks(db_path: Path) -> list[dict]:
+    """Warn once the store passes `db_size_warn_mb` (v0.3.10).
+
+    SQLite handles a large file fine; the reason to surface it is that the
+    store is meant to be committed alongside the repo, and a few hundred MB in
+    version control is a problem long before it is a query problem.
+    """
+    warn_mb = get_setting("db_size_warn_mb")
+    if not db_path.is_file():
+        return [check_row("Database size", "INFO", "no DB yet")]
+    try:
+        size_mb = db_path.stat().st_size / (1024 * 1024)
+    except OSError as e:
+        return [check_row("Database size", "INFO", f"unreadable: {e}")]
+
+    detail = f"{size_mb:.1f} MB"
+    if warn_mb and size_mb >= warn_mb:
+        return [check_row(
+            "Database size", "WARN",
+            f"{detail} — over the {warn_mb} MB warning threshold. "
+            "`selvedge prune` drops old tool-call telemetry; see "
+            "`db_size_warn_mb` in .selvedge/config.toml to change the threshold.",
+        )]
+    threshold = f"threshold {warn_mb} MB" if warn_mb else "no threshold set"
+    return [check_row("Database size", "PASS", f"{detail} ({threshold})")]
+
+
+def _config_precedence_checks() -> list[dict]:
+    """One row per setting: effective value AND which step produced it.
+
+    The same shape as the DB-path row above, and for the same reason — a
+    user should be able to see *why* a setting has the value it does without
+    reading the source or guessing whether their config file was even found.
+    """
+    rows = [check_row(
+        "Config file",
+        "INFO",
+        f"project: {project_config_path()}"
+        f"{'' if project_config_path().is_file() else ' (absent)'}"
+        f" | global: {global_config_path()}"
+        f"{'' if global_config_path().is_file() else ' (absent)'}",
+    )]
+    source_labels = {
+        "flag": "CLI flag",
+        "env": "env var",
+        "project": "project config.toml",
+        "global": "global config.toml",
+        "default": "built-in default",
+    }
+    for name, resolved in resolve_all_settings().items():
+        value = ",".join(resolved.value) if isinstance(resolved.value, list) else resolved.value
+        shown = value if value != "" else "(none)"
+        rows.append(check_row(
+            f"config: {name}", "INFO",
+            f"{shown}  [via {source_labels[resolved.source]}]",
+        ))
+    return rows
+
+
+def _redaction_scan_checks(db_path: Path) -> list[dict]:
+    """Report secret-shaped strings already sitting in the store (v0.3.10).
+
+    The write-time check only sees new events. This is the retrospective
+    half: the risk register's entry on verbatim reasoning in a committed
+    store is only honestly mitigated if a user can find out whether anything
+    already landed.
+    """
+    if not db_path.is_file():
+        return [check_row("Secret-shaped content", "INFO", "no DB yet")]
+    try:
+        hits = scan_store_for_secrets(SelvedgeStorage(db_path))
+    except sqlite3.Error as e:
+        return [check_row("Secret-shaped content", "INFO", f"scan failed: {e}")]
+    if not hits:
+        return [check_row(
+            "Secret-shaped content", "PASS",
+            "no secret-shaped strings found in stored reasoning or diffs",
+        )]
+    shown = ", ".join(f"{h['event_id'][:8]}:{h['pattern']}" for h in hits[:3])
+    more = f" (+{len(hits) - 3} more)" if len(hits) > 3 else ""
+    return [check_row(
+        "Secret-shaped content", "WARN",
+        f"{len(hits)} event(s) contain secret-shaped strings — {shown}{more}. "
+        "The store is committed alongside your repo; rotate anything real.",
+    )]
 
 

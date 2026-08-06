@@ -42,13 +42,14 @@ from . import prune as prune_mod
 from . import telemetry as telemetry_mod
 from . import update_check as update_check_mod
 from . import verify as verify_mod
-from .config import get_db_path, init_project
+from .config import get_db_path, init_project, resolve_setting
 from .logging_config import configure_logging
 from .models import ChangeEvent, ChangeType
 from .presenters import blame_payload, changeset_payload, prior_attempts_payload
 from .storage import SelvedgeStorage
 from .timeutil import normalize_revisit_after, parse_time_string, parse_window_minutes
 from .validation import (
+    apply_event_limits,
     check_entity_path_shape,
     check_reasoning_quality,
     check_revisit_nudge,
@@ -561,40 +562,65 @@ def backup(output_path, as_json):
 @cli.command()
 @click.option(
     "--days",
-    default=prune_mod.DEFAULT_DAYS,
-    show_default=True,
+    default=None,
     type=int,
     help=(
-        "Delete tool_calls older than this many days. Default of 90 days is "
-        "long enough that the previous month's agents are still in the data."
+        "Delete tool_calls older than this many days. Defaults to "
+        "retention_days_tool_calls from .selvedge/config.toml (90)."
     ),
 )
+@click.option(
+    "--include-events",
+    is_flag=True,
+    help=(
+        "ALSO delete change events older than retention_days_events. "
+        "Requires confirmation AND SELVEDGE_DESTRUCTIVE=1."
+    ),
+)
+@click.option(
+    "--event-days",
+    default=None,
+    type=int,
+    help=(
+        "Events retention in days for --include-events. Defaults to "
+        "retention_days_events from config (0 = never delete anything)."
+    ),
+)
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt.")
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def prune(days, as_json):
-    """Trim old ``tool_calls`` rows. v0.3.6 prunes telemetry only.
+def prune(days, include_events, event_days, yes, as_json):
+    """Trim old rows. Telemetry by default; events only when asked twice.
 
     \b
-    Default retention is 90 days. Pass ``--days N`` to override.
-    Every run appends a one-liner to ``.selvedge/prune.log`` so the
-    cadence is visible in ``selvedge doctor``.
+    Retention comes from .selvedge/config.toml, overridable per-run:
+      retention_days_tool_calls   default 90
+      retention_days_events       default 0 (never delete)
 
     \b
-    No ``--include-events`` flag in v0.3.6 — the destructive
-    events-prune path waits for ``.selvedge/config.toml`` in v0.3.10
-    and requires both ``SELVEDGE_DESTRUCTIVE=1`` and an interactive
-    confirmation.
+    --include-events DELETES CAPTURED REASONING. It requires BOTH an
+    interactive confirmation AND SELVEDGE_DESTRUCTIVE=1 in the
+    environment. That is deliberate: --yes in a cron entry defeats a
+    prompt, and a shell profile defeats an env var, but neither defeats
+    both. Every events prune is recorded in .selvedge/prune.log.
 
     \b
     Examples:
       selvedge prune
       selvedge prune --days 30
-      selvedge prune --json
+      SELVEDGE_DESTRUCTIVE=1 selvedge prune --include-events --event-days 365
     """
     db_path = get_db_path()
+    days = resolve_setting("retention_days_tool_calls", flag_value=days).value
     result = prune_mod.run_prune(db_path, days=days)
 
+    events_result = None
+    if include_events:
+        events_result = _prune_events(db_path, event_days, yes, as_json)
+
     if as_json:
-        click.echo(json.dumps(result.to_dict(), indent=2))
+        payload = result.to_dict()
+        payload["events"] = events_result.to_dict() if events_result else {}
+        click.echo(json.dumps(payload, indent=2))
         return
 
     console.print(
@@ -604,7 +630,53 @@ def prune(days, as_json):
     )
     console.print(f"  Cutoff:  [dim]{result.cutoff}[/dim]")
     console.print(f"  Log:     [dim]{result.log_path}[/dim]")
+    if events_result is not None:
+        console.print(
+            f"[bold red]✓ Deleted[/bold red] "
+            f"[bold]{events_result.pruned}[/bold] change event(s) older than "
+            f"[bold]{events_result.days_threshold}[/bold] day(s)"
+        )
     console.print()
+
+
+def _prune_events(db_path, event_days, yes, as_json):
+    """The destructive half of `prune`. Both gates, then delete.
+
+    Order matters: confirm first, then check the environment. A cron entry
+    carrying `--yes` sails through the prompt and stops at the env gate with
+    an explanation, which is exactly the footgun the two-gate rule exists for.
+    """
+    resolved_days = resolve_setting("retention_days_events", flag_value=event_days)
+    event_days = resolved_days.value
+
+    if event_days <= 0:
+        err_console.print(
+            "[yellow]--include-events had nothing to do:[/yellow] "
+            f"retention_days_events is 0 (via {resolved_days.source}), which "
+            "means never delete. Set it in .selvedge/config.toml or pass "
+            "--event-days N."
+        )
+        return prune_mod.run_events_prune(db_path, days=0)
+
+    storage = SelvedgeStorage(db_path)
+    cutoff = prune_mod.compute_cutoff(event_days)
+    doomed = storage.count_events_before(cutoff)
+
+    if not yes and not as_json:
+        console.print(
+            f"\n[bold red]This deletes {doomed} change event(s)[/bold red] "
+            f"older than {event_days} days — the reasoning behind them is not "
+            "recoverable from git."
+        )
+        if not click.confirm("Delete them?", default=False):
+            err_console.print("[yellow]aborted[/yellow]")
+            sys.exit(1)
+
+    try:
+        return prune_mod.run_events_prune(db_path, days=event_days)
+    except prune_mod.DestructiveNotPermitted as e:
+        err_console.print(f"[red]error:[/red] {e}")
+        sys.exit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -1241,7 +1313,13 @@ def stats(since, as_json):
       selvedge stats --since 7d
     """
     resolved_since = resolve_since(since)
-    data = get_storage().get_tool_stats(since=resolved_since)
+    storage = get_storage()
+    data = storage.get_tool_stats(since=resolved_since)
+    # Truncated-event count (v0.3.10). Surfaced here rather than only in the
+    # write-time warning so the pattern is visible after the fact — an agent
+    # that consistently logs oversized reasoning shows up as a rising number,
+    # not as a warning nobody was watching.
+    data["truncated_events"] = storage.count_truncated()
 
     if as_json:
         click.echo(json.dumps(data, indent=2))
@@ -1253,6 +1331,13 @@ def stats(since, as_json):
 
     period = f" (since {since})" if since else ""
     console.print(f"\n[bold]Selvedge tool call stats[/bold]{period}\n")
+
+    if data["truncated_events"]:
+        console.print(
+            f"  [yellow]{data['truncated_events']} event(s) truncated[/yellow] "
+            "[dim]— raise diff_bytes / reasoning_bytes in .selvedge/config.toml, "
+            "or log more concisely[/dim]"
+        )
 
     if total == 0:
         console.print("  [dim]No tool calls recorded yet.[/dim]")
@@ -1424,6 +1509,11 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
         err_console.print(f"[red]error:[/red] {e}")
         sys.exit(2)
 
+    # Size bounds + secret-shape check, shared with the MCP write path so
+    # the two can't drift. Runs before the write, so what gets stored is what
+    # the warnings describe.
+    diff_text, reasoning, limit_warnings = apply_event_limits(diff_text, reasoning)
+
     storage = get_storage()
     # Record on the shared coverage counter, mirroring the MCP `log_change`
     # tool. Without this `selvedge stats` counted CLI *reads* in the
@@ -1505,7 +1595,8 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
 
     # Surface reasoning-quality + entity-path-shape + revisit-date warnings so
     # manual entries get the same nudges that agent-driven log_change calls do.
-    warnings = check_reasoning_quality(reasoning)
+    warnings = list(limit_warnings)
+    warnings += check_reasoning_quality(reasoning)
     warnings += check_entity_path_shape(stored.entity_path, stored.entity_type)
     warnings += check_revisit_nudge(
         stored.change_type, stored.entity_type, stored.revisit_after

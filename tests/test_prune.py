@@ -13,6 +13,7 @@ from click.testing import CliRunner
 
 from selvedge import prune as prune_mod
 from selvedge.cli import cli
+from selvedge.models import ChangeEvent
 from selvedge.storage import SelvedgeStorage
 
 
@@ -146,12 +147,20 @@ def test_last_prune_line_handles_missing_log(tmp_path):
 
 
 def test_prune_cli_json_shape(runner, db_path):
-    """``--json`` output is exactly :meth:`PruneResult.to_dict`."""
+    """``--json`` is :meth:`PruneResult.to_dict` plus an ``events`` block.
+
+    ``events`` is always present and empty unless ``--include-events`` ran —
+    the house "every field always populated, never null" convention, so a
+    caller never has to branch on key presence.
+    """
     SelvedgeStorage(db_path)
     result = runner.invoke(cli, ["prune", "--json"])
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert set(payload.keys()) == {"pruned", "days_threshold", "cutoff", "log_path"}
+    payload = json.loads(result.stdout)
+    assert set(payload.keys()) == {
+        "pruned", "days_threshold", "cutoff", "log_path", "events",
+    }
+    assert payload["events"] == {}
     assert payload["days_threshold"] == prune_mod.DEFAULT_DAYS
     assert Path(payload["log_path"]).is_file()
 
@@ -163,3 +172,130 @@ def test_prune_cli_human_output(runner, db_path):
     assert result.exit_code == 0, result.output
     assert "Pruned" in result.output
     assert "1" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --include-events — the destructive path (v0.3.10)
+#
+# Two independent gates, because each has a known bypass on its own: a prompt
+# is defeated by `--yes` in a cron entry, an env var by a shell profile that
+# exports it and forgets.
+# ---------------------------------------------------------------------------
+
+
+def test_cron_footgun_yes_without_destructive_env_errors(runner, db_path, monkeypatch):
+    """--yes must NOT be sufficient. Named in the phase doc on purpose.
+
+    This is the exact shape of the accident the two-gate rule exists to
+    prevent: a scheduled job that passes --yes to avoid hanging on a prompt,
+    and thereby deletes captured reasoning unattended. Do not retire this test
+    in a suite cleanup — the name is referenced from
+    `docs/architecture.md` § Phase 2.16.
+    """
+    monkeypatch.delenv("SELVEDGE_DESTRUCTIVE", raising=False)
+    storage = SelvedgeStorage(db_path)
+    storage.log_event(ChangeEvent(
+        entity_path="users.email", change_type="add",
+        timestamp="2020-01-01T00:00:00Z", reasoning="ancient but precious"))
+
+    result = runner.invoke(
+        cli, ["prune", "--include-events", "--event-days", "1", "--yes"]
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "SELVEDGE_DESTRUCTIVE" in result.stderr
+    assert storage.count() == 1, "events were deleted with only --yes"
+
+
+def test_destructive_env_alone_still_prompts(runner, db_path, monkeypatch):
+    """The other half: the env var alone must not delete without confirmation."""
+    monkeypatch.setenv("SELVEDGE_DESTRUCTIVE", "1")
+    storage = SelvedgeStorage(db_path)
+    storage.log_event(ChangeEvent(
+        entity_path="users.email", change_type="add",
+        timestamp="2020-01-01T00:00:00Z", reasoning="ancient but precious"))
+
+    # Answer "no" at the prompt.
+    result = runner.invoke(
+        cli, ["prune", "--include-events", "--event-days", "1"], input="n\n"
+    )
+
+    assert result.exit_code == 1
+    assert storage.count() == 1, "events were deleted despite declining the prompt"
+
+
+def test_both_gates_satisfied_deletes_old_events(runner, db_path, monkeypatch):
+    monkeypatch.setenv("SELVEDGE_DESTRUCTIVE", "1")
+    storage = SelvedgeStorage(db_path)
+    storage.log_event(ChangeEvent(
+        entity_path="users.old", change_type="add",
+        timestamp="2020-01-01T00:00:00Z", reasoning="old enough to prune"))
+    storage.log_event(ChangeEvent(
+        entity_path="users.new", change_type="add",
+        reasoning="logged just now, must survive"))
+
+    result = runner.invoke(
+        cli, ["prune", "--include-events", "--event-days", "1"], input="y\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert storage.count() == 1
+    assert storage.get_history()[0]["entity_path"] == "users.new"
+
+
+def test_events_prune_is_recorded_in_the_audit_log(runner, db_path, monkeypatch):
+    monkeypatch.setenv("SELVEDGE_DESTRUCTIVE", "1")
+    storage = SelvedgeStorage(db_path)
+    storage.log_event(ChangeEvent(
+        entity_path="users.old", change_type="add",
+        timestamp="2020-01-01T00:00:00Z", reasoning="old"))
+
+    runner.invoke(cli, ["prune", "--include-events", "--event-days", "1", "--yes"],
+                  input="y\n")
+
+    log = prune_mod.prune_log_path(db_path)
+    lines = log.read_text().splitlines()
+    events_lines = [ln for ln in lines if "\tevents\t" in ln]
+    assert events_lines, f"no events line in prune.log: {lines}"
+    stamp, marker, pruned, days = events_lines[-1].split("\t")
+    assert marker == "events"
+    assert pruned == "1"
+    assert days == "1"
+
+
+def test_default_events_retention_never_deletes(runner, db_path, monkeypatch):
+    """`retention_days_events` defaults to infinity, and that must hold."""
+    monkeypatch.setenv("SELVEDGE_DESTRUCTIVE", "1")
+    storage = SelvedgeStorage(db_path)
+    storage.log_event(ChangeEvent(
+        entity_path="users.ancient", change_type="add",
+        timestamp="2010-01-01T00:00:00Z", reasoning="a decade old"))
+
+    result = runner.invoke(cli, ["prune", "--include-events", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert storage.count() == 1, "the default retention deleted an event"
+    assert "never delete" in result.stderr
+
+
+def test_run_events_prune_rechecks_the_env_itself(db_path, monkeypatch):
+    """The storage-adjacent entry point does not take the caller's word."""
+    monkeypatch.delenv("SELVEDGE_DESTRUCTIVE", raising=False)
+    SelvedgeStorage(db_path)
+    with pytest.raises(prune_mod.DestructiveNotPermitted, match="SELVEDGE_DESTRUCTIVE"):
+        prune_mod.run_events_prune(db_path, days=1)
+
+
+def test_prune_events_storage_method_is_unguarded_by_design(db_path):
+    """Policy lives in `prune`, not in storage — assert they stay separate.
+
+    A storage method that also enforced policy would be two things that can
+    disagree; this pins the split so a later "safety" patch in the wrong
+    layer is a visible decision.
+    """
+    storage = SelvedgeStorage(db_path)
+    storage.log_event(ChangeEvent(
+        entity_path="users.old", change_type="add",
+        timestamp="2020-01-01T00:00:00Z", reasoning="old"))
+    assert storage.prune_events("2021-01-01T00:00:00Z") == 1
+    assert storage.count() == 0

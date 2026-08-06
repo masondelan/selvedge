@@ -132,6 +132,42 @@ CREATE_INDEXES_SQL = [
 _LIKE_ESCAPE = "\\"
 
 
+# Marker appended to an oversized field so truncation is visible in the
+# stored text itself, not just inferable from a byte count. `count_truncated`
+# and `selvedge stats` both key off it.
+_TRUNCATION_SENTINEL = "…[truncated "
+
+
+def truncate_field(text: str, max_bytes: int) -> tuple[str, int]:
+    """Clip ``text`` to ``max_bytes`` UTF-8 bytes, returning (text, dropped).
+
+    ``max_bytes <= 0`` means no limit. The marker records how much went
+    missing, so a reader of the stored event can tell the difference between
+    reasoning that was terse and reasoning that was cut off.
+
+    Truncation is on an encoded-byte boundary, then decoded with
+    ``errors="ignore"`` so a multi-byte character split by the cut is dropped
+    rather than stored as a replacement character.
+    """
+    if max_bytes <= 0 or not text:
+        return text, 0
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text, 0
+    dropped = len(encoded) - max_bytes
+    kept = encoded[:max_bytes].decode("utf-8", errors="ignore")
+    return f"{kept}{_TRUNCATION_SENTINEL}{_human_bytes(dropped)}]", dropped
+
+
+def _human_bytes(n: int) -> str:
+    """Byte count as a short human string — `12KB`, `3.4MB`."""
+    if n < 1024:
+        return f"{n}B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.0f}KB"
+    return f"{n / (1024 * 1024):.1f}MB"
+
+
 def _escape_like(s: str) -> str:
     """Escape LIKE wildcards in user input. Pair with ``ESCAPE '\\'`` in SQL."""
     return (
@@ -896,6 +932,34 @@ class SelvedgeStorage:
             return conn.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0]
 
     @_retry_on_locked
+    def count_events_before(self, cutoff: str) -> int:
+        """How many events an events-prune would delete.
+
+        Read-only, and shown in the confirmation prompt: "delete 412 events"
+        is a decision a user can actually make; "delete old events" is not.
+        """
+        with self._session() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM events WHERE timestamp < ?", (cutoff,)
+            ).fetchone()[0]
+
+    @_retry_on_locked
+    def prune_events(self, cutoff: str) -> int:
+        """Delete ``events`` rows older than ``cutoff`` (exclusive).
+
+        The only method in this class that destroys captured reasoning. It is
+        deliberately dumb — no gating, no prompting — because the gates belong
+        where the user is, in :mod:`selvedge.prune`, and a storage method that
+        also enforced policy would be two things that can disagree.
+
+        Callers must satisfy both the confirmation and ``SELVEDGE_DESTRUCTIVE``
+        gates first; :func:`selvedge.prune.run_events_prune` is the supported
+        entry point and re-checks the environment itself.
+        """
+        with self._session() as conn:
+            cursor = conn.execute("DELETE FROM events WHERE timestamp < ?", (cutoff,))
+            return cursor.rowcount
+
     def prune_tool_calls(self, cutoff: str) -> int:
         """Delete ``tool_calls`` rows older than ``cutoff`` (exclusive).
 
@@ -1196,6 +1260,35 @@ class SelvedgeStorage:
         """Total number of change events logged."""
         with self._session() as conn:
             return conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+
+    def count_truncated(self) -> int:
+        """How many events carry a truncation marker (v0.3.10).
+
+        `selvedge stats` surfaces this so oversized-and-clipped reasoning is
+        visible rather than silently lossy — the risk the size bounds trade
+        against.
+        """
+        pattern = f"%{_TRUNCATION_SENTINEL}%"
+        with self._session() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM events WHERE diff LIKE ? OR reasoning LIKE ?",
+                (pattern, pattern),
+            ).fetchone()[0]
+
+    def scan_events_for_text(self, limit: int = 5000) -> list[dict]:
+        """Newest events with just the free-text fields, for the secret scan.
+
+        Deliberately narrow: `selvedge doctor` needs id / timestamp /
+        entity_path / reasoning / diff and nothing else, and this can run over
+        a large store.
+        """
+        with self._session() as conn:
+            rows = conn.execute(
+                "SELECT id, timestamp, entity_path, reasoning, diff FROM events "
+                "ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def find_case_collisions(self) -> list[dict]:
         """Return groups of distinct entity_paths that differ only by case.

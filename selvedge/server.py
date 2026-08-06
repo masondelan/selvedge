@@ -51,6 +51,7 @@ from .presenters import (
 from .storage import SelvedgeStorage
 from .timeutil import normalize_revisit_after, parse_time_string
 from .validation import (
+    apply_event_limits,
     check_entity_path_shape,
     check_reasoning_quality,
     check_revisit_nudge,
@@ -433,6 +434,11 @@ def log_change(
     except ValueError as e:
         return _error(str(e))
 
+    # Size bounds + secret-shape check, shared with the CLI write path.
+    # Runs before the event is built so what gets stored is what the
+    # warnings describe.
+    diff, reasoning, limit_warnings = apply_event_limits(diff, reasoning)
+
     try:
         if rename_from:
             # Dual-event rename: rename(old) + create(new, metadata.renamed_from).
@@ -491,7 +497,8 @@ def log_change(
     except ValueError as e:
         return _error(str(e))
 
-    warnings = check_reasoning_quality(reasoning)
+    warnings = list(limit_warnings)
+    warnings += check_reasoning_quality(reasoning)
     warnings += check_entity_path_shape(stored.entity_path, stored.entity_type)
     warnings += check_revisit_nudge(
         stored.change_type, stored.entity_type, stored.revisit_after

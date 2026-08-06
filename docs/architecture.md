@@ -910,15 +910,34 @@ github.com).
   so it carries none of the v0.4.x backend/rename risk. The displaced
   developer-ergonomics surface is re-homed in Phase 2.22, not dropped.
 
-### Phase 2.16 — Config + advanced retention (v0.3.10)
-> First-class `.selvedge/config.toml` lands here, paired with the
-> destructive prune path (which has needed somewhere to read events
-> retention from) and event-size bounds (which has needed somewhere
-> to read truncation limits from). All three features chain on
-> config.toml; deferring config.toml from v0.3.5 lets the grammar
-> settle in one release rather than expanding it across five.
-> Theme: *configuration as a foundation, with the dependent features
-> riding alongside.*
+### Phase 2.16 — Config + delivery (v0.3.10)
+> **A deliberate two-theme release — the second exception to the
+> single-theme rule and, like v0.3.6, explicitly not precedent.**
+> The config half was already queued here: first-class
+> `.selvedge/config.toml`, paired with the destructive prune path
+> (which needs somewhere to read events retention from) and
+> event-size bounds (which need somewhere to read truncation limits
+> from). All three chain on config.toml; deferring config.toml from
+> v0.3.5 lets the grammar settle in one release rather than
+> expanding it across five.
+>
+> The delivery half responds to the strongest external critique of
+> the read path: two independent 2026 papers — "Delivery, Not
+> Storage" (arXiv 2607.20972) and PROJECTMEM (arXiv 2606.12329) —
+> measured pull-model memory tools going unused (zero voluntary
+> memory operations in 114 turns, pre-seeded store) while
+> deterministic injection landed every time. Selvedge already ships
+> the gate half: the v0.3.9.1 PreToolUse hook blocks re-edits of
+> reverted entities with the prior reasoning inlined in the block
+> message. What's missing is delivery when there is nothing to veto
+> — at session start, and at the moment compaction destroys the
+> session's reasoning. The two halves ship together rather than
+> renumbering every downstream phase (that trade was already
+> rejected once, 2026-05-10) — the delivery items are small,
+> hook-shaped, and tool-count-neutral, and the config and delivery
+> commit series stay separate so either half can revert alone.
+> Theme: *the memory comes to the agent, and the store gets its
+> dials.*
 
 - [ ] **`.selvedge/config.toml`** — first-class project config,
       read on every entry point. Houses `retention_days_events`
@@ -951,10 +970,110 @@ github.com).
       surfacing.** Warns when DB exceeds `db_size_warn_mb`; doctor's
       config-precedence output shows the source of each effective
       setting (the same shape as the existing DB-path precedence).
+- [ ] **`redaction_patterns` in config.toml + warn-never-reject
+      secret-shape check.** The cross-cutting risk register
+      ("Reasoning text is stored verbatim…") names v0.3.10 as this
+      mitigation's durable endpoint. A small conservative default
+      set of secret-shaped patterns (key-like strings, bearer/token
+      shapes), extendable via `redaction_patterns` in config.toml,
+      checked at `log_change` write time into the existing
+      `warnings` list — warn, never reject, same posture as the
+      reasoning-quality validator — plus a `doctor` row that scans
+      stored reasoning/diffs and reports hits. No new dependency,
+      no new result type.
+- [ ] **Session-start delivery hook.** New hook entry point
+      (following the existing hooks CLI convention from
+      `selvedge/hooks/`) that emits a compact, deterministic digest
+      when a session begins, via the harness's context-injection
+      output: decisions due for revisit, currently-reverted
+      entities with prior attempts, most recent changesets.
+      **Quiet by default** — emits nothing when there is nothing to
+      say, hard size cap (config.toml key), templated output only.
+      Registered in the plugin's hook config and offered by
+      `selvedge setup`. This is the injection channel that needs no
+      veto — the counterpart to the PreToolUse gate, and the direct
+      answer to the measured pull-tool-goes-unused failure mode.
+- [ ] **Pre-compact flush hook.** Fires before the harness compacts
+      context — the moment session reasoning is destroyed — and
+      reminds the agent to `log_change` decisions made this session
+      that aren't yet in the store (referencing the session's
+      touched-but-unlogged watched entities where the hook session
+      state can supply them). **Advisory only — never blocks
+      compaction.** The hook API allows a veto; Selvedge doesn't
+      use it (false-block discipline). Verify the exact output
+      fields against the current Claude Code hooks docs at
+      implementation time — the hook surface moves faster than its
+      docs.
+- [ ] **`selvedge export --format markdown`** — human-readable,
+      deterministically-ordered digest of the store (decisions
+      grouped by entity, reverted/rejected paths surfaced first,
+      stable heading anchors), designed to be committed next to
+      `.selvedge/` so captured intent is reviewable in any diff
+      viewer. The direct answer to the ".selvedge is a binary,
+      non-reviewable artifact" critique. Templated, zero-LLM, no
+      new MCP tool.
+- [ ] **One canonical description, everywhere, enforced.** The repo
+      carries four different one-liners and none is canonical:
+      `pyproject.toml` (old "Change tracking for AI-era codebases"
+      line — and its `description` becomes the PyPI summary, which
+      downstream directory cards echo verbatim), `server.json`,
+      `manifest.json` / `.claude-plugin/plugin.json` (long variant
+      — `manifest.json`'s copy still embeds "New in v0.3.9.2"),
+      and `npm/package.json` (a fourth variant that leads with the
+      blame metaphor and "captured live" — the two framings
+      `docs/positioning.md` explicitly demotes);
+      `.claude-plugin/marketplace.json` uses the old line in both
+      fields. Fix at the root: derive the
+      canonical short line from `docs/positioning.md` approved
+      phrasing, carrying the terms searchers actually use (decision
+      provenance, blame, rejected approaches, audit trail, the
+      "why"), and set it identically in `pyproject.toml`,
+      `server.json`, `.claude-plugin/plugin.json`,
+      `.claude-plugin/marketplace.json`, and `npm/package.json`.
+      The `manifest.json` long variant may elaborate but must
+      contain the canonical line and no release-specific "New in
+      vX" text. **Enforced like version sync**: a description-sync
+      test beside `test_version_sync_across_manifests`, plus an
+      assertion that no manifest description embeds "New in v".
+      Same discipline for the README CI snippet: the
+      `uses: masondelan/selvedge@vX.Y.Z` action pin joins the
+      version-bump surfaces with a hygiene test grepping it
+      against the current version — it sat at v0.3.9 through
+      three point releases, stale and (post-mcp-2.0)
+      non-installable.
+- [ ] **Registry latest-pointer fix rides the version number.**
+      The official registry's latest-resolution is semver-shaped
+      and can't rank four-segment PEP 440 releases above `0.3.9`,
+      so `?version=latest` serves 0.3.9 — the one release that
+      dies at import (unbounded `mcp>=1.0.0` resolves mcp 2.0.0,
+      which removed `mcp.server.fastmcp`). The most authoritative
+      directory is routing every "latest" resolver around the fix
+      that 0.3.9.3 exists to deliver. Publishing three-segment
+      0.3.10 is the durable correction. Post-publish check is
+      mandatory: confirm the registry marks 0.3.10 `isLatest`;
+      if it doesn't, file upstream with the version list as the
+      repro.
+- [ ] **Positioning rollout (release-blocker, v0.3.7 pattern).**
+      `docs/positioning.md` (2026-07-26) is the source of truth:
+      commit it; reorder the README hero + "How Selvedge compares"
+      (rejected paths lead, determinism the wedge, liveness
+      demoted); correct the Git AI mechanism row (agent-invoked
+      checkpoint → Git notes, not hooks); disambiguate the two
+      AgentDiffs by owner/URL; add the Origin / BlamePrompt URLs
+      the compare page references; state the posture line —
+      *local-first by default, team-server by choice, zero-LLM
+      always* — in the README and this doc's non-goals. Site PR
+      follows as the propagation step.
 - [ ] **Tests** — `test_config_precedence.py` (~8),
       `test_prune.py::test_cron_footgun_yes_without_destructive_env_errors`
       and the events-prune suite (~10),
-      `test_event_size_bounds.py` (~6). Soft budget: ≤25 new tests.
+      `test_event_size_bounds.py` (~6), redaction warn-path (~5),
+      `test_hooks_sessionstart.py` / `test_hooks_precompact.py`
+      (~12: quiet-when-empty, size cap, lazy-import latency budget,
+      advisory-not-veto), `test_export_markdown.py` determinism +
+      anchor stability (~6). Soft budget: **≤45 new tests** — an
+      overrun against the standard ≤25, called out per the budget
+      discipline because two themes share the release.
 
 #### Risks acknowledged & mitigations
 
@@ -975,6 +1094,26 @@ github.com).
 - **Truncation silently losing high-stakes reasoning**: surfaced as
   validator warning at write time; `selvedge stats` counts
   truncated events so the pattern is visible.
+- **Injection noise**: "Why Git Is the Memory Solution" (arXiv
+  2607.14390) measures ungated episode injection degrading good
+  answers. The session-start digest is relevance-gated (due /
+  reverted / recent only), size-capped, and silent when empty —
+  delivery inherits the same precision-over-recall posture as the
+  gate.
+- **Hook latency compounding**: two new hooks must not reintroduce
+  the import tax issue #20 removes. Both follow the lazy-import
+  discipline (heavy imports below the nothing-to-do early return),
+  each with a latency assertion in its test suite.
+- **Pre-compact veto misuse**: the hook API can block compaction;
+  Selvedge never does. Advisory-only is asserted in tests.
+- **Two-theme rollback blast radius**: the acknowledged cost of the
+  combine — mitigated by the config half and the delivery half
+  landing as separate atomic commit series, so either can be
+  reverted without dragging the other.
+- **Redaction false positives**: warn-never-reject, and the default
+  pattern set ships conservative. A missed secret shape costs a
+  warning that didn't fire; a false warning on every write teaches
+  agents to ignore the warnings list.
 
 ### Phase 2.17 — Active memory v2 / semantic (v0.3.11)
 > The pattern-based half of active memory. The `expires_when` column
@@ -1090,6 +1229,29 @@ github.com).
       enforcement remains deferred (no version commitment) until
       telemetry shows what natural reasoning-quality distributions
       look like — Goodhart-trap defense.
+- [ ] **Context-cost claims, CI-verified.** `scripts/schema_tax.py`
+      wired into CI as a drift guard (`--max`, already used
+      locally) and `docs/coding-agents.md` finished as the
+      published context-cost page: the MCP tool surface measured
+      (~2.6–3.4k tokens resident), the CLI path's ~zero static
+      cost, and every public number stated as a CI-verified bound
+      regenerated by the script — not a hand-measured hero figure.
+      This is a positioning claim made machine-checkable, which is
+      this phase's whole theme. What replicates in the 2026
+      literature is cost/latency at accuracy parity, so the
+      economics page *is* the evidence surface.
+- [ ] **`dev.selvedge` namespace as a stable contract, proposed
+      upstream.** The v0.3.9 Agent Trace exporter already emits
+      reasoning + entity provenance under
+      `metadata["dev.selvedge"]`. Document that namespace as a
+      versioned public contract in `docs/agent-trace-interop.md`
+      (field-by-field, semver'd), then propose it upstream on
+      `cursor/agent-trace` as a rationale-resolution pattern for
+      the spec's declared gap — Agent Trace records point at a
+      `url` for the conversation and deliberately don't define
+      what lives there; a documented rationale namespace is the
+      complement, from a shipping producer (the existing producer
+      issue #32 is the open thread).
 
 ##### Git-import provenance + trust tiers
 > Follow-up to the v0.3.9.1 git-import feature, from design feedback on the
@@ -1388,6 +1550,111 @@ github.com).
   final relationship to the `summary` MCP tool with the CLI surface
   already in hand.
 
+### Phase 2.23 — Capture coverage: cross-harness delivery (v0.3.17)
+> The delivery loop (gate + session-start + pre-compact) is
+> Claude-Code-shaped as of v0.3.10. This phase ports the
+> capture/delivery contract to other harnesses, answering the one
+> real coverage gap in the capture story: an agent that never calls
+> the tool never writes the memory, and a harness with no hook wired
+> never gates or delivers. Cursor first — its hooks API is shipped
+> and documented, with pre-execution events and completed-thought
+> surfaces. Microsoft's Agent Host Protocol second, as an explicit
+> spike — a DRAFT protocol carrying a totally-ordered event stream
+> across four harnesses (Copilot / Claude / Codex / ACP), where one
+> integration covers all four but "breaking changes expected" is in
+> the spec's own words. Theme: *same store, same discipline, more
+> harnesses.*
+
+- [ ] **Adapter contract doc** — what a harness must expose for
+      capture/delivery parity: a pre-write gate point, a
+      session-start injection point, a pre-destruction (compact)
+      point, and a place to run the `selvedge` CLI. Written against
+      the harnesses surveyed; becomes the checklist any new adapter
+      PR fills in, so adapters accrete against a contract instead
+      of ad hoc.
+- [ ] **Cursor hooks adapter** — gate + delivery parity where
+      Cursor's hook surface allows, wiring the existing hooks CLI
+      into Cursor's hook config the way the plugin does for Claude
+      Code. `selvedge setup` and the 2.22 setup-detection version
+      contract learn the Cursor hook config path.
+- [ ] **AHP watcher — a spike, explicitly.** Evaluate what
+      *deterministic* capture and delivery the AHP event stream
+      supports: ordered tool/file events are low-tier provenance
+      (the 2.18 trust-tier language applies — derived events, not
+      testimony), and the protocol's channels may carry injection.
+      Anything that degrades into inferring decisions from events
+      is out — that's the LLM-shaped hole the non-goals forbid.
+      Timeboxed; ends in a written promote-or-park verdict either
+      way.
+- [ ] **Tests** — adapter-contract conformance suite for the
+      Cursor path (~15), spike artifacts excluded from the suite.
+      Soft budget: ≤25 new tests.
+
+#### Risks acknowledged & mitigations
+
+- **AHP protocol churn**: DRAFT status with breaking changes
+  expected — hence spike-classified, no ship commitment, verdict
+  written down either way so the defer is visible.
+- **Cursor config path drift**: third-party config paths treated as
+  a versioned contract (the 2.22 mechanism), surfaced by doctor as
+  WARN with a remediation hint.
+- **Adapter sprawl**: the contract doc gates new adapters; a
+  harness that can't meet the contract gets a documented partial
+  integration, not a bespoke fork of the hook logic.
+
+### Phase 2.24 — SelvedgeBench: failure-avoidance evaluation (v0.3.18)
+> No published benchmark isolates "given memory of a prior failed
+> attempt, does the agent avoid repeating it?" on real repos with a
+> memory-ablated control — the closest prior art (BenchTrace's
+> failure-avoidance-rate metric, arXiv 2605.29225) stops at
+> reflection quality. A first-of-kind claim is available, and the
+> bar for 2026 reviewers is known: a token-matched control arm and
+> reported write-path cost, because three independent 2026 studies
+> found memory modules failing token-matched baselines on accuracy
+> while cost/latency-at-parity results replicate. This phase is
+> also the honest test of the entity-granularity bet: fine-grained
+> memory organization is unoccupied territory with a measured
+> warning attached (arXiv 2604.27003 — strong forward transfer can
+> coexist with induced forgetting). Measure it before it becomes a
+> headline claim. Theme: *the claim, measured, against a control.*
+
+- [ ] **Task substrate** — failed-attempt scenarios derived from
+      real repository histories (revert-then-retry cycles; the 2.18
+      git-import trust-tier work supplies exactly these,
+      re-derivably) plus tasks in the style of the public
+      code-agent benchmarks.
+- [ ] **Metrics** — failure-repeat rate with memory, memory-ablated,
+      and token-matched-context arms; write-path token and latency
+      cost reported alongside every result, not in an appendix.
+- [ ] **Harness placement** — separate repo or `bench/` directory,
+      decided at spike start (separate repo keeps the core
+      dependency footprint clean). CLI support lands in the package
+      only if the bench needs a stable export surface that doesn't
+      already exist.
+- [ ] **Entity-granularity ablation** — the same tasks run at
+      file-level vs entity-level memory, so the granularity claim
+      gets a number attached (in either direction).
+- [ ] **Written result, whatever the outcome** — including a
+      negative or mixed result. Audience: the SE-research cluster
+      measuring agent-context decay and the agent-memory workshop
+      venue that now exists for exactly this.
+- [ ] **Tests** — harness-internal; core-package test delta near
+      zero. Soft budget: ≤20.
+
+#### Risks acknowledged & mitigations
+
+- **Benchmarking your own product**: the memory-ablated and
+  token-matched control arms are the defense, plus full published
+  methodology and negative results shipping with the same
+  prominence as positive ones.
+- **Goodhart by construction**: the bench exists to measure, not to
+  market; if the number is bad, the number publishes and the
+  roadmap reacts — that is the point of running it before the
+  claim leads anywhere.
+- **Eval cost creep**: timeboxed passes, sample sizes stated up
+  front, and no leaderboard ambitions — one rigorous result beats
+  a maintained ranking.
+
 ### Phase 3 — Backend rewrite + tool rename (v0.4.0)
 > First release in the breaking-changes window. Bundles the storage
 > backend abstraction and the deferred MCP tool-name rename so users
@@ -1427,6 +1694,18 @@ github.com).
       `DEPRECATED_UNTIL_VERSION` is reached without the alias
       being removed. The "one minor cycle" deprecation promise is
       enforceable, not aspirational.
+- [ ] **`mcp` SDK 2.x migration.** Pinned `mcp<2.0.0` since
+      v0.3.9.3 (2.0.0 removed `mcp.server.fastmcp` and broke the
+      server at import). The 2026-07-28 protocol revision is a
+      stateless rewrite — initialize handshake and `Mcp-Session-Id`
+      removed, Roots and Sampling deprecated, MCP-native logging
+      deprecated in favor of OpenTelemetry, W3C Trace Context in
+      `_meta`. Selvedge's stdio-local posture is the least-affected
+      case, and SEP-2596 guarantees ≥12-month deprecation windows,
+      so the migration is not urgent — but it is breaking-shaped,
+      which makes this release (the declared breaking-change
+      window) its home. Migrate the server to the 2.x SDK here,
+      bundled with the other breaks.
 - [ ] **Tests** — `test_storage_protocol.py` for the contract
       (~12), `test_storage_pg.py` against a PostgreSQL test fixture
       (~15), `test_linked_projects.py` extension for the rewritten
@@ -1461,7 +1740,14 @@ github.com).
 
 - [ ] **HTTP REST API layer (FastAPI)** — exposes every MCP server
       operation over HTTP. Endpoint list reflects whatever the
-      v0.4.0 tool-consolidation review produced.
+      v0.4.0 tool-consolidation review produced. **Designed against
+      the 2026-07-28 stateless protocol core**: no session
+      affinity, every request self-contained, W3C Trace Context
+      accepted and propagated — the protocol has ceded
+      observability to OpenTelemetry, so the HTTP layer meets it
+      there rather than inventing a parallel scheme (the
+      decision-phase span mapping is tracked under "Standards
+      participation").
       **`test_http_protocol.py` is a release-blocker for v0.4.1** —
       boots a real `selvedge-server-http` subprocess (parallel to
       the existing `test_mcp_protocol.py`) and round-trips every
@@ -1548,6 +1834,43 @@ github.com).
 
 ---
 
+## Standards participation (no version assigned)
+
+Three standards surfaces currently define a slot Selvedge's data
+model fills, and none of them has an occupant. Participation is
+public engineering work on external timelines, so it carries no
+version number — but each item below names a concrete artifact, and
+progress gets reviewed at each release alongside the phase plan.
+
+- **MCP Enterprise Readiness WG — audit trails.** The MCP 2026
+  roadmap names enterprise readiness as its least-defined priority,
+  scoped verbatim to "audit trails, SSO-integrated authentication,
+  gateway behavior, configuration portability," expected to ship as
+  Extensions (reverse-DNS namespaces) rather than core spec, with a
+  working group publicly recruiting. An append-only, locally-owned
+  change ledger with provenance tiers (Phase 2.18) is directly
+  relevant prior art. Artifact: participate in the WG; track an
+  audit-trail extension proposal under the Extensions framework.
+- **Agent Trace — rationale-resolution namespace.** The spec
+  (v0.1.0, RFC) defines where AI code came from and points at a
+  `url` for the conversation, deliberately declining to define what
+  lives there. Selvedge has shipped `metadata["dev.selvedge"]`
+  since v0.3.9. Artifact: the versioned namespace contract in
+  `docs/agent-trace-interop.md` plus the upstream proposal (Phase
+  2.18 carries both) — a rationale-resolution pattern offered from
+  a shipping producer, on the open producer thread (#32).
+- **OpenTelemetry GenAI — `gen_ai.plan.internal`.** The semantic
+  conventions define a plan span as "the decision phase where an
+  agent formulates a strategy before executing it," with no
+  attribute for the rationale content itself; the repo is in
+  Development status. With MCP deprecating its own logging in favor
+  of OTel, this span is where decision-phase telemetry converges.
+  Artifact: a proposed rationale-content attribute (or a documented
+  mapping from Selvedge events to the span), filed while the
+  conventions are still forming.
+
+---
+
 ## Cross-cutting risk register
 
 Each phase carries its own "Risks acknowledged & mitigations" subsection
@@ -1605,13 +1928,15 @@ release-scope restructure (2026-05-10) replaced 4 broad phases with
 | 2.13 | v0.3.7  | ≤ 40 new tests (entity foundation + wedge share the release) |
 | 2.14 | v0.3.8  | ≤ 25 new tests |
 | 2.15 | v0.3.9  | ≤ 20 new tests (Agent Trace export, pulled forward from 3.2; actual 25) |
-| 2.16 | v0.3.10 | ≤ 25 new tests |
+| 2.16 | v0.3.10 | ≤ 45 new tests (two-theme combine: config + delivery; overrun called out) |
 | 2.17 | v0.3.11 | ≤ 25 new tests |
-| 2.18 | v0.3.12 | ≤ 20 new tests |
+| 2.18 | v0.3.12 | ≤ 35 new tests (raised to absorb the git-import cluster + context-cost CI) |
 | 2.19 | v0.3.13 | ≤ 30 new tests |
 | 2.20 | v0.3.14 | ≤ 25 new tests |
 | 2.21 | v0.3.15 | ≤ 15 new tests (conditional ship) |
 | 2.22 | v0.3.16 | ≤ 30 new tests (developer ergonomics, deferred from v0.3.9) |
+| 2.23 | v0.3.17 | ≤ 25 new tests (cross-harness adapters; spike work excluded) |
+| 2.24 | v0.3.18 | ≤ 20 new tests (bench harness-internal; core delta ~0) |
 | 3    | v0.4.0  | ≤ 50 new tests |
 | 3.1  | v0.4.1  | ≤ 30 new tests |
 | 3.2  | v0.4.2  | — (delivered early in v0.3.9 / Phase 2.15) |
@@ -1621,10 +1946,14 @@ typically a perf-regression suite (test_migrations_perf,
 test_linked_projects_perf) or a new protocol smoke test
 (test_http_protocol). Budget overruns aren't a failure; they're a
 visibility signal that the phase scope grew or that the test design
-needs review. Aggregate cap target at v0.4.2 ship: ~700 tests
-(versus ~500 in the original plan; the release-scope restructure
-shifted total test surface up because each release ships with
-narrower scope but the same coverage discipline).
+needs review. Aggregate reality check, 2026-08: the v0.3.9.x
+point-release series (hook, plugin, and the 2026-08-01 review
+closeout) landed outside the phase-budget system and put the suite
+at **826 by v0.3.9.3** — already past the old ~700 projection for
+v0.4.2. Revised aggregate expectation at v0.4.2 ship: ~1,000 tests,
+with the per-phase soft budgets above still governing *planned*
+feature work; point-release fix series are exempt but visible (each
+carries its count in the release notes).
 
 ### MCP tool count discipline
 
@@ -1745,9 +2074,9 @@ the mitigation is the failure mode.
 
 v0.3.5 → v0.4.2 spans roughly a year of solo-maintainer effort under
 the new release-scope discipline. The 2026-05-10 restructure traded
-4 broad phases for 14 narrower ones; calendar time is roughly similar
-but ship
-rate increases from ~5 releases per year to ~14 per year. Ship rate
+4 broad phases for 14 narrower ones (16 after the 2026-08-05
+additions of Phases 2.23 and 2.24); calendar time is roughly similar
+but ship rate increases from ~5 releases per year to ~14 per year. Ship rate
 is itself a defense — "actively maintained, fast-evolving" reads
 differently from "big-bang every quarter."
 
@@ -1774,6 +2103,12 @@ selvedge --version
 
 ## Non-goals (through Phase 2)
 
+- **Stated posture — local-first by default, team-server by choice,
+  zero-LLM always.** The Phase 3 / 3.1 / 4 track adds a team-server
+  *option*; it never changes the default. Written down here so the
+  roadmap can't quietly imply otherwise: the local, dependency-light,
+  deterministic single-user path stays the product, and every
+  backend/HTTP/hosted feature is additive to it.
 - No web UI (Phase 4)
 - No PostgreSQL (Phase 3)
 - No authentication (Phase 3)
@@ -1800,12 +2135,18 @@ issue exists, (b) a named owner commits to a 90-day shipping
 review, and (c) the extension repo has been created. Until then,
 roadmap noise.
 
-**Push-model `prior_attempts` variant.** Currently pull-only.
-The push model would auto-warn on `log_change` when the entity
-has prior rejected attempts. Deferred until pull-tool adoption
-signal shows agents actually act on what `prior_attempts` returns.
-If agents ignore the pull tool, the push tool is noise; if they
-act on it, the push tool is leverage.
+**Push-model `prior_attempts` variant.** ~~Deferred until pull-tool
+adoption signal.~~ **Resolved in stages, faster than the defer
+anticipated.** The gate half shipped as the v0.3.9.1 PreToolUse
+hook (blocks re-edits of reverted entities with the prior reasoning
+inlined); the delivery half — session-start injection and the
+pre-compact flush — was promoted into Phase 2.16 (v0.3.10) after
+two independent 2026 papers measured pull-only memory tools going
+effectively unused. The original defer reasoning ("if agents ignore
+the pull tool, the push tool is noise") turned out backwards: the
+literature's finding is that agents ignore pull tools *in general*,
+which makes the push surface the load-bearing one. Entry kept for
+the record of the reversal.
 
 **`selvedge-server-http` health endpoint + structured logs.**
 Add observability surface to the HTTP layer post-v0.4.1.

@@ -31,7 +31,6 @@ Convention notes for v0.3.3+:
 """
 
 import inspect
-import json
 import sys
 from typing import Annotated, TypedDict
 
@@ -43,6 +42,12 @@ from . import __version__
 from .config import get_db_path
 from .logging_config import configure_logging
 from .models import ChangeEvent
+from .presenters import (
+    BlameResult,
+    blame_payload,
+    changeset_payload,
+    prior_attempts_payload,
+)
 from .storage import SelvedgeStorage
 from .timeutil import normalize_revisit_after, parse_time_string
 from .validation import (
@@ -153,60 +158,10 @@ class LogChangeResult(TypedDict):
     supersedes: str
 
 
-class BlameResult(TypedDict):
-    """The most recent change for an entity, or an error payload.
-
-    On success: every event field is populated, ``error`` is the empty
-    string. On miss: every event field is empty, ``error`` carries the
-    "no history found" message.
-    """
-
-    id: str
-    timestamp: str
-    entity_type: str
-    entity_path: str
-    change_type: str
-    diff: str
-    reasoning: str
-    agent: str
-    session_id: str
-    git_commit: str
-    project: str
-    changeset_id: str
-    metadata: dict
-    revisit_after: str
-    expires_when: str
-    supersedes: str
-    constraint: str
-    stale_when: str
-    superseded_by: str
-    status: str
-    error: str
-
-
-_EMPTY_BLAME: BlameResult = {
-    "id": "",
-    "timestamp": "",
-    "entity_type": "",
-    "entity_path": "",
-    "change_type": "",
-    "diff": "",
-    "reasoning": "",
-    "agent": "",
-    "session_id": "",
-    "git_commit": "",
-    "project": "",
-    "changeset_id": "",
-    "metadata": {},
-    "revisit_after": "",
-    "expires_when": "",
-    "supersedes": "",
-    "constraint": "",
-    "stale_when": "",
-    "superseded_by": "",
-    "status": "",
-    "error": "",
-}
+# `BlameResult` and the empty template live in `selvedge.presenters`, next to
+# the function that builds them, so the CLI can produce the identical shape
+# without importing this module (and with it the FastMCP runtime). Re-exported
+# here because the tool's return annotation is what generates its outputSchema.
 
 
 # ---------------------------------------------------------------------------
@@ -610,34 +565,7 @@ def blame(
     """
     storage = get_storage()
     storage.record_tool_call("blame", entity_path=entity_path)
-    result = storage.get_blame(entity_path)
-    if not result:
-        miss = dict(_EMPTY_BLAME)
-        miss["error"] = f"No history found for '{entity_path}'"
-        return miss  # type: ignore[return-value]
-    # Merge over the empty template so every schema field is populated
-    # even if the storage layer returns a slimmer dict.
-    populated = dict(_EMPTY_BLAME)
-    populated.update(result)
-    # Storage returns metadata as a JSON string; the schema declares it
-    # as an object. Parse it so the caller gets a dict, with a graceful
-    # fallback to empty-dict on malformed data.
-    md = populated.get("metadata", "")
-    if isinstance(md, str):
-        try:
-            populated["metadata"] = json.loads(md) if md else {}
-        except json.JSONDecodeError:
-            populated["metadata"] = {}
-    # Derived decision state: entity-level status plus whether THIS event
-    # has been overridden by a later supersede.
-    decision = storage.get_decision_status(entity_path)
-    populated["status"] = decision["status"]
-    populated["superseded_by"] = next(
-        (e["superseded_by"] for e in decision["trail"] if e["id"] == populated["id"]),
-        "",
-    )
-    populated["error"] = ""
-    return populated  # type: ignore[return-value]
+    return blame_payload(storage, entity_path)
 
 
 @mcp.tool(
@@ -730,10 +658,7 @@ def changeset(
     """
     storage = get_storage()
     storage.record_tool_call("changeset")
-    events = storage.get_changeset(changeset_id)
-    if not events:
-        return [{"error": f"No events found for changeset '{changeset_id}'"}]
-    return events
+    return changeset_payload(storage, changeset_id)
 
 
 @mcp.tool(
@@ -877,42 +802,17 @@ def prior_attempts(
             {"error": "min_confidence must be 'proximity_high' or 'proximity_low'"}
         ]
     results: list[dict] = []
-    if entity_path or description:
-        results = storage.get_prior_attempts(
-            entity_path=entity_path,
-            query=description,
-            min_confidence=min_confidence,
-            window_minutes=window_minutes,
-            limit=limit,
-        )
-    if fuzzy:
-        from . import semantic
-
-        try:
-            results += semantic.fuzzy_prior_attempts(
-                storage,
-                fuzzy,
-                min_confidence=min_confidence,
-                window_minutes=window_minutes,
-                limit=limit,
-                exclude_paths={r["entity_path"] for r in results},
-                exclude_ids={r["id"] for r in results},
-            )
-        except (semantic.SemanticUnavailable, semantic.IndexMissing) as e:
-            existing_paths = {r["entity_path"] for r in results}
-            fallback = [
-                r
-                for r in storage.get_prior_attempts(
-                    query=fuzzy,
-                    min_confidence=min_confidence,
-                    window_minutes=window_minutes,
-                    limit=limit,
-                )
-                if r["entity_path"] not in existing_paths
-            ]
-            results = [
-                {"note": f"fuzzy matching unavailable ({e}); fell back to substring"}
-            ] + results + fallback
+    results, _notices = prior_attempts_payload(
+        storage,
+        entity_path=entity_path,
+        description=description,
+        fuzzy=fuzzy,
+        min_confidence=min_confidence,
+        window_minutes=window_minutes,
+        limit=limit,
+    )
+    # The notices are for a human terminal; the rows already carry the same
+    # information in their always-present `note` field.
     return results
 
 

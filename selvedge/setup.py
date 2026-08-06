@@ -662,14 +662,15 @@ def _default_install_hook(project: Path) -> None:
     """
     # Late import — the cli module imports from setup, so importing back
     # at module level would create a cycle.
-    from .cli import _HOOK_MARKER, _HOOK_SCRIPT  # noqa: PLC0415
+    from .cli import _HOOK_SCRIPT  # noqa: PLC0415
+    from .diagnostics import HOOK_MARKER  # noqa: PLC0415
 
     hooks_dir = project / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     hook_path = hooks_dir / "post-commit"
     if hook_path.exists():
         existing = hook_path.read_text()
-        if _HOOK_MARKER in existing:
+        if HOOK_MARKER in existing:
             return  # already installed
         hook_path.write_text(existing.rstrip("\n") + "\n\n" + _HOOK_SCRIPT)
     else:

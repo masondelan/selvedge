@@ -27,8 +27,6 @@ Commands:
 """
 
 import json
-import os
-import sqlite3
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -39,14 +37,15 @@ from rich.console import Console
 from rich.table import Table
 
 from . import backup as backup_mod
+from . import diagnostics as diagnostics_mod
 from . import prune as prune_mod
 from . import telemetry as telemetry_mod
 from . import update_check as update_check_mod
 from . import verify as verify_mod
-from .config import get_db_path, init_project, resolve_db_path
-from .logging_config import LOG_LEVEL_ENV, configure_logging
-from .migrations import MIGRATIONS, get_applied_versions, latest_version
+from .config import get_db_path, init_project
+from .logging_config import configure_logging
 from .models import ChangeEvent, ChangeType
+from .presenters import blame_payload, changeset_payload, prior_attempts_payload
 from .storage import SelvedgeStorage
 from .timeutil import normalize_revisit_after, parse_time_string, parse_window_minutes
 from .validation import (
@@ -59,31 +58,9 @@ console = Console()
 err_console = Console(stderr=True)
 
 
-HOOK_LOG_NAME = "hook.log"
-
-
-def hook_log_path() -> Path:
-    """Path to the post-commit hook's failure log inside ``.selvedge/``."""
-    return get_db_path().parent / HOOK_LOG_NAME
-
-
-def last_hook_failure() -> str | None:
-    """
-    Return the last line of the post-commit hook failure log, or None.
-
-    Each failure writes one line in the form ``<utc-iso>\\t<message>``.
-    Read the tail rather than the whole file so a chatty hook history
-    doesn't blow up `selvedge doctor` or `selvedge status`.
-    """
-    p = hook_log_path()
-    if not p.exists():
-        return None
-    try:
-        # Hook log is line-oriented and small in practice — readlines is fine.
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return None
-    return lines[-1].strip() if lines else None
+# The hook-failure log helpers and the doctor check engine live in
+# `selvedge.diagnostics`. `status` and `doctor` both read them; keeping
+# them here would have meant diagnostics importing cli, which is a cycle.
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +268,7 @@ def status(as_json):
     total = storage.count()
     recent = storage.get_history(limit=5)
     missing_commit = storage.count_missing_git_commit()
-    hook_failure = last_hook_failure()
+    hook_failure = diagnostics_mod.last_hook_failure()
 
     db_path = get_db_path()
 
@@ -362,359 +339,10 @@ def status(as_json):
 # ---------------------------------------------------------------------------
 
 
-# Recognized log levels for the SELVEDGE_LOG_LEVEL env var. Used by the
-# doctor command to surface a typo'd value (which is silently coerced to
-# WARNING by configure_logging — easy to miss without doctor flagging it).
-_KNOWN_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
-# Maximum age (in seconds) for the last tool_calls entry to count as
-# "recent" — a fresher entry suggests the MCP server is actually wired up
-# to this DB right now. Tuned for typical agent-pool cadence: anything
-# inside a week feels live, anything older suggests stale wiring.
-_RECENT_TOOL_CALL_SECONDS = 7 * 24 * 60 * 60
-
-
-def _check(label: str, status: str, detail: str = "") -> dict:
-    """Build a single doctor check row, used for both Rich and JSON output."""
-    return {"label": label, "status": status, "detail": detail}
-
-
-def _doctor_checks() -> list[dict]:
-    """
-    Run all doctor checks and return them in display order.
-
-    Each check is a dict with ``label``, ``status`` (PASS/WARN/FAIL/INFO),
-    and ``detail`` (free-form one-liner). Failures don't raise — a single
-    broken check shouldn't prevent the rest from running, since the whole
-    point of `doctor` is to give the user a complete picture in one shot.
-    """
-    from datetime import datetime, timezone
-
-    checks: list[dict] = []
-
-    # 1. DB path resolution chain
-    resolved = resolve_db_path()
-    source_label = {
-        "env": "SELVEDGE_DB env var",
-        "walkup": "walked up from CWD to project .selvedge/",
-        "global": "global fallback (~/.selvedge/)",
-    }[resolved.source]
-    db_status = "INFO" if resolved.source != "global" else "WARN"
-    db_detail = f"{resolved.path}  [via {source_label}]"
-    checks.append(_check("Database path", db_status, db_detail))
-
-    # 2. .selvedge/ existence
-    selvedge_dir = resolved.path.parent
-    if selvedge_dir.is_dir():
-        checks.append(_check(
-            ".selvedge/ directory", "PASS", str(selvedge_dir)
-        ))
-    else:
-        checks.append(_check(
-            ".selvedge/ directory", "FAIL",
-            "missing — run `selvedge init` in your project root"
-        ))
-
-    # 3. Schema migration version (+ downgrade detection)
-    db_exists = resolved.path.is_file()
-    if not db_exists:
-        checks.append(_check(
-            "Schema version", "WARN",
-            "DB file does not exist yet — first write will create it"
-        ))
-    else:
-        try:
-            with sqlite3.connect(resolved.path) as conn:
-                applied = get_applied_versions(conn)
-            declared = {m.version for m in MIGRATIONS}
-            target = latest_version()
-            missing = sorted(declared - applied)
-            extra = sorted(applied - declared)
-            if extra:
-                # The DB was last opened by a newer Selvedge that knew about
-                # migrations this version doesn't. Downgrading is not
-                # supported — surface as FAIL so users notice before any
-                # write attempts schema work it doesn't understand.
-                checks.append(_check(
-                    "Schema version", "FAIL",
-                    f"DB has applied migration(s) {extra} that this Selvedge "
-                    f"build does not declare — likely opened by a newer version "
-                    f"and downgraded; downgrades are not supported"
-                ))
-            elif not missing:
-                checks.append(_check(
-                    "Schema version", "PASS",
-                    f"at v{target} (latest)"
-                ))
-            else:
-                checks.append(_check(
-                    "Schema version", "WARN",
-                    f"missing migration(s) {missing} — they will apply on next "
-                    f"connection through SelvedgeStorage"
-                ))
-        except sqlite3.Error as e:
-            checks.append(_check("Schema version", "FAIL", f"sqlite error: {e}"))
-
-    # 4. Post-commit hook installed?
-    hook_path = Path.cwd() / ".git" / "hooks" / "post-commit"
-    if not (Path.cwd() / ".git").exists():
-        checks.append(_check(
-            "Post-commit hook", "INFO",
-            "not in a git repo — skipping hook check"
-        ))
-    elif not hook_path.exists():
-        checks.append(_check(
-            "Post-commit hook", "WARN",
-            "not installed — run `selvedge install-hook` to auto-stamp git_commit"
-        ))
-    else:
-        contents = hook_path.read_text(errors="replace")
-        if _HOOK_MARKER in contents:
-            checks.append(_check(
-                "Post-commit hook", "PASS", str(hook_path)
-            ))
-        else:
-            checks.append(_check(
-                "Post-commit hook", "WARN",
-                f"hook exists at {hook_path} but does not contain Selvedge"
-            ))
-
-    # 5. Hook failure log — surface the most recent failure if any
-    last_fail = last_hook_failure()
-    if last_fail:
-        checks.append(_check(
-            "Last hook failure", "WARN", last_fail
-        ))
-    else:
-        checks.append(_check(
-            "Last hook failure", "PASS", "no failures recorded"
-        ))
-
-    # 6. Last tool_calls entry — proxy for "is the MCP server wired up"
-    if not db_exists:
-        checks.append(_check(
-            "MCP wiring", "WARN", "no DB yet — connect the MCP server and try again"
-        ))
-    else:
-        try:
-            storage = get_storage()
-            last_ts = storage.get_last_tool_call_timestamp()
-        except sqlite3.Error as e:
-            checks.append(_check("MCP wiring", "FAIL", f"sqlite error: {e}"))
-        else:
-            if last_ts is None:
-                checks.append(_check(
-                    "MCP wiring", "WARN",
-                    "no tool_calls recorded — run `selvedge setup` to wire "
-                    "Selvedge into your AI tools, or restart your agent if "
-                    "an MCP entry is already installed"
-                ))
-            else:
-                try:
-                    parsed = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-                    age = (datetime.now(timezone.utc) - parsed).total_seconds()
-                    if age <= _RECENT_TOOL_CALL_SECONDS:
-                        checks.append(_check(
-                            "MCP wiring", "PASS", f"last tool_call at {last_ts}"
-                        ))
-                    else:
-                        days = int(age // 86400)
-                        checks.append(_check(
-                            "MCP wiring", "WARN",
-                            f"last tool_call was {days}d ago ({last_ts}) — "
-                            f"agent may have been disconnected"
-                        ))
-                except ValueError:
-                    checks.append(_check(
-                        "MCP wiring", "WARN",
-                        f"last tool_call timestamp unparseable: {last_ts}"
-                    ))
-
-    # 7. SELVEDGE_LOG_LEVEL value
-    raw_level = os.environ.get(LOG_LEVEL_ENV)
-    if raw_level is None:
-        checks.append(_check(
-            f"{LOG_LEVEL_ENV}", "INFO", "unset (defaults to WARNING)"
-        ))
-    elif raw_level.upper().strip() in _KNOWN_LOG_LEVELS:
-        checks.append(_check(
-            f"{LOG_LEVEL_ENV}", "PASS", raw_level
-        ))
-    else:
-        checks.append(_check(
-            f"{LOG_LEVEL_ENV}", "WARN",
-            f"unrecognized value {raw_level!r} — silently treated as WARNING; "
-            f"valid: {', '.join(_KNOWN_LOG_LEVELS)}"
-        ))
-
-    # 8. Last backup freshness. Severity ladder:
-    #   • newest backup ≤7d old  → INFO
-    #   • newest backup >7d old  → WARN
-    #   • no backups + events table small → INFO (nothing precious to lose yet)
-    #   • no backups + events table ≥10k rows → FAIL (precious; back up now)
-    # 10k is the "real project" floor — small enough that most teams hit it
-    # within weeks, large enough that a no-backups state at that size is a
-    # genuine data-loss exposure rather than a CI/scratch DB.
-    backups_dir = backup_mod.default_backups_dir(resolved.path)
-    last_backup_dt = backup_mod.last_backup_time(backups_dir)
-    if last_backup_dt is not None:
-        age_td = datetime.now(timezone.utc) - last_backup_dt
-        if age_td.days <= 7:
-            checks.append(_check(
-                "Last backup", "INFO",
-                f"{last_backup_dt.isoformat(timespec='seconds')} ({age_td.days}d ago)"
-            ))
-        else:
-            checks.append(_check(
-                "Last backup", "WARN",
-                f"{last_backup_dt.isoformat(timespec='seconds')} ({age_td.days}d ago) — "
-                f"run `selvedge backup`"
-            ))
-    elif db_exists:
-        try:
-            event_count = SelvedgeStorage(resolved.path).count()
-        except sqlite3.Error:
-            event_count = 0
-        if event_count >= 10_000:
-            checks.append(_check(
-                "Last backup", "FAIL",
-                f"no backups in {backups_dir} but events table has "
-                f"{event_count:,} rows — run `selvedge backup` now"
-            ))
-        else:
-            checks.append(_check(
-                "Last backup", "INFO",
-                f"no backups yet ({event_count:,} events; threshold for FAIL is 10,000)"
-            ))
-    else:
-        checks.append(_check(
-            "Last backup", "INFO", "no DB yet — nothing to back up"
-        ))
-
-    # 9. Last prune — parsed from .selvedge/prune.log if present.
-    # An INFO row when the log exists, a softer INFO when it doesn't:
-    # absence is not a failure, just a "you haven't run it yet" signal.
-    log_path = prune_mod.prune_log_path(resolved.path)
-    last_prune = prune_mod.last_prune_line(log_path)
-    if last_prune is None:
-        checks.append(_check(
-            "Last prune", "INFO",
-            "no prune.log yet — run `selvedge prune` to start trimming "
-            "tool_calls"
-        ))
-    else:
-        ts, count, threshold = last_prune
-        checks.append(_check(
-            "Last prune", "INFO",
-            f"{ts}  ({count} row(s) pruned, {threshold}-day threshold)"
-        ))
-
-    # 10. tool_calls row count — WARN when oversized. Counter is
-    # exposed as its own storage method so tests can stub it without
-    # actually inserting 100k rows.
-    if db_exists:
-        try:
-            tc_count = SelvedgeStorage(resolved.path).count_tool_calls()
-        except sqlite3.Error as e:
-            checks.append(_check(
-                "tool_calls size", "FAIL", f"sqlite error: {e}"
-            ))
-        else:
-            if tc_count > prune_mod.TOOL_CALLS_WARN_ROWS:
-                checks.append(_check(
-                    "tool_calls size", "WARN",
-                    f"{tc_count:,} rows (threshold {prune_mod.TOOL_CALLS_WARN_ROWS:,}) — "
-                    f"run `selvedge prune` to trim old telemetry"
-                ))
-            else:
-                checks.append(_check(
-                    "tool_calls size", "PASS",
-                    f"{tc_count:,} rows (threshold {prune_mod.TOOL_CALLS_WARN_ROWS:,})"
-                ))
-    else:
-        checks.append(_check(
-            "tool_calls size", "INFO", "no DB yet"
-        ))
-
-    # 11. Case-collision watch — sibling entity paths that differ only by
-    # case. Canonicalization preserves case on purpose (most Linux
-    # filesystems are case-sensitive), so these coexist rather than being
-    # merged. WARN when present so an unintended typo collision is visible.
-    if db_exists:
-        try:
-            collisions = SelvedgeStorage(resolved.path).find_case_collisions()
-        except sqlite3.Error as e:
-            checks.append(_check("Case collisions", "FAIL", f"sqlite error: {e}"))
-        else:
-            if collisions:
-                sample = "; ".join(" vs ".join(c["paths"]) for c in collisions[:3])
-                more = f" (+{len(collisions) - 3} more)" if len(collisions) > 3 else ""
-                checks.append(_check(
-                    "Case collisions", "WARN",
-                    f"{len(collisions)} group(s) of paths differing only by case: "
-                    f"{sample}{more} — kept distinct (case-sensitive hosts); "
-                    f"reconcile if unintended"
-                ))
-            else:
-                checks.append(_check(
-                    "Case collisions", "PASS",
-                    "no sibling paths differ only by case"
-                ))
-    else:
-        checks.append(_check("Case collisions", "INFO", "no DB yet"))
-
-    # 12. Entity-path migration — surface the last migrate-paths --apply run.
-    if db_exists:
-        try:
-            last_mig = SelvedgeStorage(resolved.path).get_last_path_migration()
-        except sqlite3.Error as e:
-            checks.append(_check("Path migration", "FAIL", f"sqlite error: {e}"))
-        else:
-            if last_mig is None:
-                checks.append(_check(
-                    "Path migration", "INFO",
-                    "migrate-paths not applied — run `selvedge migrate-paths` "
-                    "to preview re-canonicalization"
-                ))
-            else:
-                checks.append(_check(
-                    "Path migration", "INFO",
-                    f"{last_mig['timestamp']}  ({last_mig['rows_rewritten']} "
-                    f"row(s) rewritten, {last_mig['collisions']} collision(s))"
-                ))
-    else:
-        checks.append(_check("Path migration", "INFO", "no DB yet"))
-
-    # 13. Stale decisions (v0.3.8) — dated decisions now due for a revisit that
-    # are still in active use. Deliberately INFO-tier, NOT WARN: a decision
-    # aging out is a nudge, not a fault. Part of this release's signal-to-noise
-    # curation pass — keeping the new row out of the WARN count is how the net
-    # warning total stays flat (the existing WARN rows were each reviewed and
-    # still fire usefully, so none were demoted to compensate).
-    if db_exists:
-        try:
-            stale = SelvedgeStorage(resolved.path).get_stale_decisions(limit=100)
-        except sqlite3.Error as e:
-            checks.append(_check("Stale decisions", "FAIL", f"sqlite error: {e}"))
-        else:
-            if stale:
-                sample = ", ".join(s["entity_path"] for s in stale[:3])
-                more = f" (+{len(stale) - 3} more)" if len(stale) > 3 else ""
-                checks.append(_check(
-                    "Stale decisions", "INFO",
-                    f"{len(stale)} decision(s) due for revisit: {sample}{more} — "
-                    f"run `selvedge stale` to review"
-                ))
-            else:
-                checks.append(_check(
-                    "Stale decisions", "INFO",
-                    "none due for revisit (a decision surfaces here once its "
-                    "revisit_after passes and the entity is still in active use)"
-                ))
-    else:
-        checks.append(_check("Stale decisions", "INFO", "no DB yet"))
-
-    return checks
+# The doctor check engine lives in `selvedge.diagnostics`; what stays here
+# is the Rich renderer, which is all this file should hold. See that
+# module's docstring for why it moved.
 
 
 @cli.command()
@@ -743,7 +371,7 @@ def doctor(as_json):
       0 — all PASS/INFO/WARN
       1 — any FAIL
     """
-    checks = _doctor_checks()
+    checks = diagnostics_mod.run_checks()
 
     if as_json:
         click.echo(json.dumps({"checks": checks}, indent=2))
@@ -1065,30 +693,26 @@ def blame(entity_path, as_json):
     # Record on the shared coverage counter (see the `diff` command) so a CLI
     # blame counts as active use of the entity for stale-decisions weighting.
     storage.record_tool_call("blame", entity_path=entity_path, agent="cli")
-    row = storage.get_blame(entity_path)
+    # One shared presenter with the MCP tool, so "the two surfaces can't
+    # diverge" is a property of the code rather than a comment above a
+    # divergence. Carries the full BlameResult shape on a miss too.
+    payload = blame_payload(storage, entity_path)
+    row = payload
 
-    if not row:
+    if payload["error"]:
         # Under --json the miss must still be JSON on stdout. `console` is
         # stdout, so printing Rich markup here made `blame` the one command
         # in the CLI whose --json output didn't parse — on the miss case,
         # which is the common one, and which the shipped agent prompt tells
         # agents to reach for.
         if as_json:
-            click.echo(json.dumps({"error": f"No history found for '{entity_path}'"}))
+            click.echo(json.dumps(payload, indent=2))
         else:
-            console.print(f"[yellow]No history found for '{entity_path}'[/yellow]")
+            console.print(f"[yellow]{payload['error']}[/yellow]")
         sys.exit(1)
 
     if as_json:
-        # Mirror the MCP blame tool: include the derived decision state so
-        # the two surfaces can't diverge.
-        decision = storage.get_decision_status(entity_path)
-        row["status"] = decision["status"]
-        row["superseded_by"] = next(
-            (e["superseded_by"] for e in decision["trail"] if e["id"] == row["id"]),
-            "",
-        )
-        click.echo(json.dumps(row, indent=2))
+        click.echo(json.dumps(payload, indent=2))
         return
 
     console.print(f"\n[bold cyan]{entity_path}[/bold cyan]")
@@ -1245,14 +869,18 @@ def changeset(changeset_id, list_all, project, since, as_json):
         console.print(table)
         return
 
-    rows = storage.get_changeset(changeset_id)
+    # Shared with the MCP tool: an unknown changeset comes back as a
+    # one-element error list, which is what lets a caller tell "unknown
+    # changeset" from "changeset with no events". `--json` used to emit a
+    # bare `[]` for both.
+    rows = changeset_payload(storage, changeset_id)
 
     if as_json:
         click.echo(json.dumps(rows, indent=2))
         return
 
-    if not rows:
-        console.print(f"[yellow]No events found for changeset '{changeset_id}'[/yellow]")
+    if len(rows) == 1 and rows[0].get("error"):
+        console.print(f"[yellow]{rows[0]['error']}[/yellow]")
         return
 
     render_summary(rows)
@@ -1366,51 +994,31 @@ def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_j
     # reflects both surfaces. A prior_attempts lookup also counts as active-use
     # of the entity for the stale-decisions weighting.
     storage.record_tool_call("prior_attempts", entity_path=entity, agent="cli")
-    rows = []
-    if entity or description:
-        rows = storage.get_prior_attempts(
-            entity_path=entity,
-            query=description,
-            min_confidence=min_confidence,
-            window_minutes=window_minutes,
-            limit=limit,
-        )
+    # Shared with the MCP tool so `--json` really does emit "the identical
+    # list the tool returns", as this command's help has always claimed.
+    rows, notices = prior_attempts_payload(
+        storage,
+        entity_path=entity,
+        description=description,
+        fuzzy=fuzzy,
+        min_confidence=min_confidence,
+        window_minutes=window_minutes,
+        limit=limit,
+    )
+    for notice in notices:
+        from rich.markup import escape
 
-    if fuzzy:
-        from . import semantic
-
-        try:
-            rows += semantic.fuzzy_prior_attempts(
-                storage,
-                fuzzy,
-                min_confidence=min_confidence,
-                window_minutes=window_minutes,
-                limit=limit,
-                exclude_paths={r["entity_path"] for r in rows},
-                exclude_ids={r["id"] for r in rows},
-            )
-        except (semantic.SemanticUnavailable, semantic.IndexMissing) as e:
-            from rich.markup import escape
-
-            # escape(): the hint contains "[semantic]", which Rich would
-            # otherwise swallow as a markup tag.
-            err_console.print(f"[yellow]fuzzy unavailable:[/yellow] {escape(str(e))}")
-            err_console.print("[dim]falling back to substring matching[/dim]")
-            existing_paths = {r["entity_path"] for r in rows}
-            rows += [
-                r
-                for r in storage.get_prior_attempts(
-                    query=fuzzy,
-                    min_confidence=min_confidence,
-                    window_minutes=window_minutes,
-                    limit=limit,
-                )
-                if r["entity_path"] not in existing_paths
-            ]
+        # escape(): the hint contains "[semantic]", which Rich would
+        # otherwise swallow as a markup tag.
+        err_console.print(f"[yellow]fuzzy unavailable:[/yellow] {escape(notice)}")
+        err_console.print("[dim]falling back to substring matching[/dim]")
 
     if as_json:
         click.echo(json.dumps(rows, indent=2))
         return
+
+    # The note row carries no attempt of its own — it's already on stderr.
+    rows = [r for r in rows if r.get("match_type") != "note"]
 
     if not rows:
         target = entity or f'"{description or fuzzy}"'
@@ -2132,7 +1740,8 @@ _selvedge_err=$(selvedge backfill-commit \\
     _selvedge_log_failure "backfill-commit failed: $_selvedge_err"
 """
 
-_HOOK_MARKER = "# Selvedge post-commit hook"
+# The post-commit marker lives in `selvedge.diagnostics`: the doctor check
+# reads it and this command writes it, so there is exactly one definition.
 
 
 @cli.command("install-hook")
@@ -2173,7 +1782,7 @@ def install_hook(path, window):
 
     if hook_path.exists():
         existing = hook_path.read_text()
-        if _HOOK_MARKER in existing:
+        if diagnostics_mod.HOOK_MARKER in existing:
             console.print("[yellow]Selvedge hook already installed.[/yellow]")
             console.print(f"  [dim]{hook_path}[/dim]")
             return

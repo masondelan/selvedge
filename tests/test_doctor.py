@@ -16,7 +16,8 @@ import time
 import pytest
 from click.testing import CliRunner
 
-from selvedge.cli import _doctor_checks, cli
+from selvedge.cli import cli
+from selvedge.diagnostics import run_checks as _doctor_checks
 from selvedge.storage import SelvedgeStorage
 
 

@@ -330,7 +330,7 @@ def _stale_reason_text(signals: list[str], matched_terms: tuple | list = ()) -> 
 
 
 def _coalesce_event_nullables(row: dict) -> dict:
-    """Coalesce the nullable active-memory columns (v0.3.8) to ``""`` in place.
+    """Normalize one event row to the always-populated read shape, in place.
 
     ``revisit_after`` / ``expires_when`` are NULLABLE, so rows written before
     migration v3 read back as ``NULL`` — likewise ``supersedes`` /
@@ -339,10 +339,28 @@ def _coalesce_event_nullables(row: dict) -> dict:
     null" convention — so diff / history / search / changeset /
     prior_attempts agree with blame / stale_decisions instead of leaking
     ``null`` for a pre-migration row.
+
+    ``metadata`` is decoded here too (v0.3.10). It is stored as a JSON TEXT
+    column, and only the ``blame`` tool used to parse it — so ``BlameResult``
+    declared ``metadata: dict`` while diff / history / search / changeset /
+    prior_attempts handed back the raw string, and the documented
+    rename-following idiom ``event["metadata"]["renamed_from"]`` raised
+    ``TypeError: string indices must be integers`` on five of the six read
+    surfaces. Decoding at this chokepoint fixes every one of them at once,
+    which is the point of having a chokepoint. Malformed JSON degrades to
+    ``{}`` rather than raising: a read path must not fail on one bad row.
     """
     for col in ("revisit_after", "expires_when", "supersedes", "constraint", "stale_when"):
         if row.get(col) is None:
             row[col] = ""
+    md = row.get("metadata")
+    if isinstance(md, str):
+        try:
+            row["metadata"] = json.loads(md) if md else {}
+        except json.JSONDecodeError:
+            row["metadata"] = {}
+    elif md is None:
+        row["metadata"] = {}
     return row
 
 

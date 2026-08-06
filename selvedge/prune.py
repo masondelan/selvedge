@@ -9,7 +9,7 @@ interactive confirmation prompt, per the cross-cutting risk register in
 Every prune appends one line to ``.selvedge/prune.log`` so the cadence
 is visible later: ``<utc-iso>\\t<count_pruned>\\t<days_threshold>``.
 The format mirrors the post-commit ``.selvedge/hook.log`` written by
-``cli.hook_log_path()`` — same tab-separated shape, same readability
+``diagnostics.hook_log_path()`` — same tab-separated shape, same readability
 constraints.
 """
 

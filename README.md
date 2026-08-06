@@ -18,14 +18,21 @@
 
 <!-- mcp-name: io.github.masondelan/selvedge -->
 
-**Long-term memory for AI-coded codebases.**
-A `git blame` for AI agents — but for the *why*, not just which line which
-model touched. Captured live, by the agent, as the change happens.
+**Long-term memory for AI-coded codebases — including what was already
+tried and rejected.**
+
+Line attribution tells you who wrote something. Selvedge tells your agent
+what *not* to write next: the approaches this codebase already tried,
+reverted, and why. It's a `git blame` for AI agents, for the *why* rather
+than which model touched which line — captured live, by the agent, as the
+change happens, so nothing downstream has to guess at it.
 
 Selvedge is a local MCP server. AI coding agents (Claude Code, Cursor,
 Copilot) call it as they work to log structured change events with
 reasoning. Your data stays in a SQLite file under `.selvedge/` next to
 your code.
+
+**Local-first by default, team-server by choice, zero-LLM always.**
 
 ---
 
@@ -109,6 +116,56 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.10
+
+**The memory comes to the agent, and the store gets its dials.** Two themes,
+shipped together because the config half is what the rest needed to read
+settings from.
+
+**Delivery.** Selvedge already blocked re-edits of reverted entities. What was
+missing was delivery when there is nothing to veto. Two new hooks:
+
+- **SessionStart** injects a compact digest as a session begins — decisions due
+  for a revisit, entities that were tried and reverted, recent changesets.
+- **PreCompact** fires just before context compaction destroys this session's
+  reasoning and names the watched entities you edited but never logged.
+
+Both are quiet when they have nothing to say, size-capped, read-only, and
+templated. Neither can block anything — PreCompact deliberately declines the
+veto the hook API offers it. This is the answer to a measured failure mode: two
+2026 papers recorded pull-model memory tools going unused entirely (zero
+voluntary memory operations across 114 turns against a pre-seeded store) while
+deterministic injection landed every time.
+
+**`selvedge export --format markdown`** renders the store as a reviewable
+digest to commit next to it, so captured intent shows up in a pull request
+instead of hiding inside a binary. Deterministic — regenerating with no new
+events is a zero-line diff.
+
+**Config.** `.selvedge/config.toml` is now first-class, with a canonical
+precedence chain that `selvedge doctor` prints per setting. It brings:
+
+- **`selvedge prune --include-events`** — the first path that can delete
+  captured reasoning, so it needs *both* a confirmation and
+  `SELVEDGE_DESTRUCTIVE=1`. Neither alone is enough, because `--yes` in a cron
+  entry defeats a prompt and a shell profile defeats an env var. Events
+  retention defaults to never.
+- **Event-size bounds** (`diff_bytes`, `reasoning_bytes`) that truncate loudly
+  — a marker in the text, a warning at write time, a count in `selvedge stats`.
+- **Secret-shape warnings** at `log_change`, extendable via
+  `redaction_patterns`, plus a `doctor` row that scans what's already stored.
+  Warn, never reject.
+
+**Also:** five review issues closed. The enforcement hook's allow path is
+**40% faster** (33.6 ms → 20.1 ms per gated call) and `SELVEDGE_HOOK_DISABLE=1`
+finally short-circuits before the imports it was documented to skip;
+`log_change` no longer discards `revisit_after` / `constraint` / `stale_when`
+on renames and supersedes; the CLI's `--json` and the MCP tools now return
+identical structures; and the Docker image no longer ships the maintainer's
+own database. Tests 826 → 984.
+
+---
+
 ## What's new in v0.3.9.3
 
 **Fixes a broken install, and lands a full code-quality pass.** `mcp` 2.0.0
@@ -141,31 +198,6 @@ Tests went 739 → 826. No schema change and no tool-surface change, so this is
 
 ---
 
-## What's new in v0.3.9.2
-
-**The Claude Code plugin is first-class now — not scaffolding.** Two commands,
-no prior `pip install`: the plugin fetches the server itself.
-
-```
-/plugin marketplace add masondelan/selvedge
-/plugin install selvedge@selvedge
-```
-
-One install carries the whole agent-facing surface. The MCP server starts
-through a launcher that tries an existing install, then `uvx`, then `pipx` — so
-a fresh machine needs nothing preinstalled, and anyone who already has Selvedge
-on their `PATH` keeps their exact version. Alongside the server, the install
-ships a **skill** that tells the agent *when* to reach for the tools (before
-editing a tracked entity, after any substantive change), the **PreToolUse
-enforcement hook** wired in by default, and four slash commands —
-`/selvedge:status`, `/selvedge:blame`, `/selvedge:history`,
-`/selvedge:prior-attempts`. The skill's text is generated from the same block
-`selvedge prompt` installs, so the plugin and the hand-written prompt can't
-drift. No store, schema, or tool-surface change — this is packaging, not new
-behavior. **Drop-in for anyone on 0.3.9.x.**
-
----
-
 ## Where Selvedge fits
 
 <p align="center">
@@ -194,24 +226,56 @@ Selvedge fits — and where it deliberately doesn't.
 
 |  | Reasoning source | Granularity | Mechanism | Grouping | Storage |
 |---|---|---|---|---|---|
-| **Selvedge** | **Captured live**, by the agent in the same context that produced the change | **Entity** — DB column, table, env var, dep, API route, function | **MCP server** — agent calls it as work happens | **Changesets** — named feature/task slugs across many entities | SQLite, zero deps |
-| AgentDiff | **Inferred post-hoc** by Claude Haiku from the diff at session end | Line | Git pre/post-commit hook | None | JSONL on disk |
-| Origin | Captured at commit time | Line | Git hook | None | Local |
-| Git AI | Attribution metadata | Line | Git hook + Agent Trace alliance | None | Git notes |
-| BlamePrompt | Prompt-only | Line | Git hook | None | Local |
+|  | Rejected paths | Reasoning source | Granularity | Mechanism | Grouping | Storage |
+|---|---|---|---|---|---|---|
+| **Selvedge** | **Queryable** — `prior_attempts` returns tried → reverted → re-opened | **Captured live**, by the agent in the same context that produced the change | **Entity** — DB column, table, env var, dep, API route, function | **MCP server** — agent calls it as work happens | **Changesets** — named feature/task slugs across many entities | SQLite, zero deps |
+| [OpenLore](https://github.com/clay-good/OpenLore) | Purged — `rejected` is an inactive status, dropped from the queryable store after each decision sync (the annotation survives in the synced spec markdown) | **Derived** — tree-sitter static analysis of code state, plus commit-gated decision notes | AST node (18 languages + 12 IaC) | MCP server — one-time index + commit-time certificates | Call-graph edges | SQLite graph in `.openlore/` |
+| [AgentDiff (sunilmallya)](https://github.com/sunilmallya/agentdiff) | None | **Inferred post-hoc** by Claude Haiku from the diff at session end | Line | Git pre/post-commit hook | None | JSONL on disk |
+| [AgentDiff (codeprakhar25)](https://github.com/codeprakhar25/agentdiff) | None | ed25519-signed cross-agent provenance | Line | Git hook | None | Local |
+| [Origin](https://github.com/mattzcarey/origin) | None | Captured at commit time | Line | Git hook | None | Local |
+| [Git AI](https://github.com/oleander/git-ai) | None | Attribution metadata | Line | **Agent-invoked checkpoint** → Git notes at commit | None | Git notes |
+| [BlamePrompt](https://github.com/blameprompt/blameprompt) | None | Prompt-only | Line | Git hook | None | Local |
 
-**Why "captured live" matters.** AgentDiff and Origin generate reasoning
-*after* the change is made, by feeding the diff back to a second LLM call.
-Selvedge's reasoning is the agent's own intent, written from the same
-context window that produced the change — no inference, no hallucinated
-explanations, and an empty `reasoning` field is itself a useful signal
-(the agent didn't have one).
+**Why "rejected paths" matter — the one that isn't copyable.** The expensive
+failure isn't forgetting why a column exists. It's an agent confidently
+re-implementing something the team already killed for a good reason, six
+months after everyone who knew that left the context window. None of the
+line-attribution tools above surface rejected paths at all, and it isn't a
+feature gap they can close in a release — a line-oriented store has no notion
+of an entity that persisted across a try → revert → retry cycle. See
+[`docs/demos/prior-attempts.md`](docs/demos/prior-attempts.md).
+
+**Why determinism matters.** Selvedge's reasoning is the agent's own intent,
+written from the same context window that produced the change. There is no
+model anywhere in the storage or retrieval path, so the same query returns the
+same answer today and in two years, across model versions. Tools that infer
+reasoning post-hoc are running a second LLM that never saw the original
+prompt: what it produces is paraphrase, and re-running it can produce
+different categories for the same change. As a Hacker News commenter put it
+about a competing approach, *"grep won't find your commit because you rejected
+'oauth-library'… unless there is deterministic enforcement"*
+([0x457](https://news.ycombinator.com/item?id=47354263)).
+
+Determinism alone is no longer a separator — OpenLore is deterministic-native
+too, and says so. The compound that separates is **append-only testimony**:
+reasoning the agent wrote itself, kept in a store where a rejection is a
+first-class record rather than an inactive status to be swept up.
 
 **Why "entity-level" matters.** Most tools attribute *lines*. Selvedge
 attributes *things you actually search for*: `users.email`,
 `env/STRIPE_SECRET_KEY`, `api/v1/checkout`, `deps/stripe`. The first
 question after `git blame` is usually *"what's the history of this column"*,
 not *"what's the history of lines 40–48 of users.py"*.
+
+**Why "captured live" matters.** Not a differentiator on its own — every tool
+here claims some flavour of it — but it's the *mechanism* that makes the
+reasoning trustworthy. Writing at the moment of the change, from the context
+that produced it, is the reason there's no second model in the path to
+hallucinate an explanation. An empty `reasoning` field is itself an honest
+signal: the agent didn't have one.
+
+<sub>Comparison current as of 2026-08-06; OpenLore at v2.1.8 / 265★,
+verified against its source. Corrections welcome as an issue.</sub>
 
 **Why "changesets" matter.** A Stripe billing rollout touches the `users`
 table, two new env vars, three new API routes, one dependency, and four
@@ -616,7 +680,8 @@ selvedge import PATH                      Import migrations (SQL / Alembic) or
               [--project NAME]            become change_type="revert" events
               [--dry-run]                 (idempotent on commit + entity)
 selvedge export [--format json|csv|       Export history (agent-trace =
-                 agent-trace]              Agent Trace v0.1.0 records)
+                 markdown|agent-trace]      Agent Trace v0.1.0 records;
+                                            markdown = reviewable digest)
               [--since SINCE]
               [--entity ENTITY]
               [--ndjson]                  agent-trace: one record per line
@@ -662,8 +727,56 @@ are also accepted and normalized to UTC.
 | Project init | `selvedge init` | Creates `.selvedge/selvedge.db` in CWD |
 | Global fallback | `~/.selvedge/selvedge.db` | Used if no project DB found |
 | Hook watch globs | `.selvedge/config.toml` | `[hook]`<br>`watch_globs = ["**/migrations/**", "db/**/*.sql"]` — replaces the enforcement hook's default schema/migration globs |
+| Project settings | `.selvedge/config.toml` | See the key list below — retention, size bounds, redaction patterns |
+| Global settings | `~/.selvedge/config.toml` | Same keys; the project file wins where both set one |
 | Hook bypass | `SELVEDGE_HOOK_DISABLE=1` | Disables the PreToolUse enforcement hook for the shell |
 | Semantic extra | `pip install "selvedge[semantic]"` | Enables `selvedge index` + `prior-attempts --fuzzy` (local model2vec embeddings, ~30 MB; core never depends on it) |
+
+### `.selvedge/config.toml`
+
+Every key is optional; a missing file means the defaults below. Precedence is
+**CLI flag → env var → project `.selvedge/config.toml` → global
+`~/.selvedge/config.toml` → default**. `SELVEDGE_DB` is the one exception: it
+always wins for database resolution, because the config file is found *by*
+resolving that path. `selvedge doctor` prints the effective value and the step
+that produced it for every setting.
+
+```toml
+retention_days_events     = 0       # 0 = never delete events (the default)
+retention_days_tool_calls = 90      # local telemetry retention
+backup_keep_last          = 7
+diff_bytes                = 65536   # truncate oversized diffs at log time
+reasoning_bytes           = 32768   # truncate oversized reasoning
+db_size_warn_mb           = 500     # doctor warns above this
+stale_days                = 0       # 0 = off
+digest_max_bytes          = 4096    # cap on the session-start digest
+redaction_patterns        = []      # extra secret shapes to warn about
+
+[hook]
+watch_globs = ["**/migrations/**", "db/**/*.sql"]
+```
+
+Every key also has an env override (`SELVEDGE_DIFF_BYTES`,
+`SELVEDGE_RETENTION_DAYS_EVENTS`, …).
+
+---
+
+## Reviewing captured intent in a pull request
+
+`.selvedge/selvedge.db` is a SQLite file, so the reasoning inside it doesn't
+show up in a diff. Export a Markdown digest next to it and commit both:
+
+```bash
+selvedge export --format markdown -o .selvedge/DECISIONS.md
+git add .selvedge/
+```
+
+The digest is grouped by entity with **reverted decisions first**, and it is
+deterministic — regenerating with no new events produces a zero-line diff, so
+it stays reviewable instead of becoming noise everyone learns to skip. Heading
+anchors derive from the entity path, so links into it keep working as it
+grows. Regenerate it in the same commit as the code, or from a pre-commit
+hook.
 
 ---
 
@@ -700,7 +813,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.9   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.10   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only

@@ -349,3 +349,28 @@ def test_dockerfile_pins_the_database_out_of_the_build_context():
         "Dockerfile must pin SELVEDGE_DB so walk-up resolution can never "
         "select a database out of the build context"
     )
+
+
+def test_readme_action_pin_tracks_the_current_version():
+    """The README's CI snippet is a version surface like any other.
+
+    It sat at `@v0.3.9` through three point releases — stale, and after mcp
+    2.0.0 removed `mcp.server.fastmcp`, pointing at the one release that dies
+    at import. Anyone copying the snippet got a broken workflow.
+    """
+    import re
+
+    readme = (_REPO_ROOT / "README.md").read_text()
+    version_match = re.search(
+        r'^__version__ = "(.+)"$', (_REPO_ROOT / "selvedge" / "__init__.py").read_text(), re.M
+    )
+    assert version_match, "could not read __version__"
+    version = version_match.group(1)
+
+    pins = re.findall(r"uses:\s*masondelan/selvedge@v(\S+)", readme)
+    assert pins, "the README no longer shows a `uses: masondelan/selvedge@vX` pin"
+    stale = [p for p in pins if p != version]
+    assert not stale, (
+        f"README action pin(s) {stale} do not match the current version {version} "
+        "— bump them with the rest of the version surfaces"
+    )

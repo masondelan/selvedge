@@ -1,7 +1,7 @@
 {
   "name": "selvedge",
   "metadata": {
-    "description": "Self-hosted marketplace for Selvedge — change tracking for AI-era codebases. Captures the why behind every change as the agent makes it."
+    "description": "Decision provenance for AI-coded codebases: know what your agents already tried and rejected. Captures the why behind every change as an append-only, queryable audit trail — a git blame for decisions, with no LLM in the path."
   },
   "owner": {
     "name": "Mason Delan"
@@ -10,7 +10,7 @@
     {
       "name": "selvedge",
       "source": "./",
-      "description": "Change tracking for AI-era codebases — captures the why behind every change as the agent makes it. git blame for semantic entities (DB columns, functions, env vars, deps), with reasoning written by the agent in the same context that produced the change."
+      "description": "Decision provenance for AI-coded codebases: know what your agents already tried and rejected. Captures the why behind every change as an append-only, queryable audit trail — a git blame for decisions, with no LLM in the path."
     }
   ]
 }

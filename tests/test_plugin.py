@@ -570,3 +570,93 @@ def test_plugin_hook_subcommands_are_real():
     for entries in manifest["hooks"].values():
         subcommand = entries[0]["hooks"][0]["command"].split()[-1]
         assert subcommand in _HOOKS, f"{subcommand!r} is not a selvedge-hook subcommand"
+
+
+# ---------------------------------------------------------------------------
+# Description sync
+#
+# The repo carried five different one-liners and none was canonical.
+# `pyproject.toml`'s becomes the PyPI summary, which downstream directory
+# cards (Glama, mcpservers.org) echo verbatim — so a drifted line there
+# propagates to surfaces nobody on this repo controls. Enforced like version
+# sync, and for the same reason: it went wrong silently three releases running.
+# ---------------------------------------------------------------------------
+
+
+def _canonical_description() -> str:
+    """The canonical line, read from pyproject — the root of the propagation."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    text = (root / "pyproject.toml").read_text()
+    match = re.search(r'^description = "(.*)"$', text, re.M)
+    assert match, "pyproject.toml has no description"
+    return match.group(1)
+
+
+def test_description_sync_across_manifests():
+    """Every short-description surface carries the identical canonical line."""
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    canonical = _canonical_description()
+
+    def _json(rel):
+        return json.loads((root / rel).read_text())
+
+    marketplace = _json(".claude-plugin/marketplace.json")
+    surfaces = {
+        "server.json": _json("server.json")["description"],
+        ".claude-plugin/plugin.json": _json(".claude-plugin/plugin.json")["description"],
+        "npm/package.json": _json("npm/package.json")["description"],
+        ".claude-plugin/marketplace.json:metadata": marketplace["metadata"]["description"],
+        ".claude-plugin/marketplace.json:plugin": marketplace["plugins"][0]["description"],
+    }
+    drifted = {name: value for name, value in surfaces.items() if value != canonical}
+    assert not drifted, (
+        "these descriptions differ from the canonical line in pyproject.toml "
+        f"(which becomes the PyPI summary directories echo): {list(drifted)}"
+    )
+
+
+def test_manifest_long_description_contains_the_canonical_line():
+    """`manifest.json` may elaborate — it may not say something different."""
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    long_form = json.loads((root / "manifest.json").read_text())["description"]
+    canonical = _canonical_description()
+    assert long_form.startswith(canonical), (
+        "manifest.json's long description must open with the canonical line"
+    )
+
+
+def test_no_manifest_description_carries_a_release_specific_string():
+    """"New in vX" text goes stale the moment the next version ships.
+
+    `manifest.json` shipped "New in v0.3.9.2" to readers of v0.3.9.3. A
+    description is not a changelog; the CHANGELOG is.
+    """
+    import json
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    offenders = []
+    for rel in ("manifest.json", "server.json", ".claude-plugin/plugin.json",
+                "npm/package.json"):
+        text = json.loads((root / rel).read_text()).get("description", "")
+        if re.search(r"New in v\d", text, re.I):
+            offenders.append(rel)
+    marketplace = json.loads((root / ".claude-plugin" / "marketplace.json").read_text())
+    for label, text in (
+        ("marketplace:metadata", marketplace["metadata"]["description"]),
+        ("marketplace:plugin", marketplace["plugins"][0]["description"]),
+    ):
+        if re.search(r"New in v\d", text, re.I):
+            offenders.append(label)
+
+    assert not offenders, f"release-specific text in a description: {offenders}"

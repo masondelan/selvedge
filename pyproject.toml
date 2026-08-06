@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selvedge"
-version = "0.3.9.3"
-description = "Change tracking for AI-era codebases"
+version = "0.3.10"
+description = "Decision provenance for AI-coded codebases: know what your agents already tried and rejected. Captures the why behind every change as an append-only, queryable audit trail — a git blame for decisions, with no LLM in the path."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "selvedge",
   "display_name": "Selvedge",
-  "version": "0.3.9.3",
-  "description": "Long-term memory for AI-coded codebases. A local MCP server that captures the why behind every change agents make, then reads it back: with prior_attempts, the agent checks 'was this tried here before, and how did it turn out?' before it edits. git blame for semantic entities (DB columns, functions, env vars, deps). New in v0.3.9.2: Selvedge installs as a first-class Claude Code plugin (zero prior pip install \u2014 /plugin bootstraps the server via uvx, and ships the enforcement hook, a skill, and slash commands). The MCP server is unchanged from v0.3.9.1: an explicit supersede flow (reverted is no longer a permanent ban \u2014 the trail reads tried -> reverted -> re-opened), a PreToolUse hook that enforces the prior_attempts check, `selvedge import --from-git` to seed pre-Selvedge reverts, and optional semantic recall (selvedge[semantic]). Local SQLite, no LLM calls.",
-  "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning \u2014 the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code \u2014 your data stays yours.",
+  "version": "0.3.10",
+  "description": "Decision provenance for AI-coded codebases: know what your agents already tried and rejected. Captures the why behind every change as an append-only, queryable audit trail — a git blame for decisions, with no LLM in the path. Agents call `prior_attempts` before editing an entity — \"was this tried here before, and how did it turn out?\" — and the trail reads tried → reverted → re-opened, because a reverted decision is not a permanent ban. Entity-level rather than line-level: DB columns, functions, env vars, dependencies, API routes. Local SQLite, no telemetry of your code, and nothing downstream re-interprets what the agent wrote.",
+  "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning — the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code — your data stays yours.",
   "author": {
     "name": "Mason Delan",
     "email": "masondelan@gmail.com",
@@ -54,7 +54,7 @@
     {
       "name": "log_change",
       "title": "Log a code change",
-      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), or the entity_path doesn't match the\nusual shape for its entity_type, the result includes a `warnings`\narray \u2014 the event is still stored.\n\nRenames: pass the new path in `entity_path`, set `change_type=\"rename\"`,\nand pass the old path in `rename_from`. Selvedge then writes two events \u2014\na `rename` on the old path and a `create` on the new path with\n`metadata.renamed_from` set \u2014 so the entity's history follows it. Example:\n\n    log_change(\n        entity_path=\"src/auth/session.py::login\",   # new path\n        change_type=\"rename\",\n        rename_from=\"src/auth.py::login\",            # old path\n        entity_type=\"function\",\n        reasoning=\"Split auth.py into an auth/ package; login moved.\",\n    )\n\nOn validation failure (invalid change_type, missing entity_path, or\n`rename_from` set without change_type='rename') the result is\n`{\"status\": \"error\", \"error\": \"...\"}` with no event written.",
+      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), or the entity_path doesn't match the\nusual shape for its entity_type, the result includes a `warnings`\narray — the event is still stored.\n\nRenames: pass the new path in `entity_path`, set `change_type=\"rename\"`,\nand pass the old path in `rename_from`. Selvedge then writes two events —\na `rename` on the old path and a `create` on the new path with\n`metadata.renamed_from` set — so the entity's history follows it. Example:\n\n    log_change(\n        entity_path=\"src/auth/session.py::login\",   # new path\n        change_type=\"rename\",\n        rename_from=\"src/auth.py::login\",            # old path\n        entity_type=\"function\",\n        reasoning=\"Split auth.py into an auth/ package; login moved.\",\n    )\n\nOn validation failure (invalid change_type, missing entity_path, or\n`rename_from` set without change_type='rename') the result is\n`{\"status\": \"error\", \"error\": \"...\"}` with no event written.",
       "inputSchema": {
         "properties": {
           "entity_path": {
@@ -63,13 +63,13 @@
             "type": "string"
           },
           "change_type": {
-            "description": "What kind of change. One of: add, remove, modify, rename, retype, create, delete, index_add, index_remove, migrate. Invalid values are rejected \u2014 pick the closest match.",
+            "description": "What kind of change. One of: add, remove, modify, rename, retype, create, delete, index_add, index_remove, migrate. Invalid values are rejected — pick the closest match.",
             "title": "Change Type",
             "type": "string"
           },
           "diff": {
             "default": "",
-            "description": "The actual change \u2014 SQL migration text, code diff, or a human-readable description of what changed. Optional but strongly recommended for non-trivial changes.",
+            "description": "The actual change — SQL migration text, code diff, or a human-readable description of what changed. Optional but strongly recommended for non-trivial changes.",
             "title": "Diff",
             "type": "string"
           },
@@ -81,7 +81,7 @@
           },
           "reasoning": {
             "default": "",
-            "description": "Why the change was made. Include the user's original request, the problem being solved, or any context that won't be obvious from the diff alone. Good example: 'User asked to add 2FA \u2014 needs phone number to send SMS verification codes.' Avoid generic placeholders like 'user request' or 'done' \u2014 these are flagged by the quality validator and returned in `warnings`.",
+            "description": "Why the change was made. Include the user's original request, the problem being solved, or any context that won't be obvious from the diff alone. Good example: 'User asked to add 2FA — needs phone number to send SMS verification codes.' Avoid generic placeholders like 'user request' or 'done' — these are flagged by the quality validator and returned in `warnings`.",
             "title": "Reasoning",
             "type": "string"
           },
@@ -181,7 +181,7 @@
     {
       "name": "diff",
       "title": "Diff an entity's history",
-      "description": "Get change history for a codebase entity, newest first.\n\nSupports prefix matching \u2014 e.g. 'users' returns all events for the users\ntable and any users.* column.",
+      "description": "Get change history for a codebase entity, newest first.\n\nSupports prefix matching — e.g. 'users' returns all events for the users\ntable and any users.* column.",
       "inputSchema": {
         "properties": {
           "entity_path": {
@@ -230,7 +230,7 @@
     {
       "name": "blame",
       "title": "Blame an entity",
-      "description": "Most recent change to an entity \u2014 what changed, when, who, why.\n\nLike `git blame` but for semantic entities (DB columns, functions, env\nvars, dependencies) and AI agents. If no history exists for the entity,\nreturns `{\"error\": \"...\"}` with protocol-level `isError: false`.",
+      "description": "Most recent change to an entity — what changed, when, who, why.\n\nLike `git blame` but for semantic entities (DB columns, functions, env\nvars, dependencies) and AI agents. If no history exists for the entity,\nreturns `{\"error\": \"...\"}` with protocol-level `isError: false`.",
       "inputSchema": {
         "properties": {
           "entity_path": {
@@ -349,7 +349,7 @@
         "properties": {
           "since": {
             "default": "",
-            "description": "Time window \u2014 ISO 8601 datetime OR relative shorthand: '15m' (last 15 minutes), '24h' (last 24 hours), '7d' (last 7 days), '5mo' (last 5 months), '1y' (last year). 'm' means minutes; 'mo' or 'mon' means months. Unparseable values produce an error rather than silently returning empty results. Empty = all time.",
+            "description": "Time window — ISO 8601 datetime OR relative shorthand: '15m' (last 15 minutes), '24h' (last 24 hours), '7d' (last 7 days), '5mo' (last 5 months), '1y' (last year). 'm' means minutes; 'mo' or 'mon' means months. Unparseable values produce an error rather than silently returning empty results. Empty = all time.",
             "title": "Since",
             "type": "string"
           },
@@ -500,12 +500,12 @@
     {
       "name": "prior_attempts",
       "title": "Prior attempts on an entity",
-      "description": "Prior change attempts on an entity, each with an inferred outcome.\n\nCall this BEFORE editing an entity. If the same change was tried before\nand reverted, you get the prior `reasoning` and `change_type` plus an\ninferred `outcome` \u2014 so you can change your plan instead of repeating a\nrejected approach.\n\nEach result is a change event with three extra fields:\n\n  - `outcome`           \u2014 \"reverted\" (a later remove/delete on the same\n                          path) or \"active\" (no later removal seen).\n  - `confidence`        \u2014 \"proximity_high\" or \"proximity_low\".\n  - `outcome_reasoning` \u2014 the reverting event's reasoning (WHY it was\n                          rejected), or \"\" while still active.\n\nOutcome is inferred from add->remove proximity \u2014 v0.3.7 has no explicit\nreject/revert change types yet (those arrive in v0.3.11). Output is\ntemplated, deterministic, and makes no LLM call. This is a pull-only\ntool: it never writes and never pushes; you decide when to ask.\n\nConservative by design \u2014 `min_confidence` defaults to \"proximity_high\",\nso an empty list (nothing clearly tried-and-rejected) is the normal,\npreferred answer over a speculative false positive. Pass\n`min_confidence=\"proximity_low\"` to widen recall.",
+      "description": "Prior change attempts on an entity, each with an inferred outcome.\n\nCall this BEFORE editing an entity. If the same change was tried before\nand reverted, you get the prior `reasoning` and `change_type` plus an\ninferred `outcome` — so you can change your plan instead of repeating a\nrejected approach.\n\nEach result is a change event with three extra fields:\n\n  - `outcome`           — \"reverted\" (a later remove/delete on the same\n                          path) or \"active\" (no later removal seen).\n  - `confidence`        — \"proximity_high\" or \"proximity_low\".\n  - `outcome_reasoning` — the reverting event's reasoning (WHY it was\n                          rejected), or \"\" while still active.\n\nOutcome is inferred from add->remove proximity — v0.3.7 has no explicit\nreject/revert change types yet (those arrive in v0.3.11). Output is\ntemplated, deterministic, and makes no LLM call. This is a pull-only\ntool: it never writes and never pushes; you decide when to ask.\n\nConservative by design — `min_confidence` defaults to \"proximity_high\",\nso an empty list (nothing clearly tried-and-rejected) is the normal,\npreferred answer over a speculative false positive. Pass\n`min_confidence=\"proximity_low\"` to widen recall.",
       "inputSchema": {
         "properties": {
           "entity_path": {
             "default": "",
-            "description": "The entity you're about to change. Exact path with prefix matching \u2014 'users' also covers 'users.email'. Examples: 'src/auth.py::login', 'users.email', 'env/STRIPE_SECRET_KEY'. Provide this OR `description`.",
+            "description": "The entity you're about to change. Exact path with prefix matching — 'users' also covers 'users.email'. Examples: 'src/auth.py::login', 'users.email', 'env/STRIPE_SECRET_KEY'. Provide this OR `description`.",
             "title": "Entity Path",
             "type": "string"
           },
@@ -517,7 +517,7 @@
           },
           "min_confidence": {
             "default": "proximity_high",
-            "description": "Confidence floor. 'proximity_high' (default) returns only attempts that were clearly tried and then reverted within the window \u2014 the high-signal 'rejected before' cases. Pass 'proximity_low' to also see the noisy tail (still-active changes and far-apart reverts).",
+            "description": "Confidence floor. 'proximity_high' (default) returns only attempts that were clearly tried and then reverted within the window — the high-signal 'rejected before' cases. Pass 'proximity_low' to also see the noisy tail (still-active changes and far-apart reverts).",
             "title": "Min Confidence",
             "type": "string"
           },
@@ -566,12 +566,12 @@
     {
       "name": "stale_decisions",
       "title": "Stale decisions due for revisit",
-      "description": "Decisions whose `revisit_after` has passed AND that are still in active use.\n\nThe date-based half of active memory (v0.3.8). Returns events with a\n`revisit_after` now in the past \u2014 but ONLY when the entity is still live, so\nan old-but-correct decision nobody touches never nags. The required\nactive-use signal is one of: the entity was queried (`blame` / `diff` /\n`prior_attempts`) at or after the decision, or its `changeset_id` saw later\nactivity. Pure age alone does NOT surface.\n\nEach result is the change event plus four fields: `revisit_due` (UTC ISO),\n`days_overdue` (int, 0 on the due day), `active_use_signals` (list), and\n`stale_reason` (a one-line summary). Most-overdue first; filter by\n`entity_path`, `project`, or `agent`. Date-based only \u2014 `expires_when`\nevaluation lands in v0.3.11. Templated and deterministic; no LLM call.",
+      "description": "Decisions whose `revisit_after` has passed AND that are still in active use.\n\nThe date-based half of active memory (v0.3.8). Returns events with a\n`revisit_after` now in the past — but ONLY when the entity is still live, so\nan old-but-correct decision nobody touches never nags. The required\nactive-use signal is one of: the entity was queried (`blame` / `diff` /\n`prior_attempts`) at or after the decision, or its `changeset_id` saw later\nactivity. Pure age alone does NOT surface.\n\nEach result is the change event plus four fields: `revisit_due` (UTC ISO),\n`days_overdue` (int, 0 on the due day), `active_use_signals` (list), and\n`stale_reason` (a one-line summary). Most-overdue first; filter by\n`entity_path`, `project`, or `agent`. Date-based only — `expires_when`\nevaluation lands in v0.3.11. Templated and deterministic; no LLM call.",
       "inputSchema": {
         "properties": {
           "entity_path": {
             "default": "",
-            "description": "Optional filter to a single entity or path prefix \u2014 'users' also covers 'users.email'. Empty = every entity.",
+            "description": "Optional filter to a single entity or path prefix — 'users' also covers 'users.email'. Empty = every entity.",
             "title": "Entity Path",
             "type": "string"
           },

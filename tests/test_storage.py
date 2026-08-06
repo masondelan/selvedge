@@ -736,3 +736,150 @@ def test_renamed_entity_with_revisit_after_surfaces_in_stale(storage):
     due = storage.get_stale_decisions()
     paths = [d["entity_path"] for d in due]
     assert "src/new.py::f" in paths, f"renamed decision never became due: {due}"
+
+
+# ---------------------------------------------------------------------------
+# Deliberate guards — bounds and boundaries the source documents
+#
+# Each of these was executed by the suite but asserted by nothing: deleting or
+# inverting it left every test green. Where a bound is involved the assertion
+# is against the LITERAL value, never against the constant that produced the
+# output — comparing a result to its own input passes for any value.
+# ---------------------------------------------------------------------------
+
+
+def test_paths_related_respects_the_dot_boundary():
+    """`users` must not satisfy a decision on `users_audit.email`.
+
+    Without the literal `.`, a prefix check on `users` matches `users_audit`,
+    and a `blame users` call would count as having acknowledged an unrelated
+    table's reverted decision — the hook would stop blocking on it.
+    """
+    from selvedge.storage import _paths_related
+
+    assert _paths_related("users", "users.email")
+    assert _paths_related("users.email", "users")
+    assert _paths_related("users.email", "users.email")
+
+    assert not _paths_related("users", "users_audit.email")
+    assert not _paths_related("users", "users_audit")
+    assert not _paths_related("user", "users.email")
+
+
+def test_active_use_tools_includes_prior_attempts():
+    """Dropping it silently retires the wedge tool as an active-use signal.
+
+    A decision whose only evidence of still being in play is a
+    `prior_attempts` query would stop surfacing in `stale` entirely.
+    """
+    from selvedge.storage import _ACTIVE_USE_TOOLS
+
+    assert _ACTIVE_USE_TOOLS == frozenset({"blame", "diff", "prior_attempts"})
+
+
+def test_prior_attempts_query_alone_surfaces_a_due_decision(storage):
+    """The behavioural half of the constant above."""
+    storage.log_event(ChangeEvent(
+        entity_path="users.email", change_type="add",
+        revisit_after="2020-01-01",
+        reasoning="Chose a single email column over a separate contacts table.",
+    ))
+    storage.record_tool_call("prior_attempts", entity_path="users.email")
+
+    due = storage.get_stale_decisions()
+    assert [d["entity_path"] for d in due] == ["users.email"]
+    assert "queried" in due[0]["active_use_signals"]
+
+
+def test_stale_when_scan_limit_is_five_hundred(storage):
+    """Shrinking this stops `review_suggested` firing on any real store."""
+    from selvedge.storage import _STALE_WHEN_SCAN_LIMIT
+
+    assert _STALE_WHEN_SCAN_LIMIT == 500
+
+
+def test_review_suggested_still_fires_past_a_handful_of_events(storage):
+    """Behavioural guard on the scan window.
+
+    Dropping the limit to 5 leaves the constant's own test green but makes the
+    condition-based rule inert on every store with more than a few events.
+    """
+    storage.log_event(ChangeEvent(
+        entity_path="payments.card_token", change_type="add",
+        stale_when="payment provider changed",
+        reasoning="Storing card tokens ourselves put us in PCI scope.",
+    ))
+    for i in range(60):
+        storage.log_event(ChangeEvent(
+            entity_path=f"noise.col{i}", change_type="modify",
+            reasoning=f"unrelated churn {i}",
+        ))
+    storage.log_event(ChangeEvent(
+        entity_path="deps/stripe", change_type="modify",
+        reasoning="Migrated: our payment provider changed to Stripe Vault.",
+    ))
+
+    due = storage.get_stale_decisions()
+    flagged = [d for d in due if d["entity_path"] == "payments.card_token"]
+    assert flagged, (
+        "the stale_when match never fired — the recent-event scan window is "
+        f"too small to reach the triggering change. surfaced={due}"
+    )
+    assert flagged[0]["flag"] == "review_suggested"
+
+
+def test_get_history_default_limit_is_fifty(storage):
+    """`selvedge history` and the MCP tool silently truncate if this shrinks."""
+    for i in range(60):
+        storage.log_event(ChangeEvent(entity_path=f"t.c{i}", change_type="add"))
+    assert len(storage.get_history()) == 50
+    assert len(storage.get_history(limit=5)) == 5
+
+
+def test_get_prior_attempts_enforces_its_limit(storage):
+    """The wedge tool's output cap — unenforced, it returns the whole store."""
+    for i in range(12):
+        storage.log_event(ChangeEvent(
+            entity_path=f"users.col{i}", change_type="add",
+            reasoning=f"tried approach {i}"))
+        storage.log_event(ChangeEvent(
+            entity_path=f"users.col{i}", change_type="remove",
+            reasoning=f"reverted approach {i}"))
+
+    assert len(storage.get_prior_attempts(query="approach", limit=3)) == 3
+    assert len(storage.get_prior_attempts(query="approach", limit=1)) == 1
+
+
+def test_idless_supersede_does_not_reopen_a_later_revert(storage):
+    """A re-open cannot apply to a revert that came after it.
+
+    An id-less `supersede` re-opens by timestamp, bounded by
+    `>= closing_ts`. Drop that bound and *any* id-less supersede on the path
+    matches — including one that predates the revert, so a decision reverted
+    last month reads as currently re-opened.
+
+    Scoped by experiment, not by the source comment: A/B-ing the bound shows
+    this ordering case is the only outcome it changes. The comment also claims
+    it stops one revert's supersede flipping *earlier, unrelated* reverts, and
+    it does not — that case reads `reopened` with the bound in place. Tracked
+    separately rather than pinned here, so this test can't ossify a bug.
+    """
+    storage.log_event(ChangeEvent(
+        entity_path="users.token", change_type="add",
+        timestamp="2026-01-01T00:00:00Z", reasoning="Attempt."))
+    storage.log_event(ChangeEvent(
+        entity_path="users.token", change_type="supersede",
+        timestamp="2026-02-01T00:00:00Z", reasoning="Re-opened early."))
+    storage.log_event(ChangeEvent(
+        entity_path="users.token", change_type="remove",
+        timestamp="2026-03-01T00:00:00Z", reasoning="Reverted after the re-open."))
+
+    attempts = {
+        a["reasoning"]: a["outcome"]
+        for a in storage.get_prior_attempts(entity_path="users.token",
+                                            min_confidence="proximity_low")
+    }
+    assert attempts["Attempt."] == "reverted", (
+        "an id-less supersede re-opened a revert that happened after it — the "
+        f"`>= closing_ts` bound is not in effect. outcomes={attempts}"
+    )

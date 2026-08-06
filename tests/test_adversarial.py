@@ -44,16 +44,27 @@ def test_search_underscore_is_literal_not_wildcard(storage):
 
 
 def test_search_percent_is_literal_not_wildcard(storage):
-    """`100% off` shouldn't match every row in the DB."""
+    """`100% off` shouldn't match every row in the DB.
+
+    The negative row has to be one that matches the pattern *unescaped* or
+    this test proves nothing. Unescaped, `%100% off%` reads as
+    "anything, 100, anything, ' off', anything" — so the decoy below matches
+    it while never containing the literal string `100% off`. The previous
+    decoy was "auth feature", which could not match either way; the test
+    passed with the `%` escape deleted.
+    """
     storage.log_event(ChangeEvent(
         entity_path="config.discount_pct", change_type="add",
         reasoning="initial 100% off promo"))
     storage.log_event(ChangeEvent(
         entity_path="users.email", change_type="add",
-        reasoning="auth feature"))
+        reasoning="bumped the cap from 100 to 200 and switched the promo off"))
 
     rows = storage.search("100% off")
-    assert len(rows) == 1
+    assert len(rows) == 1, (
+        "the `%` in the query behaved as a LIKE wildcard — it must be escaped "
+        f"to a literal. matched: {[r['reasoning'] for r in rows]}"
+    )
     assert rows[0]["entity_path"] == "config.discount_pct"
 
 
@@ -148,11 +159,16 @@ def test_parse_time_empty_raises():
         parse_time_string("   ")
 
 
-def test_history_since_unparseable_returns_error_dict():
-    """The MCP history tool returns an error rather than empty results."""
-    import os
-    os.environ["SELVEDGE_DB"] = "/tmp/__test_unparseable.db"
-    Path("/tmp/__test_unparseable.db").unlink(missing_ok=True)
+def test_history_since_unparseable_returns_error_dict(tmp_path, monkeypatch):
+    """The MCP history tool returns an error rather than empty results.
+
+    Was assigning `os.environ` directly and never restoring it, so
+    `SELVEDGE_DB` leaked to session end pointing at a fixed `/tmp` path.
+    Inert as written, but it would have masked any later test that forgot to
+    set the variable — the exact failure the autouse fixture in `conftest.py`
+    now guards against.
+    """
+    monkeypatch.setenv("SELVEDGE_DB", str(tmp_path / "unparseable.db"))
     import selvedge.server as srv
     srv._storage = None
     try:

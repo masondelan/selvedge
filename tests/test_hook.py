@@ -70,8 +70,16 @@ def test_entity_tokens_skips_file_extensions_and_dedupes():
 
 
 def test_entity_tokens_capped():
+    """Asserts the literal bound, not the constant.
+
+    Comparing the output against `_MAX_ENTITY_CANDIDATES` compared the result
+    to the very thing that produced it, so *any* value passed — dropping the
+    cap to 4 left the suite green while the hook silently stopped considering
+    36 of every 40 candidate entities.
+    """
+    assert hook._MAX_ENTITY_CANDIDATES == 40
     text = " ".join(f"table_{i}.col_{i}" for i in range(100))
-    assert len(hook._entity_tokens(text)) == hook._MAX_ENTITY_CANDIDATES
+    assert len(hook._entity_tokens(text)) == 40
 
 
 def test_entity_tokens_extracts_sql_ddl():
@@ -812,3 +820,124 @@ def test_dry_run_still_reports_the_decision_when_disabled(tmp_path):
     )
     assert proc.returncode == 0
     assert json.loads(proc.stdout)["action"] == "allow"
+
+
+# ---------------------------------------------------------------------------
+# Deliberate guards
+#
+# A mutation pass found these executed on every run but asserted by nothing:
+# each could be deleted or inverted with the whole suite green. They cluster
+# in the hook because it is the newest surface, it runs on every gated tool
+# call, and its contract is "never block on a miss" — so the mutations most
+# likely to arise from ordinary refactoring turn it into a false-positive
+# blocker while CI stays green.
+# ---------------------------------------------------------------------------
+
+
+def test_session_back_slack_is_thirty_minutes():
+    """The only guard stopping the hook from blocking a *compliant* agent.
+
+    The documented order is "query prior_attempts, then edit". Without the
+    back-slack, the session window starts at the first gated edit, so a query
+    made moments earlier falls outside it and the compliant agent is blocked.
+    """
+    from datetime import timedelta
+
+    assert hook._SESSION_BACK_SLACK == timedelta(minutes=30)
+
+
+def test_back_slack_allows_a_query_made_just_before_the_first_edit(tmp_path, monkeypatch):
+    """Pins the slack's magnitude, not just its sign.
+
+    The `prior_attempts` call is recorded BEFORE the first `evaluate()` — i.e.
+    before any session window exists — which is exactly the compliant order.
+    Setting the slack to zero makes this block.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    db = tmp_path / ".selvedge" / "selvedge.db"
+    db.parent.mkdir(parents=True)
+    storage = SelvedgeStorage(db)
+    storage.log_event(ChangeEvent(entity_path="users.sso_token", change_type="add",
+                                  reasoning="Tried a dedicated SSO token column."))
+    storage.log_event(ChangeEvent(entity_path="users.sso_token", change_type="remove",
+                                  reasoning="Reverted: tokens belong in sessions."))
+
+    # `record_tool_call` always stamps "now", so the 20-minute gap is created
+    # by advancing the edit instead of backdating the query. Same thing from
+    # the window's point of view, and it needs no test-only writer.
+    storage.record_tool_call("prior_attempts", entity_path="users.sso_token", agent="a")
+    edit_time = datetime.now(timezone.utc) + timedelta(minutes=20)
+
+    decision = hook.evaluate({
+        "session_id": "fresh-session-never-seen-before",
+        "cwd": str(tmp_path),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "migrations/0003.sql",
+                       "new_string": "ALTER TABLE users ADD COLUMN sso_token TEXT;"},
+    }, now=edit_time)
+
+    # Pins magnitude, not sign: this passes only while the slack exceeds the
+    # 20-minute gap, so shrinking 30min → 0 (or → 5min) fails it.
+    assert decision.action == "allow", (
+        "a compliant agent that queried 20 minutes before editing was blocked "
+        f"— the 30-minute back-slack is not in effect. reason={decision.reason!r}"
+    )
+
+
+def test_unknown_subcommand_exits_1_not_2():
+    """Exit 2 is Claude Code's *block* code — 1 must never become 2.
+
+    A stale `.claude/settings.json` entry pointing at a renamed subcommand
+    would then block every Edit/Write/Bash in the session, with a usage dump
+    delivered to the agent as the blocking reason.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-m", "selvedge.hooks.cli", "definitely-not-a-hook"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 1, (
+        f"unknown subcommand exited {proc.returncode}; 2 would block every "
+        "gated tool call in the session"
+    )
+
+
+def test_session_id_cannot_escape_the_state_directory(tmp_path):
+    """`session_id` is payload-supplied, so it is untrusted filename input."""
+    assert hook._sanitize_session_id("../../PWNED") == ".._.._PWNED"
+    assert hook._sanitize_session_id("a/b/../c") == "a_b_.._c"
+    assert "/" not in hook._sanitize_session_id("x/y")
+    assert hook._sanitize_session_id("") == "unknown-session"
+    assert hook._sanitize_session_id(None) == "unknown-session"
+    assert hook._sanitize_session_id(12345) == "unknown-session"
+    assert len(hook._sanitize_session_id("z" * 500)) == 128
+
+
+def test_traversal_session_id_writes_inside_the_state_dir(tmp_path):
+    """The behavioural half: state must land under hook_sessions/, always."""
+    from datetime import datetime, timezone
+
+    state_dir = tmp_path / "hook_sessions"
+    hook._session_window_start(
+        state_dir, hook._sanitize_session_id("../../PWNED"),
+        datetime.now(timezone.utc),
+    )
+    assert not (tmp_path.parent.parent / "PWNED.json").exists()
+    written = list(state_dir.glob("*.json"))
+    assert len(written) == 1
+    assert written[0].parent == state_dir
+
+
+def test_block_message_truncates_and_reports_the_remainder():
+    """The `(+N more entities)` branch was never executed by any test."""
+    assert hook._MAX_BLOCKED_REPORTED == 3
+    blocked = [
+        {"entity": f"t{i}.c{i}", "tried_reasoning": f"tried {i}",
+         "reverted_reasoning": f"reverted {i}"}
+        for i in range(5)
+    ]
+    message = hook._block_message(blocked)
+
+    assert "t0.c0" in message and "t2.c2" in message
+    assert "t3.c3" not in message and "t4.c4" not in message
+    assert "(+2 more entities)" in message

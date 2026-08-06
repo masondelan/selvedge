@@ -542,3 +542,38 @@ def test_log_change_supersede_keeps_diff_and_revisit_after():
     assert latest["change_type"] == "supersede"
     assert latest["diff"] == "ALTER TABLE pay ADD COLUMN token TEXT;"
     assert latest["revisit_after"] == "180d"
+
+
+def test_search_respects_its_limit():
+    """The tool's `limit` argument was decorative — nothing asserted it.
+
+    Hardcoding the query's bound leaves every search returning up to 1000
+    rows regardless of what the caller asked for, which on a large store is
+    both a latency and a context-window problem.
+    """
+    for i in range(10):
+        log_change(entity_path=f"users.col{i}", change_type="add",
+                   reasoning="shared searchable reasoning token zzmarker")
+
+    assert len(search("zzmarker", limit=3)) == 3
+    assert len(search("zzmarker", limit=1)) == 1
+    assert len(search("zzmarker")) == 10
+
+
+def test_prior_attempts_respects_its_limit():
+    """Same shape, on the wedge tool — its output cap was unenforced."""
+    for i in range(8):
+        log_change(entity_path=f"users.col{i}", change_type="add",
+                   reasoning="tried the zzapproach variant")
+        log_change(entity_path=f"users.col{i}", change_type="remove",
+                   reasoning="reverted the zzapproach variant")
+
+    assert len(prior_attempts(description="zzapproach", limit=3)) == 3
+    assert len(prior_attempts(description="zzapproach", limit=1)) == 1
+
+
+def test_history_respects_its_limit():
+    for i in range(60):
+        log_change(entity_path=f"t.c{i}", change_type="add")
+    assert len(history()) == 50
+    assert len(history(limit=5)) == 5

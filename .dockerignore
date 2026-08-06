@@ -1,19 +1,37 @@
-# Keep the Docker MCP Catalog image lean — pip builds the wheel from pyproject
-# (the selvedge/ package only), so none of this needs to land in the build
-# context. Excluding .git in particular keeps the whole history out of the image.
-.git
-.github
-tests
-launch
-docs
-demos
-*.pyc
-__pycache__
-.venv
-.mypy_cache
-.ruff_cache
-.pytest_cache
-htmlcov
-dist
-build
-*.egg-info
+# Build context for the Selvedge MCP Catalog image.
+#
+# This is an ALLOWLIST: deny everything, then re-admit exactly what
+# `pip install .` needs. The wheel target is `packages = ["selvedge"]` and
+# `readme = "README.md"` is read for package metadata at build time, so those
+# four entries are the whole requirement.
+#
+# Why an allowlist rather than a deny list. A deny list has to be extended
+# every time an internal-only file is added to the tree, and when someone
+# forgets, it over-ships silently. This form fails the other way: anything not
+# named below is simply absent, so a mistake breaks the build loudly instead of
+# shipping something it shouldn't. It also keeps `.git` out, which is what
+# keeps the whole history from landing in the image.
+#
+# The specific leak that motivated this: `.selvedge/` is git-tracked on purpose
+# (Selvedge dogfoods itself), and `COPY . /app` with `WORKDIR /app` put the
+# maintainer's store exactly where the entrypoint's walk-up DB resolution would
+# select it — so the container served someone else's change history as its
+# default state. Locally, `docker build .` also swept in `CLAUDE.local.md`,
+# `internal/` and the rest of the git-excluded internal-ops material.
+*
+!selvedge/
+!pyproject.toml
+!README.md
+!LICENSE
+
+# Re-exclude what could otherwise ride in under `selvedge/`. Docker's matcher
+# is non-recursive, so these need the `**/` prefix to match at any depth — a
+# bare `__pycache__` only ever matched the one at the context root.
+**/__pycache__
+**/*.pyc
+**/.selvedge
+**/*.db
+**/*.db-journal
+**/*.db-shm
+**/*.db-wal
+**/.DS_Store

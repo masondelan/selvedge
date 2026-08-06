@@ -12,6 +12,7 @@ Skips cleanly when run outside a git checkout (e.g. from an unpacked sdist).
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -157,3 +158,194 @@ def test_mcp_publisher_download_is_pinned_and_verified():
     publish = (root / ".github" / "workflows" / "publish.yml").read_text()
     assert "releases/latest/download" not in publish, "mcp-publisher is unpinned"
     assert "sha256sum -c" in publish, "mcp-publisher download is not checksum-verified"
+
+
+# --------------------------------------------------------------------------
+# Docker build context
+#
+# `.gitignore` gets a hygiene guard above; `.dockerignore` needs the same one,
+# and for a sharper reason. `.selvedge/` is git-*tracked* on purpose, so the
+# gitignore guard structurally cannot catch it — it took `COPY . /app` plus
+# `WORKDIR /app` to turn that into a container that resolved the maintainer's
+# dogfood store as its own database.
+#
+# Asserting the `.dockerignore` *text* would be worthless (the original file
+# looked fine and was wrong, because Docker's matcher is non-recursive and a
+# bare `__pycache__` only matches at the context root). So this ports Docker's
+# actual matcher — moby/patternmatcher — and asserts the resulting file set.
+# --------------------------------------------------------------------------
+
+# Characters `Pattern.compile` escapes rather than passing through to the
+# regexp. `[` and `]` are deliberately absent: Docker passes those through so
+# character classes keep working.
+_REGEXP_META = set(".+()|{}^$\\")
+
+
+class _DockerPattern:
+    """One `.dockerignore` line, compiled the way Docker compiles it."""
+
+    def __init__(self, line: str) -> None:
+        self.exclusion = line.startswith("!")  # Docker's name for a `!` re-include
+        raw = line[1:] if self.exclusion else line
+        # Docker runs filepath.Clean on the pattern, which drops trailing
+        # slashes — this is why `!selvedge/` and `!selvedge` behave alike.
+        self.cleaned = raw.strip().rstrip("/") or "."
+        self.regex = re.compile(self._to_regex(self.cleaned))
+
+    @staticmethod
+    def _to_regex(pattern: str) -> str:
+        out = "^"
+        i, n = 0, len(pattern)
+        while i < n:
+            ch = pattern[i]
+            if ch == "*":
+                if i + 1 < n and pattern[i + 1] == "*":
+                    i += 1
+                    if i + 1 < n and pattern[i + 1] == "/":
+                        i += 1  # treat `**/` as `**` and eat the slash
+                    if i + 1 == n:
+                        out += ".*"  # trailing `**` accepts everything
+                    else:
+                        out += "(.*/)?"  # any number of path segments, incl. zero
+                else:
+                    out += "[^/]*"  # a single `*` never crosses a separator
+            elif ch == "?":
+                out += "[^/]"
+            elif ch in _REGEXP_META:
+                out += "\\" + ch
+            else:
+                out += ch
+            i += 1
+        return out + "$"
+
+    def matches(self, path: str) -> bool:
+        return self.regex.match(path) is not None
+
+
+def _load_dockerignore() -> list[_DockerPattern]:
+    text = (_REPO_ROOT / ".dockerignore").read_text()
+    patterns = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        patterns.append(_DockerPattern(stripped))
+    return patterns
+
+
+def _is_excluded(path: str, patterns: list[_DockerPattern]) -> bool:
+    """Port of ``patternmatcher.MatchesOrParentMatches``.
+
+    Last match wins, and a pattern also matches a path when it matches any of
+    that path's parent directories — which is what lets a bare `*` exclude a
+    whole tree and a later `!selvedge` pull one subtree back out of it.
+    """
+    matched = False
+    parent = path.rsplit("/", 1)[0] if "/" in path else "."
+    parent_dirs = parent.split("/") if parent != "." else []
+
+    for pattern in patterns:
+        # Docker skips a pattern that cannot change the current verdict.
+        if pattern.exclusion != matched:
+            continue
+        hit = pattern.matches(path)
+        if not hit:
+            for i in range(len(parent_dirs)):
+                if pattern.matches("/".join(parent_dirs[: i + 1])):
+                    hit = True
+                    break
+        if hit:
+            matched = not pattern.exclusion
+    return matched
+
+
+def _build_context() -> set[str]:
+    """Every path that `docker build .` would send from the current worktree.
+
+    Walks the working tree rather than `git ls-files` on purpose: the leak this
+    guards is that a *local* `docker build .` sweeps up untracked internal-ops
+    files (`CLAUDE.local.md`, `internal/`) that a tracked-files view can't see.
+    """
+    patterns = _load_dockerignore()
+    # Pruning an excluded directory is only safe when no `!` pattern could
+    # reach inside it. Every exception in the file is a literal path, so a
+    # prefix test settles it exactly.
+    exception_roots = [p.cleaned for p in patterns if p.exclusion]
+
+    included: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(_REPO_ROOT):
+        rel_dir = os.path.relpath(dirpath, _REPO_ROOT).replace(os.sep, "/")
+        for name in list(dirnames):
+            rel = name if rel_dir == "." else f"{rel_dir}/{name}"
+            if _is_excluded(rel, patterns) and not any(
+                root == rel or root.startswith(rel + "/") for root in exception_roots
+            ):
+                dirnames.remove(name)
+        for name in filenames:
+            rel = name if rel_dir == "." else f"{rel_dir}/{name}"
+            if not _is_excluded(rel, patterns):
+                included.add(rel)
+    return included
+
+
+def test_docker_build_context_carries_no_store_and_nothing_internal():
+    """The image must not ship a database, or any git-excluded internal file.
+
+    The store is the sharp one: `.selvedge/selvedge.db` is tracked, so it
+    reached the image through `COPY . /app` and then *won* DB resolution,
+    because walk-up from the `WORKDIR` finds it before the `~/.selvedge/`
+    fallback the Dockerfile's own comment promises.
+    """
+    context = _build_context()
+
+    offenders = sorted(
+        p
+        for p in context
+        if "/.selvedge/" in f"/{p}"
+        or p.endswith((".db", ".db-journal", ".db-shm", ".db-wal"))
+        or p.endswith(".docx")
+        or p == "CLAUDE.local.md"
+        or p == ".coverage"
+        or p.startswith(("internal/", ".claude/", ".git/", "launch/", "tests/"))
+        or _INTERNAL_RE.search(p)
+    )
+    assert not offenders, (
+        "these would be copied into the Docker image — the build context must "
+        f"carry neither a Selvedge store nor internal-only material: {offenders}"
+    )
+
+
+def test_docker_build_context_is_exactly_the_install_set():
+    """Assert the artifact, not the config — the same shape as the sdist test.
+
+    `.dockerignore` is an allowlist, so this is what makes it meaningful: the
+    context is pinned to what `pip install .` actually reads, and anything new
+    lands here as a failure rather than in the published image.
+    """
+    context = _build_context()
+
+    non_package = sorted(p for p in context if not p.startswith("selvedge/"))
+    assert non_package == ["LICENSE", "README.md", "pyproject.toml"], (
+        f"docker build context drifted outside the install set: {non_package}"
+    )
+
+    # The package itself must arrive as source only — no caches, no store.
+    package_junk = sorted(
+        p
+        for p in context
+        if p.startswith("selvedge/") and not p.endswith((".py", ".md", ".json", ".toml"))
+    )
+    assert not package_junk, f"non-source files inside the shipped package: {package_junk}"
+
+
+def test_dockerfile_pins_the_database_out_of_the_build_context():
+    """Belt and braces: even a context leak must not become a wrong database.
+
+    Without this, the failure mode is silent — the server starts healthy and
+    serves whatever store happened to land under the WORKDIR.
+    """
+    dockerfile = (_REPO_ROOT / "Dockerfile").read_text()
+    assert re.search(r"^ENV\s+SELVEDGE_DB=", dockerfile, re.MULTILINE), (
+        "Dockerfile must pin SELVEDGE_DB so walk-up resolution can never "
+        "select a database out of the build context"
+    )

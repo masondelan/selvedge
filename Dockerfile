@@ -18,7 +18,16 @@ WORKDIR /app
 COPY . /app
 RUN pip install --no-cache-dir .
 
-# selvedge-server speaks MCP over stdio. With no project mounted, SELVEDGE_DB
-# defaults to ~/.selvedge/selvedge.db inside the container; mount a project (see
-# the run.volumes block in the catalog server.yaml) to use its .selvedge/ store.
+# selvedge-server speaks MCP over stdio. Pin the store explicitly rather than
+# letting the entrypoint resolve it: `SELVEDGE_DB` is step 1 of the resolution
+# chain, so this makes it impossible for the walk-up in step 2 to select
+# anything under /app, even if a future build-context change slips a
+# `.selvedge/` back in. (`.dockerignore` is the primary defense; this is the
+# backstop, because the failure is silent — the server comes up healthy and
+# serves the wrong history.) Selvedge creates the parent directory on first
+# use. Mount a host directory at /data to persist a store across runs:
+#
+#   docker run -i --rm -v "$PWD/.selvedge:/data" <image>
+#
+ENV SELVEDGE_DB=/data/selvedge.db
 ENTRYPOINT ["selvedge-server"]

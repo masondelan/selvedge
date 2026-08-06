@@ -32,7 +32,7 @@ set -eu
 # Pinned Selvedge version. Kept in lockstep with .claude-plugin/plugin.json
 # by tests/test_plugin.py::test_launcher_pin_matches_plugin_version — bump
 # both together (see CLAUDE.md "Version bump checklist").
-SELVEDGE_PLUGIN_PIN="0.3.9.3"
+SELVEDGE_PLUGIN_PIN="0.3.10"
 
 entry="${1:?selvedge-resolve: missing entrypoint argument}"
 shift

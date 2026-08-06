@@ -6,6 +6,147 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.10] — 2026-08-06
+
+**Config + delivery.** A deliberate two-theme release: the memory comes to the
+agent, and the store gets its dials. Ships alongside the closure of the five
+issues left open by the 2026-08-01 review.
+
+The delivery half answers a measured failure mode rather than a hunch. Two
+independent 2026 papers — "Delivery, Not Storage" (arXiv 2607.20972) and
+PROJECTMEM (arXiv 2606.12329) — recorded pull-model memory tools going unused:
+zero voluntary memory operations across 114 turns against a pre-seeded store,
+while deterministic injection landed every time. Selvedge already shipped the
+gate half; what was missing was delivery when there is nothing to veto.
+
+The version number is also the fix for a distribution problem. The official MCP
+Registry's latest-resolution is semver-shaped and cannot rank four-segment
+PEP 440 releases above `0.3.9`, so `?version=latest` served 0.3.9 — the one
+release that dies at import. Three-segment `0.3.10` is the durable correction.
+
+### Added
+
+- **SessionStart delivery hook.** Injects a compact, relevance-gated digest as
+  a session begins: decisions due for revisit, entities whose standing verdict
+  is *reverted*, recent changesets. Quiet when there is nothing to say,
+  size-capped via `digest_max_bytes`, read-only, fail-open, templated. Emitted
+  through `hookSpecificOutput.additionalContext` — plain stdout is ignored by
+  the harness.
+- **PreCompact delivery hook.** Fires immediately before context compaction
+  destroys the session's reasoning and names watched entities edited this
+  session with no `log_change` recorded, subtracting what is already stored.
+  **Advisory only** — the hook API allows a veto via exit code 2 or
+  `{"decision": "block"}`, and Selvedge uses neither. Blocking compaction does
+  not inconvenience a tool call; it wedges the session. Asserted in tests.
+- **`selvedge export --format markdown`.** A deterministic, stably-anchored
+  digest of the store, grouped by entity with reverted decisions first,
+  designed to be committed next to `.selvedge/` so captured intent is
+  reviewable in a diff. Regenerating with no new events produces a zero-line
+  diff. Zero-LLM, no new MCP tool.
+- **First-class `.selvedge/config.toml`** with the full key set —
+  `retention_days_events` (default: never), `retention_days_tool_calls`,
+  `backup_keep_last`, `diff_bytes`, `reasoning_bytes`, `db_size_warn_mb`,
+  `stale_days`, `digest_max_bytes`, `redaction_patterns` — and a canonical
+  precedence chain: CLI flag > env var > project config > global
+  `~/.selvedge/config.toml` > default. `SELVEDGE_DB` remains the one exception
+  and always wins for database resolution. `selvedge doctor` prints the
+  effective value and the precedence step for every setting.
+- **`selvedge prune --include-events`.** The first path that can delete
+  captured reasoning, so it requires *both* an interactive confirmation and
+  `SELVEDGE_DESTRUCTIVE=1`, plus an audit line in `.selvedge/prune.log`.
+  Neither gate alone is enough: `--yes` in a cron entry defeats a prompt, and a
+  shell profile defeats an env var. Events retention defaults to infinity.
+- **Event-size bounds at log time.** `diff_bytes` / `reasoning_bytes` truncate
+  with a `…[truncated NNKB]` marker, a warning in the existing warnings list,
+  and a count in `selvedge stats`. Loud on purpose — silently clipping the
+  reasoning behind a decision is the loss this tool exists to prevent.
+- **Secret-shape warnings at `log_change`.** A conservative built-in set
+  (vendor-prefixed keys, PEM headers, bearer tokens, `SECRET=<opaque>`
+  assignments, credentialed connection strings), extendable via
+  `redaction_patterns`, checked on both surfaces into the existing `warnings`
+  list. Warn, never reject. A `doctor` row scans what is already stored, since
+  the write-time check cannot see it. Closes the cross-cutting risk register's
+  "reasoning stored verbatim in a committed store" entry, whose prior
+  mitigation was documentation.
+- **`doctor` gains** a database-size warning against `db_size_warn_mb`, a
+  per-setting config-precedence readout, and the stored-secret scan.
+
+### Changed
+
+- **One canonical description, everywhere, enforced.** The repo carried five
+  different one-liners and none was canonical — including `pyproject.toml`'s,
+  which becomes the PyPI summary that downstream directory cards echo verbatim.
+  All short-description surfaces now carry an identical line derived from
+  `docs/positioning.md`; `manifest.json` may elaborate but must open with it.
+  A description-sync test sits beside the version-sync test, plus an assertion
+  that no description embeds release-specific "New in vX" text — `manifest.json`
+  was shipping "New in v0.3.9.2" to readers of v0.3.9.3.
+- **README positioning.** Rejected paths lead; determinism is stated as shared
+  ground rather than a separator (OpenLore is deterministic-native too) with
+  append-only testimony as the actual wedge. The comparison table gains a
+  "Rejected paths" column, corrects Git AI's mechanism (agent-invoked
+  checkpoint → Git notes, **not** git hooks), disambiguates the two AgentDiff
+  projects by owner and URL, and links every entry. The posture line —
+  *local-first by default, team-server by choice, zero-LLM always* — is now in
+  the README.
+- **The README CI-snippet action pin joins the version-bump surfaces**, with a
+  hygiene test grepping it against the current version. It sat at `v0.3.9`
+  through three point releases: stale, and post-mcp-2.0 non-installable.
+- `.selvedge/config.toml` settings are read through one shared layer rather
+  than per-command, and both `log_change` write paths share one limits check.
+
+### Fixed
+
+- **The PreToolUse hook's allow path is ~40% faster** — p50 33.6 ms → 20.1 ms
+  per gated tool call against a 14 ms interpreter floor, measured n=60
+  interleaved. The hook's own logic was always 0.58 ms; the rest was import
+  cost for work the common path never does. Heavy imports moved below the
+  early return, `Decision` is no longer a `@dataclass`, and the public API
+  resolves lazily (PEP 562) so importing any `selvedge.*` submodule no longer
+  pulls the whole surface. **`SELVEDGE_HOOK_DISABLE=1` now actually
+  short-circuits** — it was checked after every import had run, so it measured
+  the same as not setting it. Verified byte-identical across 13 payloads.
+  (#20)
+- **`log_change` no longer discards `revisit_after`, `constraint` and
+  `stale_when`** on the rename and supersede branches, or `diff` on supersede.
+  They were accepted, validated, then dropped, with `{"status": "logged",
+  "warnings": []}` returned — so a decision recorded at a rename never
+  surfaced in `selvedge stale`. Fixed in storage so both surfaces inherit it.
+  (#21)
+- **The Docker image no longer ships the maintainer's database.** `.selvedge/`
+  is git-tracked by design, and `COPY . /app` with `WORKDIR /app` put it where
+  the entrypoint's walk-up resolution selected it — the container served
+  someone else's change history as its default state. `.dockerignore` is now a
+  fail-closed allowlist, `SELVEDGE_DB` is pinned in the image, and a hygiene
+  test ports Docker's own matcher to assert the resulting file set. (#22)
+- **The CLI and the MCP server return identical structures.** `metadata` was a
+  dict on `blame` and a JSON string on five other read surfaces, so the
+  documented `event["metadata"]["renamed_from"]` idiom raised `TypeError`
+  everywhere but `blame`; `prior_attempts --fuzzy` returned lists of different
+  lengths with a malformed note row; an empty changeset was `[]` on one surface
+  and an error list on the other. A shared presenter layer now backs both.
+  `doctor`'s check engine moved to `selvedge/diagnostics.py`, resolving a
+  forward reference that only worked because it was read at call time. (#26)
+- **~12 deliberate guards were executed but unasserted** — each deletable with
+  the suite green. Mutation score on the sampled set: 64% → 100%. Includes a
+  test that had decayed to a no-op and one that compared its result against the
+  constant that produced it. Adds the repo's first `tests/conftest.py`, pinning
+  `SELVEDGE_DB` to a temp path so no test can reach the real store. (#23)
+
+### Notes
+
+- Test suite 826 → 984. The soft budget for this phase is ≤45 new tests and
+  this release exceeds it, which the budget discipline requires calling out:
+  the overrun is the cost of the two-theme combine (config and delivery each
+  carry their own suite) plus the five review issues folded in, of which #23 is
+  a pure test-coverage issue. Coverage 88.3% → 89.0%.
+- Schema tax unchanged at 3705/3800 tokens — no MCP tool signatures were
+  touched, and no tools were added.
+- The config and delivery halves landed as separate commit series so either can
+  be reverted without dragging the other.
+
+---
+
 ## [0.3.9.3] — 2026-08-01
 
 **Unbreaks `pip install selvedge`, plus a full code-quality pass.** `mcp` 2.0.0

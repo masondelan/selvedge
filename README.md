@@ -224,17 +224,15 @@ references.
 There's a fast-growing "git blame for AI agents" category. Here's where
 Selvedge fits — and where it deliberately doesn't.
 
-|  | Reasoning source | Granularity | Mechanism | Grouping | Storage |
-|---|---|---|---|---|---|
 |  | Rejected paths | Reasoning source | Granularity | Mechanism | Grouping | Storage |
 |---|---|---|---|---|---|---|
 | **Selvedge** | **Queryable** — `prior_attempts` returns tried → reverted → re-opened | **Captured live**, by the agent in the same context that produced the change | **Entity** — DB column, table, env var, dep, API route, function | **MCP server** — agent calls it as work happens | **Changesets** — named feature/task slugs across many entities | SQLite, zero deps |
 | [OpenLore](https://github.com/clay-good/OpenLore) | Purged — `rejected` is an inactive status, dropped from the queryable store after each decision sync (the annotation survives in the synced spec markdown) | **Derived** — tree-sitter static analysis of code state, plus commit-gated decision notes | AST node (18 languages + 12 IaC) | MCP server — one-time index + commit-time certificates | Call-graph edges | SQLite graph in `.openlore/` |
-| [AgentDiff (sunilmallya)](https://github.com/sunilmallya/agentdiff) | None | **Inferred post-hoc** by Claude Haiku from the diff at session end | Line | Git pre/post-commit hook | None | JSONL on disk |
-| [AgentDiff (codeprakhar25)](https://github.com/codeprakhar25/agentdiff) | None | ed25519-signed cross-agent provenance | Line | Git hook | None | Local |
-| [Origin](https://github.com/mattzcarey/origin) | None | Captured at commit time | Line | Git hook | None | Local |
-| [Git AI](https://github.com/oleander/git-ai) | None | Attribution metadata | Line | **Agent-invoked checkpoint** → Git notes at commit | None | Git notes |
-| [BlamePrompt](https://github.com/blameprompt/blameprompt) | None | Prompt-only | Line | Git hook | None | Local |
+| [AgentDiff (sunilmallya)](https://github.com/sunilmallya/agentdiff) | None | **Inferred post-hoc** by Claude Haiku from the diff at session end | Line | Claude Code lifecycle hooks → local daemon | Session/task | JSONL on disk |
+| [AgentDiff (codeprakhar25)](https://github.com/codeprakhar25/agentdiff) | None | ed25519-signed cross-agent provenance | Line | Per-agent editor hooks + git hooks (sign at commit) | None | Signed traces in git refs |
+| [Origin](https://github.com/opsworks-co/origin-cli) | None — `rework` flags reverted AI code post-hoc, without rationale | Prompt receipts, captured live per turn | Line | Agent lifecycle hooks + git post-commit hook | None | Git notes + sessions branch |
+| [Git AI](https://github.com/git-ai-project/git-ai) | None | Attribution metadata | Line | **Agent-invoked checkpoint** → Git notes at commit | None | Git notes |
+| [BlamePrompt](https://github.com/Ekaanth/blameprompt) | None | Prompt receipts — prompt, cost, tools; no stated rationale | Line | Agent-lifecycle hooks + post-commit hook | None | Git notes |
 
 **Why "rejected paths" matter — the one that isn't copyable.** The expensive
 failure isn't forgetting why a column exists. It's an agent confidently

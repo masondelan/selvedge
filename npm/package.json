@@ -1,6 +1,6 @@
 {
   "name": "selvedge-mcp",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "pypiVersion": "0.3.10",
   "description": "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected.",
   "bin": {

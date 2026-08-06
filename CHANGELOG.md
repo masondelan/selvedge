@@ -6,7 +6,7 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
-## [0.3.10] — 2026-08-06
+## [0.3.10] — 2026-08-05
 
 **Config + delivery.** A deliberate two-theme release: the memory comes to the
 agent, and the store gets its dials. Ships alongside the closure of the five

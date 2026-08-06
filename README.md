@@ -274,7 +274,7 @@ that produced it, is the reason there's no second model in the path to
 hallucinate an explanation. An empty `reasoning` field is itself an honest
 signal: the agent didn't have one.
 
-<sub>Comparison current as of 2026-08-06; OpenLore at v2.1.8 / 265★,
+<sub>Comparison current as of 2026-08-05; OpenLore at v2.1.8 / 265★,
 verified against its source. Corrections welcome as an issue.</sub>
 
 **Why "changesets" matter.** A Stripe billing rollout touches the `users`

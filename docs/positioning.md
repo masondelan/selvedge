@@ -1,6 +1,7 @@
 # Positioning — canonical
 
-**Status:** current as of 2026-07-26. Supersedes the differentiator framing in
+**Status:** current as of 2026-08-06 (OpenLore purge scoping amended against the
+2026-08-05 source-verified brief). Supersedes the differentiator framing in
 `README.md` §"How Selvedge compares", `docs/comparison.html`, and
 `docs/index.html`. This file is the source of truth; if copy anywhere disagrees
 with this doc, the copy is wrong.
@@ -73,11 +74,20 @@ elsewhere:
   `purgeInactiveDecisions` (`src/core/decisions/store.ts`, docstring: "Drop all
   inactive decisions — their content is already in ADRs / spec.md") runs after
   every decision sync (`src/core/decisions/syncer.ts`), and `INACTIVE_STATUSES`
-  includes `rejected`. Precision matters here: a rejection *annotation*
-  survives in their synced spec markdown — what disappears is the **queryable
-  record**. Nothing in OpenLore can answer `prior_attempts`' question. This is
-  a consequence of derivation, not an oversight: re-derivable memory has no
-  reason to retain what the code no longer contains.
+  includes `rejected`. Precision matters here, and it cuts two ways
+  (re-verified at file/line 2026-08-05 — see
+  `launch/v0.3.10-press-run/competitive-brief-2026-08-05.md` § OpenLore):
+  a decision **approved and synced, then later rejected** leaves its content
+  as an annotation in the synced spec/ADR markdown — the **queryable record**
+  is what disappears. A decision **rejected without ever being approved**
+  leaves nothing durable at all by default: `handleRejectDecision` writes
+  nothing to spec/ADR, the syncer syncs only approved/auto-approved decisions,
+  and the `decision_rejected` telemetry emit is opt-in (`OPENLORE_TELEMETRY`).
+  The purge docstring's "their content is already in ADRs / spec.md" is true
+  for synced decisions only. Nothing in OpenLore can answer `prior_attempts`'
+  question in either case. This is a consequence of derivation, not an
+  oversight: re-derivable memory has no reason to retain what the code no
+  longer contains.
 - **Economics.** 73 tools (13 in the default preset) vs. Selvedge's 8 at a
   CI-verified 3,705-token schema tax. State both numbers precisely; don't
   round theirs up for effect.
@@ -194,9 +204,16 @@ mode is nondeterministic labels."
   deterministic-native). The compound that separates is append-only testimony —
   captured stated reasoning, rejected paths retained and queryable.
 - That OpenLore uses an LLM (it doesn't), or that it "deletes all record" of
-  rejections. The precise claim: rejected decisions are purged from the
-  queryable store after sync (`purgeInactiveDecisions`); an annotation survives
-  in synced spec markdown, a queryable record does not.
+  rejections *unconditionally*. The precise claim (scoping amended 2026-08-06;
+  file/line evidence in the 2026-08-05 competitive brief): rejected decisions
+  are purged from the queryable store after every sync
+  (`purgeInactiveDecisions`). A decision approved and synced before rejection
+  leaves an annotation in the synced spec markdown; a decision rejected
+  without ever being approved leaves nothing durable by default —
+  `handleRejectDecision` writes nothing to spec/ADR, and the syncer syncs
+  approved decisions only. The "no durable record at all" claim may be made
+  **only** with that never-approved scoping attached; unscoped, keep the
+  annotation-survives phrasing.
 
 ---
 

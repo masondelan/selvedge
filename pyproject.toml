@@ -55,7 +55,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.6.0",
-    "mypy>=1.10.0",
+    "mypy>=2.3.0",
     "hatchling",
     # Dev-only (NOT a runtime dependency): gives scripts/schema_tax.py the real
     # tokenizer so the CI MCP-footprint gate matches the published figure.

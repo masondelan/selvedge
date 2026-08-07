@@ -37,7 +37,7 @@ dependencies = [
     # CI could not see this: the 3.10 job installs [dev], and pytest drags
     # tomli in transitively.
     "tomli>=2.0.0; python_version < '3.11'",
-    "click>=8.0.0",
+    "click>=8.4.2",
     "rich>=13.0.0",
 ]
 

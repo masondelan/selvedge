@@ -38,7 +38,7 @@ dependencies = [
     # tomli in transitively.
     "tomli>=2.0.0; python_version < '3.11'",
     "click>=8.0.0",
-    "rich>=13.0.0",
+    "rich>=15.0.0",
 ]
 
 [project.optional-dependencies]

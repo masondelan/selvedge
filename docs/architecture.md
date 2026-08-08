@@ -1150,6 +1150,17 @@ github.com).
 > independently arrived at. Validates this phase's bet. Selvedge's
 > evaluator stays log-derived (entity events, not parsed code), per
 > the non-goals.
+>
+> Folded in from the v0.3.10 release-thread feedback (dev.to,
+> 2026-08), value-gated per the discipline above: the
+> PreCompact/digest invariants and the seeded regression fixture
+> (Zira), the capture-time `stale_when` nudge (Skillselion), and
+> the digest selection-order contract (Rulestack). The public
+> replies on that thread commit the first two clusters to this
+> release. The thread's fourth idea, a PR-review importer
+> (Nyx533), is parked in the Future work appendix with
+> promote-when conditions — coverage argument accepted, current
+> build shape refused on the zero-network and determinism lines.
 
 - [ ] **`expires_when` evaluation in `stale_decisions`** — column
       exists since v0.3.8; v0.3.11 ships the evaluator. **Closed
@@ -1189,12 +1200,74 @@ github.com).
       `reject`/`revert` adoption ships in this PR. The sentinel-
       bracketed `--install` path must continue to work idempotently
       across the new content.
+- [ ] **PreCompact invariants** *(release-thread feedback: Zira;
+      serves **Robust** — the handoff between sessions is exactly
+      the "trusting captured intent six months later" surface)* —
+      two contracts the current behavior implies but nothing
+      asserts. (a) Repeat-fire stability: two consecutive
+      compactions with no store change emit byte-identical
+      reminders, and the reminder goes quiet for an entity once its
+      `log_change` lands (the reminder is already re-derived from
+      store state per fire; the test turns that from an
+      implementation detail into a contract). (b) The reminder
+      distinguishes "edited entity with no log" from "log exists
+      but was truncated" — the v0.3.10 size-bound markers
+      (`…[truncated NNKB]`) make the truncated case detectable, so
+      name it instead of lumping it with the unlogged case. Zero
+      new surface: tests plus one reminder line.
+- [ ] **SessionStart digest regression fixture** *(release-thread
+      feedback: Zira; serves **Robust** — failure modes observable,
+      determinism asserted rather than assumed)* — seed a store
+      with a reverted decision, render the digest, and assert: the
+      dead path is named, the byte cap holds on a line boundary,
+      and a supersede landing between seed and render yields a
+      digest that names exactly one effective verdict (the
+      digest-boundary race, made deterministic as a fixture). This
+      is the mechanical half of the three-arm comparison from the
+      thread; the model-behavior half (does injection measurably
+      change the agent's path) is deliberately deferred to Phase
+      2.24's delivery-mode arms, where it gets a control — model
+      behavior does not belong in this suite.
+- [ ] **`stale_when` capture nudge** *(release-thread feedback:
+      Skillselion — "the reason a decision was made is also the
+      condition under which it should die"; serves **Robust** — a
+      rejection stored without its invalidating condition is data
+      that silently rots — and **Easy to use** — guidance lands at
+      capture time inside the existing flow, no new tool, no new
+      flag)* — when a `revert` or `reject` event is logged with no
+      `stale_when` and no `expires_when`, the reasoning-quality
+      validator suggests recording the invalidating condition.
+      Warns, never rejects — same posture as the secret-shape
+      warnings. Rides the same three adoption surfaces this phase
+      already touches (docstring, PROMPT_BLOCK, validator). Digest
+      rows whose `stale_when` matched present as *re-examine*
+      rather than a bare *reverted* — presentation only; the
+      verdict itself never mutates, append-only stays append-only,
+      a human (or agent) still closes the loop with `supersede`.
+- [ ] **Digest selection order as documented contract** *(release-
+      thread feedback: Rulestack; serves **Robust** — predictable,
+      observable behavior under growth)* — the digest is bounded by
+      construction (5/section + `digest_max_bytes`), so store
+      growth changes *which* five, not *how many*. Today the order
+      is most-overdue-first + recency; v0.3.11 documents that order
+      in the hook docstring and pins it with a test, so "why did
+      this decision surface and not that one" has a stable answer.
+      The speculative half — a deterministic ranking cut over the
+      active-use signals `get_stale_decisions` already computes —
+      is *not* a ship item here: Phase 2.24's delivery-mode arms
+      measure whether ranking moves failure-repeat rate at all
+      before any ranking design is entertained. No semantic or
+      prompt-conditioned ranking while the measurement is absent.
 - [ ] **Tests** — `test_expires_when_grammar.py` covering each
       recognized pattern + a rejection case per malformed shape
       (~8), `test_active_memory.py` extension for `reject`/`revert`
       round-trip + classifier upgrade (~10), `test_prompt.py`
       update (~3), `test_public_api.py` extension for new enum
-      values (~2). Soft budget: ≤25 new tests.
+      values (~2), `test_hooks_precompact.py` repeat-fire +
+      truncation-distinction (~6), `test_hooks_sessionstart.py`
+      seeded fixture + supersede-boundary (~5), validator nudge
+      (~3). Soft budget: ≤40 new tests (raised from ≤25 to absorb
+      the release-thread cluster).
 
 #### Risks acknowledged & mitigations
 
@@ -1355,6 +1428,14 @@ github.com).
       entity extraction with class-context, miss-rate diff (~15).
       Soft budget: ≤35 new tests (raised from the interop items'
       ≤20 to absorb the git-import cluster).
+
+      *(A PR-review importer — the "review threads are the unmined
+      half" idea from the v0.3.10 release thread — was considered
+      for this cluster and parked in the Future work appendix: as
+      currently conceivable it strains two core lines at once, the
+      zero-network core and deterministic precision-over-recall.
+      The appendix entry carries the promote-when conditions so the
+      idea isn't lost.)*
 
 #### Risks acknowledged & mitigations
 
@@ -1664,6 +1745,21 @@ github.com).
 - [ ] **Metrics** — failure-repeat rate with memory, memory-ablated,
       and token-matched-context arms; write-path token and latency
       cost reported alongside every result, not in an appendix.
+- [ ] **Delivery-mode ablation** *(v0.3.10 release-thread feedback:
+      Zira; serves **Robust** in this phase's own register — "the
+      claim, measured, against a control": the delivery claim is
+      the release's headline and currently rests on two external
+      papers)* — a second axis crossing the memory arms: the same
+      seeded store delivered three ways — deterministic injection
+      (SessionStart digest on), pull-only (MCP tools available, no
+      injection), and no delivery. Per arm: failure-repeat rate,
+      digest bytes added, false-positive digests (digest surfaced,
+      task unrelated — the relevance-gating claim, measured), and
+      time-to-first-tool-call. This is the in-repo replication of
+      the "Delivery, Not Storage" result the release leans on, and
+      the measurement that decides whether Phase 2.17's
+      selection-order contract ever grows a ranking step. Lives in
+      the bench harness; the zero-LLM core is untouched.
 - [ ] **Harness placement** — separate repo or `bench/` directory,
       decided at spike start (separate repo keeps the core
       dependency footprint clean). CLI support lands in the package
@@ -2213,6 +2309,34 @@ the pull tool, the push tool is noise") turned out backwards: the
 literature's finding is that agents ignore pull tools *in general*,
 which makes the push surface the load-bearing one. Entry kept for
 the record of the reversal.
+
+**PR-review importer (`import --from-pr-reviews`).** From the
+v0.3.10 release-thread feedback (Nyx533): "team decisions live in
+review threads and commit messages the agent never sees." Commit
+messages are mined since v0.3.9.1; review threads are the unmined
+half, and the coverage argument is real. Parked rather than
+scheduled because the obvious build strains two core lines at
+once: it needs the forge API (auth, rate limits, a network touch
+in an importer — the core's zero-network posture allows a
+documented one-shot exception, but it's still the heaviest one
+yet), and it parses free-form review prose for "rejection
+language," which is the nondeterministic-label problem this
+product exists to refuse — a false "reverted" verdict seeded from
+a misread comment would gate the enforcement hook on innocent
+entities, the exact anti-Robust failure `gitimport.py`'s
+"precision over recall" line guards against. Promote to a phase
+when all three hold: (a) a fixture corpus of real review threads
+shows a *structured-signals-only* extractor (e.g. review state
+`CHANGES_REQUESTED` + hunk-anchored comments on a named entity
+whose lines a later push removed — states and anchors, not prose
+interpretation) reaching git-import-grade precision; (b) the
+network touch stays one-shot, opt-in, and confined to the
+importer, same posture as the semantic extra's model download;
+(c) imported records land on a `re-derivable-forge` provenance
+rung under the 2.18 trust tiers, advisory-only to enforcement —
+never hard-blocking. Until then the honest answer to the thread
+stands: the gap is real, and this entry is where it waits without
+compromising the store it would feed.
 
 **`selvedge-server-http` health endpoint + structured logs.**
 Add observability surface to the HTTP layer post-v0.4.1.

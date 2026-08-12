@@ -3,6 +3,17 @@
   "$id": "https://selvedge.sh/schemas/agent-trace-0.1.0.json",
   "title": "Agent Trace Record v0.1.0",
   "description": "Vendored copy of the Agent Trace v0.1.0 trace-record schema (https://github.com/cursor/agent-trace). Reference + documentation; Selvedge validates with the dependency-free selvedge.exporters.agent_trace.validate_trace_record().",
+  "$comment": "Provenance for this vendored copy is recorded under x-provenance below. The upstream repository returned HTTP 404 as of 2026-08-10; this file is now the in-repo record of what Selvedge targets.",
+  "x-provenance": {
+    "source_repo": "https://github.com/cursor/agent-trace",
+    "spec_version": "0.1.0",
+    "retrieved": "Retrieval date not recorded in-repo. This vendored copy first appears in commit 2eebfd4, 2026-06-22 (Selvedge v0.3.9).",
+    "license": "CC BY 4.0 — as claimed by the original repo; upstream LICENSE no longer retrievable (repo 404 as of 2026-08-10).",
+    "upstream_status": "https://github.com/cursor/agent-trace returns HTTP 404 as of 2026-08-10, confirmed with an authenticated gh token and with an anonymous fetch. Not a 301, so the repo was deleted or made private. Last archive.org capture of the repo root: 2026-07-25 (status 200).",
+    "surviving_publication": "https://agent-trace.dev/ was live on 2026-08-10, carrying the full v0.1.0 text, with a machine-readable schema at https://agent-trace.dev/schemas/v1/trace-record.json",
+    "divergence_note": "This file mirrors the inline schema from the upstream README. The schema served at agent-trace.dev is a separate artifact generated from the upstream zod source (schemas.ts): it declares the same draft (2020-12) but uses the older `definitions` keyword under a top-level `$ref` rather than `$defs`, and its `version` pattern is two-segment (^[0-9]+\\.[0-9]+$). Selvedge emits \"0.1.0\", which passes this schema and fails that one. Upstream is not self-consistent on this point: the archived zod source carries a three-segment regex. See docs/agent-trace-interop.md, section Resilience.",
+    "runtime_use": "None. No code in selvedge/ reads this file. It is consumed only by tests/test_agent_trace_export.py as a drift anchor against the hand-rolled validator."
+  },
   "type": "object",
   "required": ["version", "id", "timestamp", "files"],
   "additionalProperties": true,

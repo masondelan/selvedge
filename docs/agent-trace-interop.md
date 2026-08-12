@@ -13,6 +13,71 @@ maintainer.
 > predated the published spec. `selvedge/exporters/agent_trace.py` is the
 > source of truth; the corrected wire format and mapping table follow.*
 
+## Status note — 2026-08-10: the upstream repo is gone
+
+`https://github.com/cursor/agent-trace` returns **HTTP 404**. Confirmed twice
+on 2026-08-10 — once with an authenticated `gh` token and once with an
+anonymous fetch. It is not a rename: GitHub answers renames and transfers with
+a 301, so this is a deletion or a switch to private. The `cursor` org still
+exists with exactly 10 public repos and none of them is `agent-trace`;
+`anysphere`, `Cognition-ai`, and the `agent-trace` / `agenttrace` org names
+hold no replacement either. The last archive.org capture of the repo root is
+dated 2026-07-25 (status 200), so the removal happened between then and
+2026-08-10. No deprecation notice, migration note, or announcement was found
+anywhere.
+
+**The spec itself survives.** <https://agent-trace.dev/> is live (HTTP 200) and
+carries the complete v0.1.0 text, with a machine-readable schema at
+<https://agent-trace.dev/schemas/v1/trace-record.json>. The README (554 lines,
+blob capture 2026-06-29) and the `reference/` TypeScript files
+(`trace-store.ts`, `trace-hook.ts`, last captures 2026-05-27) are recoverable
+from archive.org.
+Treat agent-trace.dev as the surviving publication home; treat every
+`github.com/cursor/agent-trace` link in this repo as dead.
+
+Full forensics, the salvage options, and the decision:
+[`docs/outreach/agent-trace-listing.md`](outreach/agent-trace-listing.md).
+**Nothing in Selvedge breaks** — see the *Resilience* section below.
+
+### Corrections to the text below
+
+The shipped mapping table and the v0.1.0 record shape in this doc are still
+correct and are deliberately left in place. These specific claims are not:
+
+- **"drafted by Cognition AI"** (opening paragraph of *Why interop with Agent
+  Trace at all*) — not supported. Cognition's own
+  post positions the company as *joining in support*, and
+  [InfoQ](https://www.infoq.com/news/2026/02/agent-trace-cursor/) attributes
+  the spec to Cursor. The spec's example records use a `dev.cursor` metadata
+  namespace and `api.cursor.com` URLs. "backed by Cloudflare, Vercel, Google
+  Jules, Amp, OpenCode, and git-ai" checks out as names on the partner list,
+  but the upstream wording was "partners for helping shape Agent Trace" —
+  a design-input credit, not a backing claim. That list also included
+  Amplitude, Cline, and Tapes, which this doc dropped.
+- **git-ai's README no longer mentions Agent Trace.** `git-ai-project/git-ai` is
+  actively developed (last push 2026-08-11) and its README contains **zero**
+  occurrences of "Agent Trace"; it promotes its own
+  [Git AI standard](https://github.com/git-ai-project/git-ai/blob/main/specs/git_ai_standard_v3.0.0.md)
+  (spec file `git_ai_standard_v3.0.0.md`) instead. Whether that is a withdrawal
+  or a README that never carried the credit is **unverified** — claim the
+  absence, not a departure. Per `docs/positioning.md` § "Never claim", a
+  competitor claim we can't source is one they can cheaply correct.
+- **The "official validator" at `/tree/main/validator`** (*Test plan*, item 2)
+  — that path
+  appears in no archive capture, and the README describes only `reference/`
+  (`trace-store.ts`, `trace-hook.ts`). An official validator directory is
+  **unverified** and probably never existed. Only the vendored path was ever
+  built (see *Resilience*).
+- **"25 tests"** (*Implementation status*, item 3) —
+  `tests/test_agent_trace_export.py` now defines 35 `test_` functions with no
+  parametrisation, and `pytest tests/test_agent_trace_export.py` reports
+  `35 passed`. 25 was the v0.3.9 figure; `CHANGELOG.md:566`,
+  `docs/architecture.md:896`, and `docs/architecture.md:1939` repeat the stale
+  number.
+- **The Cognition announcement URL** (*References*, at the end) —
+  `cognition.ai/blog/agent-trace` now 301s to `cognition.com/blog/agent-trace`.
+  Stale but functional.
+
 ## Why interop with Agent Trace at all
 
 [Agent Trace](https://github.com/cursor/agent-trace) is the open RFC released
@@ -223,18 +288,174 @@ All of the originally-planned work landed together in v0.3.9:
 
 Pulled forward from the v0.4.0 plan; Postgres + HTTP remain the v0.4.0 markers.
 
+## Resilience — what the upstream 404 costs us
+
+Audited 2026-08-10, immediately after the repo went 404. **Verdict: nothing
+breaks.** `pytest`, `ruff`, `mypy`, the wheel build, the CLI, and the MCP
+server all behave identically with the upstream repo gone. There is zero
+runtime, test, packaging, or CI dependency on `github.com/cursor/agent-trace`.
+Four specific answers:
+
+**1. `validate_trace_record` uses inline constants, not the vendored schema.**
+`selvedge/exporters/agent_trace.py:490-538` (plus `_validate_file` at
+`:541-589`) is a hand-rolled checker under the section banner "validation (no
+third-party jsonschema dependency)". It compares against module-level
+constants — `AGENT_TRACE_VERSION` (`:48`), the inline set
+`{"git", "jj", "hg", "svn"}` (`:519`), `_CONTRIBUTOR_TYPES` (`:64`) — with no
+file read anywhere. The module imports only `hashlib`, `json`, `re`, `uuid`,
+`typing.Any`, and `..models.VALID_CHANGE_TYPES`. No `pathlib`, no `open()`.
+
+**2. The vendored schema is never read at runtime — it is dead as code.**
+Repo-wide, and setting aside the prose of this section itself,
+`agent_trace_schema.json` has exactly five references and **none is
+in `selvedge/`**: two tests
+(`tests/test_agent_trace_export.py:153` and `:382`, which assert the vendored
+file's `required` lists agree with the hand-rolled validator) and three prose
+mentions (`CHANGELOG.md:553`, `docs/architecture.md:895`, and item 3 of
+*Implementation status* above). The file ships in the wheel but nothing
+imports it.
+
+Being honest about what "vendored" bought us: not a runtime hedge — the
+runtime never needed one. It bought a **documentation artifact** (a precise,
+machine-readable record of the shape we target, which now outlives its source)
+and a **drift anchor** for two consistency tests. That is still worth having
+now that upstream is unreachable, but it is not the thing that made us
+resilient. The thing that made us resilient was refusing the `jsonschema`
+dependency and writing the checker by hand.
+
+**3. No code path and no test reaches the network.** `selvedge/exporters/`
+contains no `urllib` / `requests` / `httpx` / `urlopen` / `socket` reference at
+all. `tests/test_agent_trace_export.py` imports only `json`, `uuid`,
+`pathlib.Path`, `pytest`, `click.testing.CliRunner`, and Selvedge modules. The
+only network-adjacent tests in the whole suite are `test_update_check.py` and
+`test_telemetry.py`, both of which monkeypatch `urlopen` and both of whose
+docstrings state that no test in the module hits the network.
+
+**4. What is actually damaged is documentation credibility, not function.**
+`cursor/agent-trace` appears in 9 tracked files. Three of them ship to PyPI
+users: `selvedge/exporters/agent_trace.py:3` (module docstring),
+`selvedge/cli.py:1971` (**user-facing** — it renders in
+`selvedge export --help`), and `selvedge/exporters/agent_trace_schema.json:5`
+(the `description` field; now carries a provenance header, see below). The
+rest are `README.md`, `CHANGELOG.md`, `docs/architecture.md`,
+`docs/comparison.html`, `docs/faq.html`, and this file. All are dead links;
+`https://agent-trace.dev/` is the live replacement.
+
+**One real external risk, and it predates the 404.** The schema *served* at
+`https://agent-trace.dev/schemas/v1/trace-record.json` is a different artifact
+from the README's inline schema we vendored — generated from the upstream zod
+source, and using `definitions` under a top-level `$ref` rather than `$defs`.
+(It declares the *same* draft we do, `https://json-schema.org/draft/2020-12/schema`;
+`definitions` is a draft-07-era keyword that `zod-to-json-schema` still emits,
+not a different draft.) Its `version` pattern is **two-segment**
+(`"pattern": "^[0-9]+\\.[0-9]+$"`, described there as `"Agent Trace
+specification version (e.g., '1.0')"`). Selvedge emits `"0.1.0"`
+(`AGENT_TRACE_VERSION`, `agent_trace.py:48`), which passes the README schema and
+**fails** the served one. Our vendored copy puts no `pattern` on `version` at
+all, so no local check will ever surface this. Anyone validating Selvedge output
+against that live URL gets a rejection.
+
+**Do not "fix" this by emitting `"0.1"` without reading the next sentence.**
+Upstream is not self-consistent, and the weight of the evidence is on our side.
+The zod source the served schema is generated from —
+`schemas.ts`, [archived 2026-06-23](https://web.archive.org/web/20260623013002id_/https://raw.githubusercontent.com/cursor/agent-trace/refs/heads/main/schemas.ts)
+— defines `TraceRecordSchema.version` with a **three-segment** regex
+(`^[0-9]+\.[0-9]+\.[0-9]+$`) carrying that same `(e.g., '1.0')` description, so
+the served two-segment pattern disagrees with the repo source, with the README's
+inline schema, and with the spec's own stated version string of `0.1.0`. The
+served artifact is the outlier. Changing the emitted `version` is a wire-format
+change either way and belongs to the maintainer, alongside the namespace
+question below — but the defensible default is to keep `"0.1.0"` and document
+the disagreement, which is what this file now does.
+
+## Namespace ownership — `metadata["dev.selvedge"]`
+
+Selvedge has emitted its data under `metadata["dev.selvedge"]` since v0.3.9
+(`SELVEDGE_NS`, `selvedge/exporters/agent_trace.py:52`). Reverse-domain
+notation for `dev.selvedge` implies ownership of **selvedge.dev**. The
+project's domain is **selvedge.sh**, which would reverse to `sh.selvedge`.
+Whether we hold selvedge.dev is **unverified** and was not checked here.
+
+**Did the spec require domain ownership?** *Unverifiable from in-repo sources,
+and not re-checked upstream.* The vendored schema constrains `metadata` only as
+`{"type": "object"}` — no `propertyNames`, no key pattern, no ownership
+language — so nothing we hold imposes a requirement. The claim in the
+*namespace name* open question below ("AT spec recommends reverse domain
+notation") is this repo's paraphrase of a **draft** that predated the published
+v0.1.0 text, not a retrieved quote.
+The normative sentence, if one exists, is no longer retrievable from
+`github.com/cursor/agent-trace` (404 as of 2026-08-10); the surviving
+publication at agent-trace.dev may contain it but was not re-read for this
+question. Do not assert either way.
+
+**The convention is loose in practice.** The spec's own example records use a
+`dev.cursor` metadata namespace while Cursor's primary domain is cursor.com —
+i.e. the format's own author did exactly what we did. Whatever the text says,
+the reference usage does not treat the reverse-domain key as a proof of
+ownership.
+
+**Cost of changing the key later: it is a wire-format break.** Any third-party
+consumer keying off `metadata["dev.selvedge"]` breaks, and so does our own
+lossless round-trip — `selvedge import --format agent-trace` recovers entity,
+change type, and reasoning from that exact key. Every Agent Trace file exported
+by Selvedge since 2026-06-22 carries it. A rename would need a deprecation
+window in which the importer reads both keys and the exporter writes only the
+new one, plus a CHANGELOG breaking-change note. That is real work for a
+cosmetic gain.
+
+**Does upstream's disappearance make this moot or more urgent?** Mostly moot.
+There is no registry, no conformance body, and no arbiter left to object to our
+choice of key — the only party who could have ruled on it is gone. What
+remains is a self-consistency question: a reader who resolves `selvedge.dev`
+and finds nothing sees a small credibility scratch. That is a marketing-surface
+concern, not an interop one, and it is strictly lower urgency than it was in
+June.
+
+**Recommendation: keep `dev.selvedge`. Do not change it.** The cost is a
+breaking change to a shipped export format; the benefit is cosmetic alignment
+with a convention whose own author didn't follow it and whose enforcement body
+no longer exists. If the mismatch bothers us, the cheap defensible move is a
+defensive registration of selvedge.dev pointing at selvedge.sh — that
+retro-justifies the key without touching the wire. **This is the maintainer's
+call and no change has been made.**
+
 ## Open questions
 
-- **Should we list under "compatible producers" on the AT side?**  Yes
+*(Answered 2026-08-10. Originals preserved; each carries its resolution.)*
+
+- ~~**Should we list under "compatible producers" on the AT side?**  Yes
   once PR 2 lands. Open a PR against `cursor/agent-trace` adding Selvedge
-  to whatever registry list they keep.
-- **`extensions.selvedge.*` namespace name.**  AT spec recommends reverse
+  to whatever registry list they keep.~~
+  **ANSWERED 2026-08-10 — no, and there never was one.** A "compatible
+  producers" list never existed. Neither the archived README (554 lines,
+  recovered in full) nor the live spec page contains a producers registry, an
+  implementations list, or an adopters list. What exists is a ten-name
+  *acknowledgements* list under `## Contributing`, introduced with "Thanks to
+  the following partners for helping shape Agent Trace:" — Amp, Amplitude,
+  Cline, Cloudflare, Cognition, git-ai, Jules, OpenCode, Tapes, Vercel. That
+  is a design-input credit with no mechanism for adding an implementation.
+  Keyword scan of the live page: *producer* 0 hits, *registry* 0, *adopter* 0,
+  *compatible* 0. The PR target is 404 regardless. The **Discoverability**
+  payoff claimed in *Why interop with Agent Trace at all* has no path to
+  realization and should not be cited in positioning. Decision memo:
+  [`docs/outreach/agent-trace-listing.md`](outreach/agent-trace-listing.md).
+- ~~**`extensions.selvedge.*` namespace name.**  AT spec recommends reverse
   domain notation (`com.example.foo`). We could use `dev.selvedge.*` if
   we register the domain, otherwise `selvedge.*` is fine — multiple
-  vendors are using flat namespaces in the wild.
+  vendors are using flat namespaces in the wild.~~
+  **ANSWERED 2026-08-10 — resolved in shipping as `metadata["dev.selvedge"]`;
+  keep it.** See *Namespace ownership* above for the ownership analysis, the
+  break cost, and the recommendation. No change made; a namespace rename is a
+  breaking change to a shipped export format and is the maintainer's call.
 - **Versioning.**  Pin to AT v0.1.0 for v0.4.0. When AT v0.2.0 lands,
   emit the newest spec version we know about; document the mapping per
   version in this file.
+  **UPDATED 2026-08-10 — the pin is now permanent by default.** With the
+  upstream repo gone and no v0.2.0 ever published, `AGENT_TRACE_VERSION`
+  stays `"0.1.0"` and this contingency has no trigger. The live open item is
+  not a *spec* version bump but the two-segment/three-segment `version`
+  pattern disagreement between the README schema we vendored and the schema
+  served at agent-trace.dev — see the last paragraph of *Resilience*.
 
 ## What this does *not* change
 

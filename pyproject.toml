@@ -29,7 +29,7 @@ dependencies = [
     # camelCase to snake_case, so an unbounded `mcp>=1.0.0` resolves to a
     # release where `selvedge-server` fails at import. Lift this only together
     # with the 2.x migration.
-    "mcp>=1.0.0,<2.0.0",
+    "mcp>=2.0.0,<3.0.0",
     # `tomllib` is stdlib from 3.11. On the declared 3.10 floor a PRODUCTION
     # install had no TOML parser at all, so `.selvedge/config.toml` was
     # silently ignored — including a user narrowing the hook's watch globs,

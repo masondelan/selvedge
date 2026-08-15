@@ -104,9 +104,9 @@
   <text x="76" y="458" class="mono" font-size="10"
         fill="#1F3057" opacity="0.7">cross-tool wire format</text>
   <text x="76" y="474" class="mono" font-size="10"
-        fill="#1F3057" opacity="0.7">Cursor / Cognition RFC</text>
+        fill="#1F3057" opacity="0.7">Cursor RFC · frozen v0.1.0</text>
   <text x="76" y="492" class="mono" font-size="10"
-        fill="#B23A2A">Selvedge is a compatible producer</text>
+        fill="#B23A2A">Selvedge emits + reads it</text>
 
   <!-- Observability hooks (center) -->
   <rect x="320" y="416" width="240" height="84" rx="8" fill="#FFFFFF"

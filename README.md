@@ -206,7 +206,7 @@ Tests went 739 → 826. No schema change and no tool-surface change, so this is
 
 AI agents call Selvedge as they work. Selvedge captures the *why*
 into a durable, queryable store and emits it back out — as
-[Agent Trace](https://github.com/cursor/agent-trace) records for
+[Agent Trace](https://agent-trace.dev/) records for
 cross-tool readers, as observability metadata that links into
 Sentry/Datadog stack traces, and as compliance artifacts for SOC 2
 and EU AI Act audits.
@@ -281,16 +281,17 @@ functions across the codebase. Tag every event with `changeset:add-stripe-billin
 and you can pull the entire scope back later — even if the original PR was
 broken into eight smaller ones over a month.
 
-**Selvedge ↔ Agent Trace.** [Agent Trace](https://github.com/cursor/agent-trace)
-(Cursor + Cognition AI, RFC Jan 2026, backed by Cloudflare, Vercel, Google
-Jules, Amp, OpenCode, and git-ai) is an emerging *open standard* for AI
-code attribution traces. Selvedge isn't a competitor to it — it's a
-compatible producer. As of **v0.3.9**, `selvedge export --format agent-trace`
-emits Agent Trace v0.1.0 records (and `selvedge import --format agent-trace`
-reads them back); the mapping is in
-[`docs/agent-trace-interop.md`](docs/agent-trace-interop.md). Agent
-Trace is the wire format. Selvedge is the live capture + query layer that
-emits it.
+**Selvedge ↔ Agent Trace.** [Agent Trace](https://agent-trace.dev/) is an
+open AI code-attribution wire format published by Cursor (RFC, Jan 2026). Its
+original GitHub home went 404 in August 2026 and the multi-vendor momentum
+behind it has faded, but the spec and schema still resolve at agent-trace.dev,
+frozen at v0.1.0. Since **v0.3.9**, `selvedge export --format agent-trace`
+emits Agent Trace v0.1.0 records and `selvedge import --format agent-trace`
+reads them back — a portable, documented interchange format for file/line AI
+attribution, with reasoning and entity-level provenance carried in each
+record's `dev.selvedge` metadata. The mapping is in
+[`docs/agent-trace-interop.md`](docs/agent-trace-interop.md); Selvedge vendors
+the schema and has no runtime dependency on the upstream project.
 
 ---
 

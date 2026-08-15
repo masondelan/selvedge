@@ -849,8 +849,8 @@ github.com).
   require a second migration. Documented in v0.3.8's release notes.
 
 ### Phase 2.15 — Agent Trace export interop (v0.3.9)
-> Selvedge becomes a compatible **producer** of [Agent Trace](https://github.com/cursor/agent-trace),
-> the open RFC (Cursor + Cognition AI, Jan 2026) for AI code
+> Selvedge becomes a **producer** of [Agent Trace](https://agent-trace.dev/),
+> the open RFC (Cursor, Jan 2026) for AI code
 > attribution traces. **Pulled forward from Phase 3.2 (v0.4.2).** The
 > exporter was originally scheduled for the post-backend window, but the
 > standard gained backing (Cloudflare, Vercel, Google Jules, Amp,
@@ -893,10 +893,10 @@ github.com).
       `trace_record_to_event`, `extract_line_ranges`,
       `events_to_trace_records`, `validate_trace_record`) plus a vendored
       v0.1.0 JSON Schema (`selvedge/exporters/agent_trace_schema.json`).
-- [x] **Tests** — `test_agent_trace_export.py` (25): round-trip, non-file
+- [x] **Tests** — `test_agent_trace_export.py` (35): round-trip, non-file
       entity preservation, line-range extraction, collapse-by-session,
       reasoning-quality passthrough, schema validation, CLI integration.
-      Over the ≤20 Phase 3.2 budget by 5 — called out in the CHANGELOG.
+      Over the ≤20 Phase 3.2 budget by 15 — called out in the CHANGELOG.
 
 #### Risks acknowledged & mitigations
 
@@ -1342,18 +1342,27 @@ github.com).
       literature is cost/latency at accuracy parity, so the
       economics page *is* the evidence surface.
 - [ ] **`dev.selvedge` namespace as a stable contract; upstream
-      proposal parked.** The v0.3.9 Agent Trace exporter already
-      emits reasoning + entity provenance under
+      dead, exporter kept frozen.** The v0.3.9 Agent Trace exporter
+      already emits reasoning + entity provenance under
       `metadata["dev.selvedge"]`. Document that namespace as a
       versioned public contract in `docs/agent-trace-interop.md`
       (field-by-field, semver'd) — that part stands regardless,
-      for consumers of our own exports. The upstream proposal on
-      `cursor/agent-trace` is **parked as of 2026-08-06**: the
-      spec repo is dormant (10 commits total, last 2026-02-06, no
-      tags or releases ever, still 0.1.0 RFC; producer issue #32
-      unanswered since June). Wake condition: the repo shows life
-      — a release, a tag, or sustained commits. The exporter
-      itself stays shipped; it's additive interop either way.
+      for consumers of our own exports. Upstream is now **gone**, not
+      merely parked: `github.com/cursor/agent-trace` returns HTTP 404
+      as of 2026-08-10 (deletion or made-private, not a rename; the
+      steward, Cursor/Anysphere, is mid-acquisition by SpaceX). The
+      spec + schema survive frozen at agent-trace.dev; the launch
+      coalition has scattered (git-ai left for its own Git AI Standard
+      v3.0.0). **Decision 2026-08-11 (keep + demote):** keep the
+      shipped exporter/importer frozen — dependency-free, offline, its
+      output stays valid — but stop marketing it as a live multi-vendor
+      standard; it is now just a portable, documented export format. No
+      wake condition remains; if an attribution standard reconsolidates
+      later it will be a different wire format, so retention is
+      optionality, not a hedge on this one. Removal was considered and
+      rejected: it would break a shipped CLI surface for ~zero runtime
+      saving. See `docs/agent-trace-interop.md` § Resilience and
+      `docs/outreach/agent-trace-listing.md`.
 - [ ] **`test_append_only.py` — the retention claim,
       machine-checkable.** Asserts no code path deletes `reject` /
       `revert` / superseded events except the destructive-gated
@@ -1936,7 +1945,7 @@ github.com).
       migration-imported events carry
       `metadata["dev.selvedge"].range_unknown: true` and an empty
       `files[]` rather than fabricating `[1, 1]` placeholders.
-- [x] **Tests** — `test_agent_trace_export.py` (25) shipped in v0.3.9.
+- [x] **Tests** — `test_agent_trace_export.py` (35) shipped in v0.3.9.
 
 #### Risks acknowledged & mitigations
 

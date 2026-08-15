@@ -1968,9 +1968,11 @@ def export(fmt, since, entity, project, limit, ndjson, collapse, output):
 
     \b
     The agent-trace format emits Agent Trace v0.1.0 records
-    (https://github.com/cursor/agent-trace) — one per change event by default.
-    Selvedge is a compatible producer; reasoning and entity-level provenance
-    travel in each record's metadata under the "dev.selvedge" namespace.
+    (https://agent-trace.dev/) — one per change event by default. The format is
+    frozen at v0.1.0 (its original GitHub home went 404 in 2026-08); Selvedge
+    vendors the schema and needs no upstream connection. Reasoning and
+    entity-level provenance travel in each record's metadata under the
+    "dev.selvedge" namespace.
     """
     import csv as csv_mod
     import io

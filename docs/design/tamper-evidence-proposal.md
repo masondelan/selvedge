@@ -467,7 +467,7 @@ open question in §9 rather than recommended outright.
 | Site | Change |
 |---|---|
 | `backfill_git_commit` | **None.** `git_commit` is outside the protected core. The `UPDATE` stands as written. This is the whole point of the asymmetric cut. |
-| `recanonicalize_paths(apply=True)` | After rewriting, append one `amend` record per rewritten row (or one covering record with the row list in `detail`, if run sizes warrant), binding `{event_id, field: "entity_path", new_core_hash}`. It already writes a `path_migrations` audit row in the same transaction (`storage.py:1041-1057`) — this is a second write to the same transaction. |
+| `recanonicalize_paths(apply=True)` | After rewriting, append one **covering** `amend` record per run with the full row list in `detail`, each entry binding `{event_id, new_core_hash}` under `{field: "entity_path"}`. *(Amended 2026-08-29, resolving §11 open question 4: the shipped implementation and `test_migrate_paths_apply_appends_one_covering_amend` use ONE covering record per run, not one per row — the per-row variant described in the original draft was declined.)* It already writes a `path_migrations` audit row in the same transaction (`storage.py:1041-1057`) — this is a second write to the same transaction. |
 | `prune_events` | Append one `tombstone` record in the same transaction as the `DELETE`, with `{cutoff, count, cumulative_count}` in `detail`. Note this puts a *write* inside a method whose docstring (`storage.py:950-957`) says it is "deliberately dumb — no gating, no prompting." The tombstone is not a gate, so the docstring's intent holds; it should be updated to say so. |
 
 ---
@@ -850,7 +850,9 @@ Target: ~20 tests in a new `tests/test_tamper_evidence.py`. All use `tmp_path` a
 **Legitimate mutation and boundary records (3)**
 
 16. `migrate-paths --apply` on rows with non-canonical paths: chain stays intact, one
-    `amend` record per rewritten row, and `path_migrations` still gets its audit row.
+    covering `amend` record per run with the rewritten-row list in `detail` *(amended
+    2026-08-29 per the open-question-4 decision — originally "one record per rewritten
+    row")*, and `path_migrations` still gets its audit row.
 17. A gated `prune --include-events` (both gates satisfied): rows deleted, chain rows
     retained, one tombstone appended, `chain_intact` PASS.
 18. Two prunes accumulate `cumulative_count` correctly and both still verify.
@@ -891,6 +893,10 @@ should make.**
    awkward when an importer inserts an old-timestamped event at a high `seq` that a later
    prune removes. Count-only is simple and honest; revisit if it proves too weak.
 4. **Per-row `amend` vs one covering record** for a large `migrate-paths` run (§5.3).
+   **Resolved (2026-08-29): one covering record per run**, with the full row list in
+   `detail` — recorded in `chain.append_amend`'s docstring and locked by
+   `test_migrate_paths_apply_appends_one_covering_amend`. §5.3 and §10 item 16 are
+   amended to match.
 5. **Does the chain cover `tool_calls`?** This proposal says no — telemetry, ungated
    prune, not part of the decision record. Worth stating explicitly in the manifest so the
    omission is declared rather than discovered.

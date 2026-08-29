@@ -35,9 +35,14 @@ from archive.org.
 Treat agent-trace.dev as the surviving publication home; treat every
 `github.com/cursor/agent-trace` link in this repo as dead.
 
-Full forensics, the salvage options, and the decision:
-[`docs/outreach/agent-trace-listing.md`](outreach/agent-trace-listing.md).
-**Nothing in Selvedge breaks** — see the *Resilience* section below.
+The decision memo (2026-08-10) weighed three options — keep the exporter and
+re-document it against the frozen spec, republish our vendored schema as "the"
+public reference, or deprecate the surface — and chose the first: carrying
+cost is near zero, removal would break a shipped CLI surface for no gain, and
+republishing would assert stewardship we don't have over a schema upstream
+itself contradicts. The full forensics live in an internal note (not shipped
+with the repo). **Nothing in Selvedge breaks** — see the *Resilience* section
+below.
 
 ### Corrections to the text below
 
@@ -107,9 +112,10 @@ Concretely, supporting `selvedge export --format agent-trace` means:
 
 1. ~~**Discoverability.** When the Agent Trace alliance publishes its list of
    "compatible producers," Selvedge is on it.~~ **Void as of 2026-08-11:** no
-   "compatible producers" registry ever existed (verified — see
-   [`outreach/agent-trace-listing.md`](outreach/agent-trace-listing.md)), and
-   the alliance has since scattered (upstream repo 404; git-ai left for its own
+   "compatible producers" registry ever existed (verified against the archived
+   README and the live spec page — zero occurrences of *producer*, *registry*,
+   *adopter*, or *compatible*; full forensics in an internal note), and the
+   alliance has since scattered (upstream repo 404; git-ai left for its own
    standard). This discoverability rationale no longer applies.
 2. **Compliance posture.** If the EU AI Act / California AB 2013 push
    companies toward Agent Trace as the de-facto attribution audit format,
@@ -445,8 +451,10 @@ call and no change has been made.**
   Keyword scan of the live page: *producer* 0 hits, *registry* 0, *adopter* 0,
   *compatible* 0. The PR target is 404 regardless. The **Discoverability**
   payoff claimed in *Why interop with Agent Trace at all* has no path to
-  realization and should not be cited in positioning. Decision memo:
-  [`docs/outreach/agent-trace-listing.md`](outreach/agent-trace-listing.md).
+  realization and should not be cited in positioning. The decision memo
+  (2026-08-10) closed this as "keep the exporter, frozen" — the format stays a
+  portable, documented export, not a live multi-vendor standard; the full
+  forensics live in an internal note.
 - ~~**`extensions.selvedge.*` namespace name.**  AT spec recommends reverse
   domain notation (`com.example.foo`). We could use `dev.selvedge.*` if
   we register the domain, otherwise `selvedge.*` is fine — multiple

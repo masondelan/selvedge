@@ -116,6 +116,44 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.11
+
+**Abandoned alternatives are first-class, and the log can prove itself.**
+
+**Rejections and reverts are now stated outcomes, not inferences.**
+`change_type="reject"` records "we considered this and decided against it"
+without writing the change — the counterpart to `revert` for paths never
+taken. `prior_attempts` reads both as a new `confidence: "exact"` tier; the
+old proximity heuristic drops to tiebreaker. And the `expires_when` column
+that shipped dormant in v0.3.8 gets its evaluator: a closed, machine-checkable
+grammar — `library:NAME>=VERSION`, `entity:PATH:changes`, `date:ISO`,
+`manual:LABEL` — validated at write time, evaluated locally by
+`selvedge stale` with no network and no LLM. A rejection stored with the
+condition that would invalidate it is a decision that knows when to die.
+
+**The event log is now tamper-evident.** Every logged event gets a SHA-256
+chain record in a sidecar table, same transaction, over every field except the
+late-bound `git_commit` (git already witnesses that one). Two new
+`selvedge verify` checks: `chain_intact` fails hard when a chained row was
+edited, deleted, or reordered out-of-band — the check names the exact sequence
+number — and `chain_coverage` warns (never fails) about rows that predate the
+chain. Legitimate operations append boundary records instead of breaking the
+chain, so `migrate-paths` and a destructive-gated prune verify clean while a
+silent `sqlite3` edit does not. `selvedge verify --json` publishes the
+attestation manifest. Honest scope, stated in the module itself: this detects
+casual and accidental modification and produces an independently verifiable
+export; it is not proof against a motivated local attacker.
+
+**Also:** the PreCompact reminder now distinguishes "edited with no log" from
+"log exists but was truncated," and both hook surfaces have their determinism
+pinned byte-for-byte in tests; capture-time nudges suggest recording the
+invalidating condition when a reject/revert lands without one;
+`selvedge supersede` gains `-d/--diff`, `--revisit-after`, and
+`--expires-when` (#31); and an id-less supersede no longer re-opens every
+earlier revert on the path (#30). Tests 984 → 1114.
+
+---
+
 ## What's new in v0.3.10
 
 **The memory comes to the agent, and the store gets its dials.** Two themes,
@@ -132,10 +170,10 @@ missing was delivery when there is nothing to veto. Two new hooks:
 
 Both are quiet when they have nothing to say, size-capped, read-only, and
 templated. Neither can block anything — PreCompact deliberately declines the
-veto the hook API offers it. This is the answer to a measured failure mode: two
-2026 papers recorded pull-model memory tools going unused entirely (zero
-voluntary memory operations across 114 turns against a pre-seeded store) while
-deterministic injection landed every time.
+veto the hook API offers it. This is the answer to a measured failure mode:
+"Delivery, Not Storage" (arXiv:2607.20972) recorded a pull-model memory tool
+going unused entirely (zero voluntary memory operations across 114 turns
+against a pre-seeded store) while deterministic injection landed every time.
 
 **`selvedge export --format markdown`** renders the store as a reviewable
 digest to commit next to it, so captured intent shows up in a pull request
@@ -165,36 +203,6 @@ identical structures; and the Docker image no longer ships the maintainer's
 own database. Tests 826 → 984.
 
 ---
-
-## What's new in v0.3.9.3
-
-**Fixes a broken install, and lands a full code-quality pass.** `mcp` 2.0.0
-(released 2026-07-28) removed `mcp.server.fastmcp`, and Selvedge declared
-`mcp>=1.0.0` with no upper bound — so any `pip install selvedge` after that date
-pulled 2.0.0 and `selvedge-server` failed at import. This release pins the
-dependency. **If your server stopped starting, this is why — upgrade.**
-
-It ships alongside a review that put nine independent passes over the codebase
-and then tried to *disprove* every finding before acting on it. Seventeen
-confirmed defects fixed. The ones you would actually have noticed:
-
-- **The enforcement hook stopped blocking things it shouldn't.** Reading a
-  tracked file — `cat`, `git diff`, `pytest`, `ruff check` — was blocked, and
-  the remediation the error message told you to run was blocked by the same
-  gate, so there was no way out from the CLI. Two more paths fed the same
-  false blocks: a commented-out line of SQL counted as a real deletion, and any
-  commit message merely containing the word "revert" marked every file it
-  touched as reverted.
-- **Lookups got fast at scale.** The main entity read was scanning every row —
-  measured 7.4 ms → 0.35 ms at 100k events, and the hook had been taking
-  seconds on large stores.
-- **`selvedge setup` can no longer delete parts of your `CLAUDE.md`**, an
-  interrupted backup can no longer destroy your last good one, and upgrading
-  while two Selvedge processes are running no longer crashes with an error that
-  looked like database corruption.
-
-Tests went 739 → 826. No schema change and no tool-surface change, so this is
-**drop-in for anyone on 0.3.9.x**.
 
 ---
 
@@ -812,7 +820,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.10   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.11   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only

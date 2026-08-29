@@ -6,6 +6,148 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.11] — 2026-08-29
+
+**Abandoned alternatives are first-class, and the log can prove itself.** The
+active-memory release: the `expires_when` column that shipped dormant in
+v0.3.8 gets its evaluator, `reject` joins `revert` so paths never taken are
+recorded the same way paths rolled back are, and `prior_attempts` reads both
+as stated outcomes instead of inferring them. Riding along, pulled forward
+from the verifiable-claims phase: a tamper-evident hash chain over the event
+log, because a store that retains rejected decisions as its differentiator
+should be able to show the retention is intact.
+
+Three of the smaller items answer the v0.3.10 release-thread feedback
+directly (the PreCompact/SessionStart contracts, the capture-time
+`stale_when` nudge, the digest selection-order pin), and two close issues
+from the v0.3.10 release review (#30, #31).
+
+### Added
+
+- **Tamper-evident hash chain** (`selvedge-chain/1`, design (d) of
+  `docs/design/tamper-evidence-proposal.md`). Every logged event gets a
+  SHA-256 chain record in a sidecar `event_chain` table, written in the same
+  transaction, over a canonicalized 17-field core — every events column
+  except `git_commit`, which is late-bound by the post-commit hook and
+  independently checkable against git. The two legitimate mutators append
+  boundary records instead of breaking the chain: `migrate-paths --apply`
+  appends an `amend` record re-binding rewritten rows, and the
+  destructive-gated prune appends a `tombstone` accounting for the *chained*
+  rows it deleted — so a gated prune verifies clean while a silent `sqlite3`
+  deletion of a chained row fails verification. Zero new dependencies (stdlib
+  `hashlib`/`json`), no schema migration of the `events` table, genesis is
+  automatic on first write after upgrade.
+- **Two new `selvedge verify` checks.** `chain_intact` (must-fail) recomputes
+  the chain end to end — hashes, `prev_hash` threading, `seq` contiguity,
+  tombstone accounting; nothing legitimate can trip it. `chain_coverage`
+  (warn-only) counts events rows with no chain record — expected on every
+  upgraded install, so it warns without breaking CI. Threat model stated
+  plainly in the module docstring: this detects casual and accidental
+  modification; it is not proof against a motivated local attacker, who
+  controls the file and can recompute every digest.
+- **Chain attestation manifest** in `selvedge verify --json`
+  (`chain_manifest`): storage mechanism, chain algorithm, canonical-form
+  version, and the verification-procedure reference — the four fields
+  SEP-3004 §2.7 asks a self-attesting store to publish, producible here
+  precisely because the verifier ships in the package.
+- **`expires_when` evaluation in `selvedge stale`.** The column existed since
+  v0.3.8; now it does something. A decision can carry a machine-checkable
+  expiry condition in a closed four-shape grammar — `library:NAME>=VERSION`,
+  `entity:PATH:changes`, `date:ISO`, `manual:LABEL` — validated at write time
+  on every path (MCP, CLI, importers); values outside the grammar are
+  rejected, not stored. Evaluation is local-only, no network, no LLM:
+  installed distribution metadata, the event log itself, and the clock. Fired
+  conditions surface as `flag="expired"` with the pattern that fired; a
+  `library:` condition whose package isn't locally observable presents as
+  `flag="manual_review"` rather than a guess, and `manual:` never auto-fires.
+- **`change_type="reject"`.** Records "we considered this and decided against
+  it" without writing the change — the counterpart to `revert` for paths
+  never taken. No new MCP tool; logged via the existing `log_change`.
+  Adoption defended on three surfaces: a worked example in the `log_change`
+  docstring, a prompt-block sentence telling agents to log rejections (the
+  load-bearing one — it reaches the agent every session), and a
+  reject-specific validator rule nudging the reasoning to name what was
+  chosen instead, not just what was refused.
+- **`stale_when` capture nudge.** When a `reject` or `revert` lands with
+  neither `stale_when` nor `expires_when`, the validator suggests recording
+  the invalidating condition — the reason a decision was made is also the
+  condition under which it should die. Warns, never rejects, same posture as
+  the secret-shape warnings. Digest rows whose `stale_when` condition has
+  since matched present as *re-examine* rather than a bare *reverted* —
+  presentation only; the stored verdict never mutates, and closing the loop
+  still takes an explicit `supersede`.
+- **`selvedge supersede` gains `-d/--diff`, `--revisit-after`, and
+  `--expires-when`** (#31), with the same semantics as `selvedge log`. The
+  storage layer accepted them all along and v0.3.10 fixed `log_change`
+  dropping them on the supersede branch — but the guided command never
+  exposed them, so the raw path could record the re-apply migration and the
+  recheck date while the documented path could not. Parity restored, and the
+  guided flow's diff/reasoning now pass through the same size-bound and
+  secret-shape checks as every other write path.
+
+### Changed
+
+- **`prior_attempts` confidence tiers.** An attempt closed by an explicit
+  `reject` or `revert` event now reports `confidence: "exact"` — the outcome
+  is stated in the log, not inferred. The v0.3.7 proximity heuristic remains
+  as the tiebreaker for attempts without a stated outcome. No API change for
+  callers, but **results move**: rows that previously came back as
+  `confidence: proximity_high` can now come back as `confidence: exact`, so
+  callers filtering on `proximity_high` should also accept `exact`.
+- **PreCompact reminder contracts, pinned.** Two behaviors the hook already
+  implied are now asserted: repeat-fire stability (two consecutive
+  compactions with no store change emit byte-identical reminders, and the
+  reminder goes quiet for an entity once its `log_change` lands), and the
+  reminder now distinguishes "edited with no log" from "log exists but was
+  truncated" — the v0.3.10 `…[truncated NNKB]` markers make the second case
+  detectable, and its fix (re-log a concise version before the clipped
+  reasoning is compacted away) is different from the first's.
+- **SessionStart digest selection order is a documented contract.** The
+  digest is bounded by construction (5 per section + `digest_max_bytes`), so
+  store growth changes *which* five surface, not how many. The order —
+  most-overdue revisits first, then condition matches by decision time, most
+  recent reverts first, most recently active changesets — is now in the hook
+  docstring and pinned by tests, including a seeded regression fixture for
+  the digest-boundary race: a supersede landing between seed and render
+  yields a digest naming exactly one effective verdict. Deliberately dumb
+  ranking — overdue-ness and recency, nothing semantic; anything smarter
+  waits on Phase 2.24's delivery-mode measurement.
+- **`selvedge prompt` block** now tells agents to log rejections and reverts
+  with their invalidating conditions; the bundled skill is regenerated from
+  it. The sentinel-bracketed `--install` path stays idempotent across the new
+  content.
+
+### Fixed
+
+- **An id-less supersede no longer re-opens every earlier revert on the
+  path** (#30). The timestamp fallback in `get_prior_attempts` matched a
+  supersede-without-link against *every* earlier closing removal, so one
+  hand-logged `supersede` flipped independent, still-standing reverts to
+  `reopened`. The fallback now mirrors `log_supersede`'s own auto-link rule:
+  an id-less supersede re-opens at most the single removal it would have
+  auto-linked to at write time; earlier reverts keep their verdicts.
+
+### Notes
+
+- Test suite 984 → 1114. The soft budget for this phase is ≤40 new tests —
+  already raised from ≤25 to absorb the release-thread cluster — and this
+  release exceeds it deliberately, which the budget discipline requires
+  calling out: the overrun is the tamper-evidence chain pulled forward from
+  the verifiable-claims phase (~33 tests in `test_tamper_evidence.py` plus
+  the `verify` additions) on top of the `expires_when` grammar suite and the
+  hook-contract fixtures the thread feedback committed this release to.
+  Coverage 89.4%, flat against v0.3.10.
+- Schema tax 4445/5450 (was 3705/3800) — `log_change` gained the
+  `expires_when` parameter and `get_stale_decisions` documents the three
+  surfacing flags, so the resident tool-surface cost moves this release; the
+  core surface is 2.2% of a 200k-token window.
+- The chain makes no claim about rows that predate it — including whether
+  they still exist. Pre-genesis rows are *unchained, not invalid*, surfaced
+  by the warn-only `chain_coverage` check; a `chain seal` command for
+  opt-in retroactive coverage is future work, per the design doc. Selvedge's
+  own dogfood store crossed its genesis with this release — the decisions
+  behind v0.3.11 are the first chained rows.
+
 ## [0.3.10] — 2026-08-05
 
 **Config + delivery.** A deliberate two-theme release: the memory comes to the

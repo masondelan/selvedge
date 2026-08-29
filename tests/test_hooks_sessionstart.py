@@ -26,6 +26,11 @@ def project(tmp_path, monkeypatch):
     monkeypatch.delenv("SELVEDGE_DB", raising=False)
     monkeypatch.delenv(hook.DISABLE_ENV, raising=False)
     monkeypatch.setenv("SELVEDGE_QUIET", "1")
+    # With SELVEDGE_DB unset, the hook's `payload.get("cwd") or os.getcwd()`
+    # fallback walks UP from the process cwd — run from the repo root, a
+    # payload with no cwd (the malformed-payload tests) would resolve the
+    # maintainer's real dogfood store. chdir to tmp so the walk finds nothing.
+    monkeypatch.chdir(tmp_path)
     proj = tmp_path / "proj"
     (proj / ".selvedge").mkdir(parents=True)
     SelvedgeStorage(proj / ".selvedge" / "selvedge.db")
@@ -241,3 +246,187 @@ def test_quiet_path_does_not_import_storage(project):
     assert "selvedge.storage" not in loaded, (
         f"the quiet path imported the storage layer: {sorted(loaded)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.17 regression fixture — seeded store, capped render, supersede race
+# ---------------------------------------------------------------------------
+
+
+def test_seeded_rejection_names_the_dead_path(project):
+    """First arm of the fixture: the dead path is named in the digest.
+
+    Seeded with the v0.3.11 `reject` type — a rejection is a standing
+    negative verdict and must surface exactly like a revert does.
+    """
+    _storage(project).log_event(ChangeEvent(
+        entity_path="payments.retry_queue", change_type="reject",
+        timestamp="2026-01-05T00:00:00Z",
+        reasoning="Rejected: at-least-once delivery already covers retries."))
+    digest = hook.evaluate(_payload(project))
+    assert "payments.retry_queue" in digest
+    assert "REVERTED" in digest
+    assert "at-least-once delivery" in digest
+
+
+def test_byte_cap_cuts_the_rendered_digest_on_a_line_boundary(project, monkeypatch):
+    """Second arm: digest_max_bytes holds against the REAL digest.
+
+    `test_cap_cuts_on_a_line_boundary` proves it for synthetic text; this
+    pins it end-to-end — the capped render is a whole-line prefix of the
+    uncapped one, never a mid-line clip.
+    """
+    st = _storage(project)
+    for i in range(8):
+        st.log_event(ChangeEvent(
+            entity_path=f"users.col{i}", change_type="add",
+            timestamp=f"2026-01-0{i + 1}T00:00:00Z",
+            reasoning="tried " + "x" * 80))
+        st.log_event(ChangeEvent(
+            entity_path=f"users.col{i}", change_type="revert",
+            timestamp=f"2026-02-0{i + 1}T00:00:00Z",
+            reasoning="reverted " + "y" * 80))
+
+    full = hook.evaluate(_payload(project))
+    assert full
+    cap = len(full.encode("utf-8")) // 2
+    monkeypatch.setenv("SELVEDGE_DIGEST_MAX_BYTES", str(cap))
+    capped = hook.evaluate(_payload(project))
+
+    assert 0 < len(capped.encode("utf-8")) <= cap
+    assert len(capped) < len(full)
+    assert full.startswith(capped), "the cap must keep a prefix, unreordered"
+    assert full[len(capped)] == "\n", "the cut must land on a line boundary"
+
+
+def test_supersede_between_seed_and_render_leaves_one_effective_verdict(project):
+    """Third arm: the digest-boundary race, made deterministic.
+
+    Two dead paths are seeded; a supersede for one lands after the seed but
+    before the render. The digest must name exactly one effective verdict —
+    the still-standing one — and drop the re-opened path entirely.
+    """
+    _seed_reverted(project, path="users.sso_token")
+    st = _storage(project)
+    st.log_event(ChangeEvent(
+        entity_path="billing.tax_rate", change_type="add",
+        timestamp="2026-01-03T00:00:00Z",
+        reasoning="Tried a column-level tax rate."))
+    st.log_event(ChangeEvent(
+        entity_path="billing.tax_rate", change_type="revert",
+        timestamp="2026-01-04T00:00:00Z",
+        reasoning="Reverted: rates live in the tax service."))
+    # The race, replayed as a fixture: the supersede lands between seed and
+    # render.
+    st.log_event(ChangeEvent(
+        entity_path="users.sso_token", change_type="supersede",
+        timestamp="2026-03-01T00:00:00Z",
+        reasoning="Constraint lifted; SSO tokens re-opened."))
+
+    digest = hook.evaluate(_payload(project))
+    assert "billing.tax_rate" in digest, "the standing verdict must surface"
+    assert digest.count("users.sso_token") == 0, (
+        "a superseded verdict must not appear even once — one effective "
+        "verdict, not a reverted row plus a supersede footnote"
+    )
+
+
+# ---------------------------------------------------------------------------
+# stale_when presentation — matched condition reads as *re-examine*
+# ---------------------------------------------------------------------------
+
+
+def _seed_matched_stale_when(project):
+    """A rejection with a stale_when condition, then a later change that
+    matches it via the v0.3.8 keyword-overlap surfacing."""
+    st = _storage(project)
+    st.log_event(ChangeEvent(
+        entity_path="billing.provider_fee", change_type="reject",
+        timestamp="2026-01-01T00:00:00Z",
+        reasoning="Rejected a separate fee column while we stay on Stripe.",
+        stale_when="stripe payment processor replaced"))
+    st.log_event(ChangeEvent(
+        entity_path="billing.gateway", change_type="modify",
+        timestamp="2026-02-01T00:00:00Z",
+        reasoning="Migrated the payment processor from stripe to adyen."))
+
+
+def test_matched_stale_when_presents_as_re_examine(project):
+    """A dead path whose invalidating condition has since matched reads as
+    *re-examine*, not a bare warning."""
+    _seed_matched_stale_when(project)
+    digest = hook.evaluate(_payload(project))
+    assert "billing.provider_fee" in digest
+    assert "re-examine" in digest
+    assert "stale_when" in digest, "the row must say WHY it is re-examine"
+
+
+def test_unmatched_stale_when_stays_a_bare_reverted_row(project):
+    """No later match, no re-examine marker — the condition alone changes
+    nothing."""
+    _storage(project).log_event(ChangeEvent(
+        entity_path="billing.provider_fee", change_type="reject",
+        timestamp="2026-01-01T00:00:00Z",
+        reasoning="Rejected a separate fee column.",
+        stale_when="stripe payment processor replaced"))
+    digest = hook.evaluate(_payload(project))
+    assert "billing.provider_fee" in digest
+    assert "re-examine" not in digest
+
+
+def test_re_examine_is_presentation_only(project):
+    """The stored verdict never mutates — append-only stays append-only."""
+    _seed_matched_stale_when(project)
+    st = _storage(project)
+    before = st.count()
+
+    digest = hook.evaluate(_payload(project))
+    assert "re-examine" in digest
+
+    assert st.count() == before, "rendering the digest must write nothing"
+    assert any(
+        r["entity_path"] == "billing.provider_fee" and r["change_type"] == "reject"
+        for r in st.get_reverted_entities()
+    ), "the standing verdict is still the rejection; only the wording changed"
+
+
+# ---------------------------------------------------------------------------
+# Selection order — documented contract, pinned (no ranking system here)
+# ---------------------------------------------------------------------------
+
+
+def test_selection_order_due_section_most_overdue_first_capped_at_five(project):
+    """Seven due decisions; the five most overdue surface, most overdue
+    leading. Store growth changes WHICH five, never HOW MANY."""
+    st = _storage(project)
+    for i in range(7):
+        path = f"svc.decision{i}"
+        st.log_event(ChangeEvent(
+            entity_path=path, change_type="add",
+            timestamp="2020-01-01T00:00:00Z",
+            revisit_after=f"2020-0{i + 2}-01",  # i=0 is the most overdue
+            reasoning=f"decision number {i}"))
+        st.record_tool_call("prior_attempts", entity_path=path)
+
+    digest = hook.evaluate(_payload(project))
+    surfaced = [f"svc.decision{i}" for i in range(5)]
+    positions = [digest.index(p) for p in surfaced]
+    assert positions == sorted(positions), "most overdue must lead"
+    for dropped in ("svc.decision5", "svc.decision6"):
+        assert dropped not in digest, "the cap keeps the five MOST overdue"
+
+
+def test_selection_order_reverted_section_most_recent_first_capped_at_five(project):
+    """Six standing reverts; the five most recent surface, newest leading."""
+    st = _storage(project)
+    for i in range(6):
+        st.log_event(ChangeEvent(
+            entity_path=f"svc.dead{i}", change_type="revert",
+            timestamp=f"2026-01-0{i + 1}T00:00:00Z",
+            reasoning=f"reverted path number {i}"))
+
+    digest = hook.evaluate(_payload(project))
+    assert "svc.dead0" not in digest, "the oldest revert falls off the cap"
+    surfaced = [f"svc.dead{i}" for i in (5, 4, 3, 2, 1)]
+    positions = [digest.index(p) for p in surfaced]
+    assert positions == sorted(positions), "most recent revert must lead"

@@ -43,6 +43,7 @@ from . import telemetry as telemetry_mod
 from . import update_check as update_check_mod
 from . import verify as verify_mod
 from .config import get_db_path, init_project, resolve_setting
+from .expires_when import validate_expires_when
 from .logging_config import configure_logging
 from .models import ChangeEvent, ChangeType
 from .presenters import blame_payload, changeset_payload, prior_attempts_payload
@@ -51,7 +52,9 @@ from .timeutil import normalize_revisit_after, parse_time_string, parse_window_m
 from .validation import (
     apply_event_limits,
     check_entity_path_shape,
+    check_invalidation_capture_nudge,
     check_reasoning_quality,
+    check_reject_reasoning,
     check_revisit_nudge,
 )
 
@@ -448,6 +451,10 @@ def verify(strict, as_json):
     code = verify_mod.exit_code(results, strict=strict)
 
     if as_json:
+        # chain_manifest: the SEP-3004 §2.7 attestation manifest for the
+        # tamper-evidence chain (v0.3.11). Every field a string, never null.
+        from .chain import chain_manifest
+
         click.echo(
             json.dumps(
                 {
@@ -455,6 +462,7 @@ def verify(strict, as_json):
                     "db_path": str(db_path),
                     "checks": [r.to_dict() for r in results],
                     "exit_code": code,
+                    "chain_manifest": chain_manifest(),
                 },
                 indent=2,
             )
@@ -1036,9 +1044,11 @@ def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_j
     labeled (match_type="fuzzy" with a similarity score).
 
     \b
-    Conservative by default: only the clear "tried, then reverted within the
-    window" signal shows. An empty result is the normal, good answer (exit 0) —
-    pass --all to widen recall.
+    Conservative by default: only the high-signal rows show — attempts closed
+    by an explicit revert/reject and standalone rejections (confidence
+    "exact"), plus "tried, then reverted within the window" (proximity_high).
+    An empty result is the normal, good answer (exit 0) — pass --all to widen
+    recall.
 
     \b
     Examples:
@@ -1104,7 +1114,12 @@ def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_j
 
     label = entity or f'"{description or fuzzy}"'
     console.print(f"\n[bold]Prior attempts[/bold]  [dim]{label}[/dim]\n")
-    outcome_styles = {"reverted": "red", "reopened": "cyan", "active": "yellow"}
+    outcome_styles = {
+        "reverted": "red",
+        "rejected": "red",
+        "reopened": "cyan",
+        "active": "yellow",
+    }
     for r in rows:
         outcome = r.get("outcome", "")
         confidence = r.get("confidence", "")
@@ -1121,10 +1136,23 @@ def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_j
             f"[{outcome_style}]{outcome}[/{outcome_style}]  "
             f"[dim]({confidence})[/dim]{fuzzy_tag}"
         )
-        # The trail, one line per step: tried → reverted → re-opened.
+        # The trail, one line per step: tried → reverted → re-opened. A
+        # standalone rejection was never tried — its whole point is "decided
+        # against WITHOUT writing the change" — so its reasoning gets the
+        # "rejected:" label, not "tried:".
+        is_rejection = r.get("change_type") == "reject"
         if r.get("reasoning"):
-            console.print(f"    [dim]tried:[/dim]     {r['reasoning']}")
-        if outcome in ("reverted", "reopened") and r.get("outcome_reasoning"):
+            if is_rejection:
+                console.print(f"    [dim]rejected:[/dim]  {r['reasoning']}")
+            else:
+                console.print(f"    [dim]tried:[/dim]     {r['reasoning']}")
+        if (
+            outcome in ("reverted", "reopened")
+            and r.get("outcome_reasoning")
+            # A standalone rejection's outcome_reasoning IS its own
+            # reasoning — already printed above, don't repeat it.
+            and r.get("outcome_reasoning") != r.get("reasoning")
+        ):
             console.print(f"    [dim]reverted:[/dim]  {r['outcome_reasoning']}")
         if outcome == "reopened" and r.get("supersede_reasoning"):
             console.print(f"    [dim]re-opened:[/dim] {r['supersede_reasoning']}")
@@ -1221,7 +1249,12 @@ def stale_cmd(entity, project, agent, limit, as_json):
     """Show decisions now due for a revisit.
 
     \b
-    Two surfacing rules (see the `flag` field):
+    Three surfacing rules (see the `flag` field):
+      expired           — the decision's `expires_when` condition fired
+                          (v0.3.11), evaluated locally: date passed, the
+                          named entity changed, or the named dependency
+                          reached the version. `expired_pattern` names the
+                          grammar kind that fired.
       revisit_due       — `revisit_after` has passed AND the entity is still
                           live (recently queried, or its changeset kept
                           moving). Pure age never surfaces, so an
@@ -1230,6 +1263,9 @@ def stale_cmd(entity, project, agent, limit, as_json):
                           `stale_when` condition (v0.3.9.1). Surfacing only —
                           follow up with `selvedge supersede` if the
                           condition really was triggered.
+      manual_review     — a `library:` expires_when whose dependency isn't
+                          locally observable; presented for a human rather
+                          than guessed at. (`manual:LABEL` never auto-fires.)
     `--json` is built for cron / Slack / digest jobs.
 
     \b
@@ -1251,7 +1287,9 @@ def stale_cmd(entity, project, agent, limit, as_json):
         console.print("[green]No decisions are due for a revisit.[/green]")
         console.print(
             "[dim]Decisions surface here once their [bold]revisit_after[/bold] "
-            "passes and the entity is still in active use.[/dim]"
+            "passes and the entity is still in active use, or when a "
+            "[bold]stale_when[/bold] / [bold]expires_when[/bold] condition "
+            "fires.[/dim]"
         )
         return
 
@@ -1273,11 +1311,11 @@ def stale_cmd(entity, project, agent, limit, as_json):
     table.add_column("Why", overflow="fold")
     for r in rows:
         flag = r.get("flag", "revisit_due")
-        flag_cell = (
-            "[yellow]review[/yellow]"
-            if flag == "review_suggested"
-            else "[red]due[/red]"
-        )
+        flag_cell = {
+            "expired": "[red]expired[/red]",
+            "review_suggested": "[yellow]review[/yellow]",
+            "manual_review": "[magenta]manual[/magenta]",
+        }.get(flag, "[red]due[/red]")
         overdue = f"{r.get('days_overdue', 0)}d" if r.get("revisit_due") else "—"
         table.add_row(
             r.get("entity_path", ""),
@@ -1449,6 +1487,14 @@ _CHANGE_TYPE_CHOICES = [ct.value for ct in ChangeType]
     "offset from now (e.g. '90d', '6mo'). Surfaced later by `selvedge stale`.",
 )
 @click.option(
+    "--expires-when",
+    default="",
+    help="Machine-checkable expiry condition (closed grammar, validated): "
+    "'library:NAME>=VERSION', 'entity:PATH:changes', 'date:ISO', or "
+    "'manual:LABEL'. `selvedge stale` evaluates it locally and flags "
+    "'expired' with the pattern that fired.",
+)
+@click.option(
     "--rename-from",
     default="",
     help="Old path when CHANGE_TYPE is 'rename'; ENTITY_PATH is the new path. "
@@ -1471,16 +1517,17 @@ _CHANGE_TYPE_CHOICES = [ct.value for ct in ChangeType]
     "--supersedes",
     default="",
     help="Event id this change overrides. Only valid with CHANGE_TYPE "
-    "'supersede'; empty auto-links the latest remove/delete on the entity. "
+    "'supersede'; empty auto-links the entity's latest removal event "
+    "(remove/delete/index_remove/revert/reject). "
     "Prefer `selvedge supersede` for the guided flow.",
 )
-def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, commit, project, changeset, revisit_after, rename_from, constraint, stale_when, supersedes):
+def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, commit, project, changeset, revisit_after, expires_when, rename_from, constraint, stale_when, supersedes):
     """Manually log a change event.
 
     \b
     CHANGE_TYPE must be one of:
       add, remove, modify, rename, retype, create, delete,
-      index_add, index_remove, migrate, revert, supersede
+      index_add, index_remove, migrate, revert, reject, supersede
 
     \b
     Examples:
@@ -1502,9 +1549,12 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
         sys.exit(2)
 
     # Normalize --revisit-after with the same grammar as --since (relative
-    # offsets preserved, absolute dates canonicalized) before it reaches storage.
+    # offsets preserved, absolute dates canonicalized), and validate
+    # --expires-when against the closed grammar (v0.3.11), before either
+    # reaches storage.
     try:
         normalized_revisit = normalize_revisit_after(revisit_after)
+        normalized_expires = validate_expires_when(expires_when)
     except ValueError as e:
         err_console.print(f"[red]error:[/red] {e}")
         sys.exit(2)
@@ -1534,6 +1584,7 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
                 project=project,
                 changeset_id=changeset,
                 revisit_after=normalized_revisit,
+                expires_when=normalized_expires,
                 constraint=constraint,
                 stale_when=stale_when,
             )
@@ -1549,6 +1600,7 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
                 constraint=constraint,
                 stale_when=stale_when,
                 revisit_after=normalized_revisit,
+                expires_when=normalized_expires,
                 supersedes=supersedes,
                 agent=agent,
                 git_commit=commit,
@@ -1567,6 +1619,7 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
                 project=project,
                 changeset_id=changeset,
                 revisit_after=normalized_revisit,
+                expires_when=normalized_expires,
                 constraint=constraint,
                 stale_when=stale_when,
             )
@@ -1597,9 +1650,13 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
     # manual entries get the same nudges that agent-driven log_change calls do.
     warnings = list(limit_warnings)
     warnings += check_reasoning_quality(reasoning)
+    warnings += check_reject_reasoning(stored.change_type, reasoning)
     warnings += check_entity_path_shape(stored.entity_path, stored.entity_type)
     warnings += check_revisit_nudge(
         stored.change_type, stored.entity_type, stored.revisit_after
+    )
+    warnings += check_invalidation_capture_nudge(
+        stored.change_type, stored.stale_when, stored.expires_when
     )
     for warning in warnings:
         err_console.print(f"[yellow]warning:[/yellow] {warning}")
@@ -1619,6 +1676,14 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
     help="Why the reverted decision no longer stands — what changed in the world.",
 )
 @click.option(
+    "--diff",
+    "-d",
+    "diff_text",
+    default="",
+    help="The change diff or description — e.g. the migration that re-applies "
+    "the decision. Same semantics as `selvedge log --diff`.",
+)
+@click.option(
     "--constraint",
     default="",
     help="The (now-lifted or new) testable principle, kept queryable.",
@@ -1629,17 +1694,32 @@ def log(entity_path, change_type, diff_text, reasoning, entity_type, agent, comm
     help="What would invalidate THIS new verdict, for future stale-checking.",
 )
 @click.option(
+    "--expires-when",
+    default="",
+    help="Machine-checkable expiry condition for the new verdict (closed "
+    "grammar, validated): 'library:NAME>=VERSION', 'entity:PATH:changes', "
+    "'date:ISO', or 'manual:LABEL'. `selvedge stale` evaluates it locally. "
+    "Same semantics as `selvedge log --expires-when`.",
+)
+@click.option(
+    "--revisit-after",
+    default="",
+    help="Revisit date for the re-opened decision: an ISO date or a relative "
+    "offset from now (e.g. '90d', '6mo'). Surfaced later by `selvedge stale`. "
+    "Same semantics as `selvedge log --revisit-after`.",
+)
+@click.option(
     "--supersedes",
     default="",
     help="Explicit event id to override. Default: the entity's most recent "
-    "remove/delete event.",
+    "removal event (remove/delete/index_remove/revert/reject).",
 )
 @click.option("--agent", default="", help="Agent or author name")
 @click.option("--commit", default="", help="Git commit hash")
 @click.option("--project", default="", help="Project name")
 @click.option("--changeset", "-c", default="", help="Changeset ID to group related changes")
 @click.option("--json", "as_json", is_flag=True, help="Output the stored event as JSON")
-def supersede_cmd(entity_path, reasoning, constraint, stale_when, supersedes, agent, commit, project, changeset, as_json):
+def supersede_cmd(entity_path, reasoning, diff_text, constraint, stale_when, expires_when, revisit_after, supersedes, agent, commit, project, changeset, as_json):
     """Re-open a reverted decision — append-only, never rewrites history.
 
     \b
@@ -1650,6 +1730,12 @@ def supersede_cmd(entity_path, reasoning, constraint, stale_when, supersedes, ag
     diff then read the full trail: tried → reverted → re-opened.
 
     \b
+    A supersede is a change like any other: --diff records the migration or
+    change text that re-applies the decision, and --revisit-after dates the
+    re-opened verdict for `selvedge stale` — both with the same semantics as
+    `selvedge log`.
+
+    \b
     There is deliberately no automatic un-retiring — this command IS the
     explicit re-open step.
 
@@ -1658,15 +1744,34 @@ def supersede_cmd(entity_path, reasoning, constraint, stale_when, supersedes, ag
       selvedge supersede payments.card_token -r "Provider now vaults cards — PCI constraint gone."
       selvedge supersede users.sso_token -r "..." --constraint "tokens must be short-lived"
       selvedge supersede users.sso_token -r "..." --supersedes 3fa2b1c0-...
+      selvedge supersede pay.token -r "..." -d "ALTER TABLE pay ADD COLUMN token TEXT;" --revisit-after 180d
     """
+    # Normalize --revisit-after with the same grammar as `selvedge log`
+    # (relative offsets preserved, absolute dates canonicalized) and validate
+    # --expires-when against the closed grammar before either reaches
+    # storage — flag parity with the log command's supersede branch (#31).
+    try:
+        normalized_revisit = normalize_revisit_after(revisit_after)
+        normalized_expires = validate_expires_when(expires_when)
+    except ValueError as e:
+        err_console.print(f"[red]error:[/red] {e}")
+        sys.exit(2)
+
+    # Size bounds + secret-shape check, shared with the `selvedge log` and MCP
+    # write paths so the guided flow can't drift from the raw one.
+    diff_text, reasoning, limit_warnings = apply_event_limits(diff_text, reasoning)
+
     storage = get_storage()
     storage.record_tool_call("log_change", entity_path=entity_path, agent=agent or "cli")
     try:
         stored = storage.log_supersede(
             entity_path,
+            diff=diff_text,
             reasoning=reasoning,
             constraint=constraint,
             stale_when=stale_when,
+            revisit_after=normalized_revisit,
+            expires_when=normalized_expires,
             supersedes=supersedes,
             agent=agent,
             git_commit=commit,
@@ -1698,7 +1803,7 @@ def supersede_cmd(entity_path, reasoning, constraint, stale_when, supersedes, ag
     )
     console.print(f"  [dim]Status[/dim]  [green]{decision['status_line']}[/green]")
 
-    for warning in check_reasoning_quality(reasoning):
+    for warning in [*limit_warnings, *check_reasoning_quality(reasoning)]:
         err_console.print(f"[yellow]warning:[/yellow] {warning}")
 
 

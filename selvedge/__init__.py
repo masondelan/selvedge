@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-__version__ = "0.3.10"
+__version__ = "0.3.11"
 
 # name -> submodule it lives in. Kept in step with `__all__` by
 # `test_lazy_exports_covers_the_whole_surface` rather than by deriving one

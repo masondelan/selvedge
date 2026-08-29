@@ -14,7 +14,9 @@ from selvedge.validation import (
     GENERIC_REASONING_PATTERNS,
     REASONING_MIN_LENGTH,
     check_entity_path_shape,
+    check_invalidation_capture_nudge,
     check_reasoning_quality,
+    check_reject_reasoning,
 )
 
 # ---------------------------------------------------------------------------
@@ -172,3 +174,67 @@ def test_check_entity_path_shape_is_silent_for_unshaped_types_and_empty():
     assert check_entity_path_shape("", "function") == []
     # The patterns are keyed by the documented entity types.
     assert set(ENTITY_PATTERNS) == {"function", "column", "file"}
+
+
+# ---------------------------------------------------------------------------
+# Reject-quality rule (v0.3.11) — name what was chosen instead. Warn, never
+# reject, like every other rule here.
+# ---------------------------------------------------------------------------
+
+
+def test_reject_without_an_alternative_nudges():
+    warnings = check_reject_reasoning(
+        "reject", "Rejected storing raw card PANs on the user row."
+    )
+    assert len(warnings) == 1
+    assert "chosen" in warnings[0]
+
+
+@pytest.mark.parametrize("reasoning", [
+    "Rejected raw PANs — went with provider tokens instead.",
+    "Rejected raw PANs in favor of provider tokens.",
+    "Considered raw PANs; chose provider tokens rather than PCI scope.",
+])
+def test_reject_naming_the_alternative_is_silent(reasoning):
+    assert check_reject_reasoning("reject", reasoning) == []
+
+
+def test_reject_rule_only_fires_for_reject_events():
+    text = "Removed the column; no alternative involved."
+    assert check_reject_reasoning("remove", text) == []
+    assert check_reject_reasoning("revert", text) == []
+
+
+def test_reject_rule_leaves_empty_reasoning_to_the_empty_warning():
+    """One problem, one warning — no stacking on top of the empty nudge."""
+    assert check_reject_reasoning("reject", "") == []
+    assert check_reject_reasoning("reject", "   ") == []
+
+
+# ---------------------------------------------------------------------------
+# stale_when capture nudge (v0.3.11) — a reject/revert stored without its
+# invalidating condition is data that silently rots. Warn, never reject.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("change_type", ["reject", "revert"])
+def test_invalidation_nudge_fires_without_any_condition(change_type):
+    warnings = check_invalidation_capture_nudge(change_type, "", "")
+    assert len(warnings) == 1
+    assert "stale_when" in warnings[0]
+    assert "expires_when" in warnings[0]
+
+
+def test_invalidation_nudge_silent_when_either_condition_is_set():
+    assert check_invalidation_capture_nudge(
+        "reject", "payment provider changed", ""
+    ) == []
+    assert check_invalidation_capture_nudge(
+        "revert", "", "date:2027-01-01T00:00:00.000000Z"
+    ) == []
+
+
+def test_invalidation_nudge_silent_for_other_change_types():
+    assert check_invalidation_capture_nudge("add", "", "") == []
+    assert check_invalidation_capture_nudge("remove", "", "") == []
+    assert check_invalidation_capture_nudge("supersede", "", "") == []

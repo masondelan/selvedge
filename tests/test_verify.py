@@ -80,6 +80,8 @@ def test_clean_db_passes_every_check(db_path):
 
 def test_unknown_change_type_in_store_fails(db_path):
     """Direct INSERT of a bogus change_type — ChangeEvent guards in normal writes."""
+    # Raw-inserted rows are deliberately UNCHAINED (no event_chain record) —
+    # they draw a chain_coverage WARN, which changes no assertion here.
     SelvedgeStorage(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -97,6 +99,8 @@ def test_unknown_change_type_in_store_fails(db_path):
 
 
 def test_empty_entity_path_fails(db_path):
+    # Raw insert bypasses log_event, so the row is deliberately unchained —
+    # chain_coverage WARNs, which doesn't affect the must_fail assertion.
     SelvedgeStorage(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -111,6 +115,8 @@ def test_empty_entity_path_fails(db_path):
 
 
 def test_unparseable_timestamp_fails(db_path):
+    # Raw insert bypasses log_event, so the row is deliberately unchained —
+    # chain_coverage WARNs, which doesn't affect the must_fail assertion.
     SelvedgeStorage(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -168,6 +174,8 @@ def test_singleton_changeset_is_warn_not_fail(db_path):
 
 def test_old_event_missing_git_commit_warns(db_path):
     """Event past the backfill window with empty git_commit → WARN, not FAIL."""
+    # Raw insert bypasses log_event, so the row is deliberately unchained —
+    # chain_coverage WARNs alongside missing_git_commit; both are should_warn.
     SelvedgeStorage(db_path)
     old = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat().replace("+00:00", "Z")
     with sqlite3.connect(str(db_path)) as conn:
@@ -229,6 +237,8 @@ def test_verify_cli_warn_only_exits_zero_strict_escalates(runner, db_path):
 
 
 def test_verify_cli_fail_exits_one(runner, db_path):
+    # Raw insert bypasses log_event, so the row is deliberately unchained —
+    # chain_coverage WARNs; exit 1 is driven by the change_type must_fail.
     SelvedgeStorage(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(

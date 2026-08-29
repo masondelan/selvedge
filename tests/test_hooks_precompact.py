@@ -252,3 +252,140 @@ def test_gate_then_precompact_end_to_end(project):
 
     reminder = hook.evaluate(_payload(project))
     assert "migrations/003.sql" in reminder
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.17 contracts: repeat-fire stability + truncation distinction
+# ---------------------------------------------------------------------------
+
+
+def _log_truncated(project, entity_path, session_id="sess-1"):
+    """Log an event whose reasoning carries a real v0.3.10 truncation marker.
+
+    Built with the same `truncate_field` the write paths use, so the fixture
+    stores exactly what an over-limit `log_change` would have stored.
+    """
+    from selvedge.storage import truncate_field
+
+    clipped, dropped = truncate_field("the full constraint story " * 400, 120)
+    assert dropped, "fixture must actually truncate"
+    SelvedgeStorage(project / ".selvedge" / "selvedge.db").log_event(ChangeEvent(
+        entity_path=entity_path, change_type="modify",
+        session_id=session_id, reasoning=clipped,
+    ))
+
+
+def test_repeat_fire_is_byte_identical_until_the_store_changes(project):
+    """Contract (a): re-derivation from store state, pinned.
+
+    Two consecutive fires with no store change emit byte-identical output —
+    envelope and all — and the reminder goes quiet for an entity the moment
+    its log_change lands.
+    """
+    _touch(project, "sess-1", ["migrations/0001.sql"])
+
+    def fire() -> bytes:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            assert hook.run([], stdin=json.dumps(_payload(project))) == 0
+        return buf.getvalue().encode("utf-8")
+
+    first, second = fire(), fire()
+    assert first == second, "an unchanged store must not change a single byte"
+    assert b"migrations/0001.sql" in first
+
+    SelvedgeStorage(project / ".selvedge" / "selvedge.db").log_event(ChangeEvent(
+        entity_path="migrations/0001.sql", change_type="modify",
+        session_id="sess-1", reasoning="Indexed the slow report query.",
+    ))
+    assert hook.evaluate(_payload(project)) == "", (
+        "once the log_change lands, the reminder goes quiet for that entity"
+    )
+
+
+def test_truncated_log_is_named_separately_from_no_log(project):
+    """Contract (b): 'log was cut' is not lumped with 'no log at all'."""
+    _touch(project, "sess-1", ["migrations/0001.sql", "migrations/0002.sql"])
+    _log_truncated(project, "migrations/0001.sql")
+
+    reminder = hook.evaluate(_payload(project))
+    # 0002 has no log at all — it stays in the unlogged list.
+    assert "  - migrations/0002.sql" in reminder
+    # 0001 has a log, so it leaves the unlogged list...
+    assert "  - migrations/0001.sql" not in reminder
+    # ...but that log was clipped, and the reminder says so by name.
+    assert "Log exists but was truncated for: migrations/0001.sql" in reminder
+    assert "[truncated" in reminder, "the line must name the v0.3.10 marker"
+
+
+def test_everything_logged_but_truncated_still_reminds(project):
+    """A clipped log is not a captured log — the tail of the reasoning exists
+    only in the session context compaction is about to destroy."""
+    _touch(project, "sess-1", ["migrations/0001.sql"])
+    _log_truncated(project, "migrations/0001.sql")
+
+    reminder = hook.evaluate(_payload(project))
+    assert "Log exists but was truncated for: migrations/0001.sql" in reminder
+    assert "no log_change recorded" not in reminder, (
+        "a truncated log must not be presented as a missing one"
+    )
+
+
+def test_truncation_line_is_scoped_to_this_session(project):
+    """Another session's truncated event is not this session's loss."""
+    _touch(project, "sess-1", ["migrations/0002.sql"])
+    _log_truncated(project, "migrations/0001.sql", session_id="sess-other")
+
+    reminder = hook.evaluate(_payload(project))
+    assert "  - migrations/0002.sql" in reminder
+    assert "truncated" not in reminder
+    assert "migrations/0001.sql" not in reminder
+
+
+def test_truncation_line_goes_quiet_after_a_concise_relog(project):
+    """The reminder's own instruction, followed, silences the reminder.
+
+    Same goes-quiet contract as the unlogged list: the line says "re-log a
+    concise version now" — once that untruncated re-log is the entity's
+    newest session event, the next fire must not re-issue the instruction,
+    or a compliant agent re-logs a duplicate on every compaction. The store
+    stays append-only: the old truncated event remains in place.
+    """
+    _touch(project, "sess-1", ["migrations/0001.sql"])
+    _log_truncated(project, "migrations/0001.sql")
+    assert "Log exists but was truncated for: migrations/0001.sql" in (
+        hook.evaluate(_payload(project))
+    )
+
+    # The compliant agent follows the instruction: a concise re-log.
+    SelvedgeStorage(project / ".selvedge" / "selvedge.db").log_event(ChangeEvent(
+        entity_path="migrations/0001.sql", change_type="modify",
+        session_id="sess-1",
+        reasoning="Concise re-log: index added for the slow report query.",
+    ))
+
+    reminder = hook.evaluate(_payload(project))
+    assert reminder == "", (
+        "once the concise re-log lands, the truncation reminder goes quiet"
+    )
+
+    # And the append-only record still holds both events — nothing was
+    # edited or displaced, the truncated one just stopped being newest.
+    import sqlite3
+
+    with sqlite3.connect(str(project / ".selvedge" / "selvedge.db")) as con:
+        n = con.execute(
+            "SELECT COUNT(*) FROM events WHERE entity_path = ?",
+            ("migrations/0001.sql",),
+        ).fetchone()[0]
+    assert n == 2
+
+
+def test_truncated_relog_that_is_still_truncated_keeps_reminding(project):
+    """A re-log that got clipped again is still a loss — stay loud."""
+    _touch(project, "sess-1", ["migrations/0001.sql"])
+    _log_truncated(project, "migrations/0001.sql")
+    _log_truncated(project, "migrations/0001.sql")  # newer, still truncated
+
+    reminder = hook.evaluate(_payload(project))
+    assert "Log exists but was truncated for: migrations/0001.sql" in reminder

@@ -36,6 +36,10 @@ from __future__ import annotations
 
 import json
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # heavy import stays lazy at runtime — see evaluate()
+    from ..storage import SelvedgeStorage
 
 EXIT_ALLOW = 0
 
@@ -59,6 +63,27 @@ def build_digest(db_path: object, max_bytes: int) -> str:
          about to re-implement one of these is the expensive failure),
       3. the most recent changesets, for orientation.
 
+    **Selection order — a documented contract, not an accident.** Each
+    section is capped at ``_MAX_PER_SECTION`` (5), so store growth changes
+    *which* five surface, not *how many*:
+
+      1. Revisit rows come from ``get_stale_decisions``: date-due rows
+         first, **most overdue leading** (ascending due date), then
+         condition-only matches by decision time.
+      2. Reverted rows come from ``get_reverted_entities``: **most recent
+         revert first** (descending timestamp of the standing verdict).
+      3. Changesets: most recently active first.
+
+    That order is deliberately dumb — overdue-ness and recency, nothing
+    semantic, nothing prompt-conditioned. Pinned by
+    ``test_selection_order_*`` in ``test_hooks_sessionstart.py``. Any
+    smarter ranking waits on Phase 2.24's delivery-mode measurement.
+
+    A reverted row whose ``stale_when`` condition has since matched a later
+    change presents as *re-examine* instead of a bare warning — presentation
+    only, reusing the v0.3.8 active-memory surfacing. The stored verdict
+    never mutates; closing the loop still takes an explicit ``supersede``.
+
     Deterministic: same store, same string. Nothing here is generated.
     """
     from ..storage import SelvedgeStorage
@@ -80,7 +105,13 @@ def build_digest(db_path: object, max_bytes: int) -> str:
         lines = ["Tried before and REVERTED — check prior_attempts before touching:"]
         for row in reverted:
             why = row["reasoning"] or "(no reasoning recorded)"
-            lines.append(f"  - {row['entity_path']}: {why}")
+            if _stale_condition_matched(storage, row["entity_path"]):
+                lines.append(
+                    f"  - {row['entity_path']} [re-examine — a later change "
+                    f"matched its stale_when condition]: {why}"
+                )
+            else:
+                lines.append(f"  - {row['entity_path']}: {why}")
         sections.append("\n".join(lines))
 
     # `list_changesets` has no limit parameter — it is a grouped summary, and
@@ -99,6 +130,18 @@ def build_digest(db_path: object, max_bytes: int) -> str:
     )
     digest = header + "\n\n" + "\n\n".join(sections)
     return _cap(digest, max_bytes)
+
+
+def _stale_condition_matched(storage: SelvedgeStorage, entity_path: str) -> bool:
+    """Whether a later change has matched this entity's ``stale_when`` condition.
+
+    Reuses the v0.3.8 active-memory surfacing — ``get_stale_decisions``
+    rule 2's deterministic keyword overlap — rather than re-implementing any
+    matching here. Read-only, presentation input only: a ``True`` changes how
+    a reverted row is *worded* in the digest, never what the store says.
+    """
+    rows = storage.get_stale_decisions(entity_path=entity_path)
+    return any("stale_when_match" in r["active_use_signals"] for r in rows)
 
 
 def _cap(text: str, max_bytes: int) -> str:

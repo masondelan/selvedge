@@ -271,6 +271,49 @@ def test_log_change_event_still_logged_even_with_warning():
 
 
 # ---------------------------------------------------------------------------
+# log_change — reject/revert adoption nudges (v0.3.11). Both warn-only rules
+# ride the MCP write path: name the chosen alternative on a reject, and
+# capture the invalidating condition on any reject/revert.
+# ---------------------------------------------------------------------------
+
+
+def test_log_change_reject_without_alternative_or_condition_nudges_twice():
+    result = log_change(
+        entity_path="users.card_pan",
+        change_type="reject",
+        reasoning="Rejected storing raw card PANs on the user row.",
+    )
+    assert result["status"] == "logged"  # warn, never reject
+    assert any("chosen" in w for w in result["warnings"])
+    assert any("stale_when" in w and "expires_when" in w for w in result["warnings"])
+
+
+def test_log_change_revert_without_condition_gets_the_capture_nudge():
+    result = log_change(
+        entity_path="api/v1/beta",
+        change_type="revert",
+        reasoning="Rolled back the beta route — it leaked internal ids.",
+    )
+    assert result["status"] == "logged"
+    assert any("stale_when" in w for w in result["warnings"])
+    # The alternative rule is reject-specific.
+    assert not any("chosen" in w for w in result["warnings"])
+
+
+def test_log_change_well_formed_reject_is_warning_free():
+    result = log_change(
+        entity_path="users.card_pan",
+        change_type="reject",
+        entity_type="column",
+        reasoning="Rejected raw PANs — went with provider tokens instead; "
+        "PANs in our DB put us in PCI scope.",
+        stale_when="payment provider changed",
+    )
+    assert result["status"] == "logged"
+    assert result["warnings"] == []
+
+
+# ---------------------------------------------------------------------------
 # log_change — rename_from dual-event extension (v0.3.7)
 # ---------------------------------------------------------------------------
 

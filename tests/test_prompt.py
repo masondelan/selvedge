@@ -80,6 +80,45 @@ def test_prompt_block_mentions_cli_equivalents():
     assert "--json" in PROMPT_BLOCK
 
 
+def test_prompt_block_tells_agents_to_log_rejections_and_reverts():
+    """The v0.3.11 adoption sentence — the prompt block is the load-bearing
+    surface (it reaches the agent every session), so reject/revert logging
+    must be instructed here, with the invalidating-condition capture."""
+    assert 'change_type="reject"' in PROMPT_BLOCK
+    assert 'change_type="revert"' in PROMPT_BLOCK
+    assert "stale_when" in PROMPT_BLOCK
+    assert "expires_when" in PROMPT_BLOCK
+    # The CLI change_type list stays in lockstep with the enum.
+    assert "revert, reject, supersede" in PROMPT_BLOCK
+
+
+def test_install_updates_a_pre_v0311_block_and_stays_idempotent(tmp_path: Path):
+    """The sentinel-bracketed --install path across the new PROMPT_BLOCK
+    content: a pre-v0.3.11 block (no reject sentence) updates in place,
+    and a re-run is a byte-stable no-op."""
+    target = tmp_path / "CLAUDE.md"
+    old_block = (
+        f"{SENTINEL_START}\n"
+        "## Selvedge — change tracking\n"
+        "Old instructions without the reject sentence.\n"
+        f"{SENTINEL_END}"
+    )
+    target.write_text(f"# Project\n\n{old_block}\n\nFooter.\n")
+
+    action, _ = install_to_file(target)
+    assert action == "updated"
+    updated = target.read_text()
+    assert 'change_type="reject"' in updated
+    assert "Old instructions without the reject sentence." not in updated
+    assert "Footer." in updated
+
+    # Idempotence across the new content.
+    action, backup = install_to_file(target)
+    assert action == "unchanged"
+    assert backup is None
+    assert target.read_text() == updated
+
+
 # ---------------------------------------------------------------------------
 # install_to_file — happy paths
 # ---------------------------------------------------------------------------

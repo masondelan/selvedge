@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TypeVar
 
+from . import chain
+from .expires_when import evaluate_expires_when
 from .migrations import apply_migrations
 from .models import ChangeEvent
 from .timeutil import normalize_timestamp, resolve_revisit_due, utc_now_iso
@@ -237,10 +239,21 @@ def _parse_iso(ts: str) -> datetime:
 # (any non-removal event) is inferred as *reverted* when one of these follows
 # it on the same path — the v0.3.7 add->remove proximity heuristic. The
 # explicit ``revert`` type (v0.3.9.1, pulled forward from the v0.3.11 plan
-# for the git-history importer) is a removal by definition.
+# for the git-history importer) is a removal by definition. ``reject``
+# (v0.3.11) counts too: the standing verdict on a rejected path is negative,
+# a later supersede can re-open it, and the digest names it as a dead path —
+# but in ``get_prior_attempts`` a reject that closes no earlier attempt
+# surfaces as its OWN row (the rejection IS the record), unlike the other
+# removal types, which only ever fold into the attempt they close.
 _REMOVAL_CHANGE_TYPES: frozenset[str] = frozenset(
-    {"remove", "delete", "index_remove", "revert"}
+    {"remove", "delete", "index_remove", "revert", "reject"}
 )
+
+# The explicit-verdict subset: change types whose presence states the outcome
+# outright rather than implying it. An attempt closed by one of these reports
+# ``confidence: "exact"`` in ``get_prior_attempts`` (v0.3.11) — the v0.3.7
+# add->remove proximity window is only a tiebreaker for the implicit types.
+_EXPLICIT_VERDICT_CHANGE_TYPES: frozenset[str] = frozenset({"revert", "reject"})
 
 # Words too generic to count toward a stale_when keyword match. Only tokens of
 # 4+ characters are considered at all, so the list only needs 4+ char glue
@@ -308,7 +321,8 @@ def _derive_path_status(events: list[dict]) -> str:
     ``events`` is the path's full timeline, oldest first. The latest event
     wins:
 
-      - a removal (``remove`` / ``delete`` / ``index_remove``) → ``"reverted"``
+      - a removal (``remove`` / ``delete`` / ``index_remove`` / ``revert`` /
+        ``reject``) → ``"reverted"``
       - a ``supersede`` → ``"reopened"`` (the prior revert no longer stands)
       - anything else → ``"active"``
       - no events at all → ``"no_history"``
@@ -339,19 +353,34 @@ def _trail_phase(change_type: str) -> str:
     return "tried"
 
 
-def _stale_reason_text(signals: list[str], matched_terms: tuple | list = ()) -> str:
+def _stale_reason_text(
+    signals: list[str],
+    matched_terms: tuple | list = (),
+    expires_detail: str = "",
+) -> str:
     """Render the surfacing signals into a one-line, deterministic summary.
 
     Pure templated assembly — the human-readable half of the ``stale_decisions``
     contract, with no LLM hop. Returns the empty string for no signals (which
     never happens on a surfaced row, but keeps the field always-present).
+    ``expires_detail`` is the evaluator's one-liner for the ``expires_when``
+    signals (v0.3.11), empty when neither fired.
     """
     phrases = {
         "queried": "the entity was queried (blame/diff/prior_attempts) after the decision",
         "changeset_activity": "its changeset kept moving with later sibling changes",
     }
-    parts = [phrases[s] for s in signals if s in phrases]
     sentences: list[str] = []
+    if "expires_when_fired" in signals:
+        sentences.append(
+            f"expired — its expires_when condition fired ({expires_detail})."
+        )
+    if "expires_manual_review" in signals:
+        sentences.append(
+            "manual review — its expires_when condition cannot be evaluated "
+            f"locally ({expires_detail})."
+        )
+    parts = [phrases[s] for s in signals if s in phrases]
     if parts:
         sentences.append(
             "past its revisit date and still active — " + "; ".join(parts) + "."
@@ -493,7 +522,7 @@ class SelvedgeStorage:
         return _open_connection(self.db_path)
 
     @contextmanager
-    def _session(self) -> Iterator[sqlite3.Connection]:
+    def _session(self, immediate: bool = False) -> Iterator[sqlite3.Connection]:
         """
         Context manager that yields a connection and guarantees
         ``commit-on-success / rollback-on-error / always-close``.
@@ -502,9 +531,21 @@ class SelvedgeStorage:
         ``with self._connect() as conn`` had (sqlite3.Connection's own
         context manager handles the transaction but does NOT close the
         connection on exit).
+
+        ``immediate=True`` opens the transaction with ``BEGIN IMMEDIATE`` so
+        the write lock is taken up front. Required for any write that first
+        reads the chain head (``log_event`` / ``log_event_batch`` / the
+        boundary-record writers): with SQLite's default deferred
+        transactions two processes could both read the same head and fork
+        the chain. Same rationale as the ``BEGIN IMMEDIATE`` in
+        :mod:`selvedge.migrations`; a busy ``BEGIN IMMEDIATE`` raises the
+        usual locked/busy error, which :func:`_retry_on_locked` and the
+        ``busy_timeout`` PRAGMA already handle.
         """
         conn = _open_connection(self.db_path)
         try:
+            if immediate:
+                conn.execute("BEGIN IMMEDIATE")
             yield conn
             conn.commit()
         except BaseException:
@@ -525,6 +566,13 @@ class SelvedgeStorage:
             conn.execute(CREATE_TABLE_SQL)
             conn.execute(CREATE_TOOL_CALLS_SQL)
             conn.execute(CREATE_PATH_MIGRATIONS_SQL)
+            # Tamper-evidence sidecar (v0.3.11). A brand-new table added as
+            # CREATE TABLE IF NOT EXISTS — deliberately NOT a MIGRATIONS
+            # entry, for the same reason as path_migrations above: opening
+            # this DB with an older Selvedge must not trip verify's
+            # downgrade detector.
+            conn.execute(chain.CREATE_EVENT_CHAIN_SQL)
+            conn.execute(chain.CREATE_EVENT_CHAIN_INDEX_SQL)
             for idx_sql in CREATE_INDEXES_SQL:
                 conn.execute(idx_sql)
         # Migrations open their own connection and manage transactions
@@ -545,6 +593,41 @@ class SelvedgeStorage:
                 "CREATE INDEX IF NOT EXISTS idx_revisit_after "
                 "ON events(revisit_after) "
                 "WHERE revisit_after IS NOT NULL AND revisit_after != ''"
+            )
+            # Cheap read probe (no write lock) — the immediate transaction in
+            # _ensure_genesis only runs on the one construction that first
+            # enables the chain, keeping the hook's per-call cost flat.
+            chain_empty = (
+                conn.execute("SELECT seq FROM event_chain LIMIT 1").fetchone() is None
+            )
+        if chain_empty:
+            self._ensure_genesis()
+
+    @_retry_on_locked
+    def _ensure_genesis(self) -> None:
+        """Append the genesis chain record the first time the chain is enabled.
+
+        Genesis carries ``{enabled_at, pre_chain_count, pre_chain_max_timestamp,
+        selvedge_version}`` — rows already in the store are *unchained, not
+        invalid* (surfaced by verify's ``chain_coverage`` warning). Runs under
+        ``BEGIN IMMEDIATE`` and re-checks emptiness under the lock so N
+        processes opening a fresh DB append exactly one genesis record.
+        """
+        from . import __version__
+
+        with self._session(immediate=True) as conn:
+            if conn.execute("SELECT seq FROM event_chain LIMIT 1").fetchone() is not None:
+                return  # another process won the race
+            pre_chain_count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            max_ts = conn.execute(
+                "SELECT COALESCE(MAX(timestamp), '') FROM events"
+            ).fetchone()[0]
+            chain.append_genesis(
+                conn,
+                enabled_at=utc_now_iso(),
+                pre_chain_count=int(pre_chain_count),
+                pre_chain_max_timestamp=str(max_ts),
+                selvedge_version=__version__,
             )
 
     # ------------------------------------------------------------------
@@ -592,10 +675,17 @@ class SelvedgeStorage:
 
     @_retry_on_locked
     def log_event(self, event: ChangeEvent) -> ChangeEvent:
-        """Persist a ChangeEvent and return it (with id/timestamp set)."""
+        """Persist a ChangeEvent and return it (with id/timestamp set).
+
+        The event and its tamper-evidence chain record (v0.3.11) land in one
+        ``BEGIN IMMEDIATE`` transaction — the write lock is taken before the
+        chain head is read so two writers cannot fork the chain (§7.1 of the
+        tamper-evidence proposal).
+        """
         self._normalize_for_storage(event)
-        with self._session() as conn:
+        with self._session(immediate=True) as conn:
             conn.execute(self._INSERT_SQL, self._event_row(event))
+            chain.append_event_records(conn, [event])
         return event
 
     @_retry_on_locked
@@ -606,14 +696,17 @@ class SelvedgeStorage:
         Significantly faster than calling :meth:`log_event` in a loop
         when importing large migration histories — one connection, one
         commit, one fsync. Also makes the import atomic: either all
-        events land or none do.
+        events land or none do. Chain records are appended in the same
+        transaction with ONE head read for the whole batch, so importers
+        are cheaper than a per-event design.
         """
         events = list(events)
         if not events:
             return events
         rows = [self._event_row(self._normalize_for_storage(e)) for e in events]
-        with self._session() as conn:
+        with self._session(immediate=True) as conn:
             conn.executemany(self._INSERT_SQL, rows)
+            chain.append_event_records(conn, events)
         return events
 
     @_retry_on_locked
@@ -626,6 +719,7 @@ class SelvedgeStorage:
         constraint: str = "",
         stale_when: str = "",
         revisit_after: str = "",
+        expires_when: str = "",
         supersedes: str = "",
         agent: str = "",
         session_id: str = "",
@@ -647,10 +741,13 @@ class SelvedgeStorage:
             the same entity path (exact or dotted-prefix); otherwise
             ``ValueError``. Explicit beats inferred.
           - ``supersedes`` empty — auto-link to the most recent removal event
-            (``remove`` / ``delete`` / ``index_remove``) on the path. If the
-            path has no removal to re-open, ``ValueError`` — superseding
-            nothing is almost always a mis-targeted entity path, and an
-            explicit error beats a dangling re-open marker.
+            (``remove`` / ``delete`` / ``index_remove`` / ``revert`` /
+            ``reject`` — the full :data:`_REMOVAL_CHANGE_TYPES` set, so an
+            id-less supersede after a standalone rejection re-opens the
+            rejection, not an older remove) on the path. If the path has no
+            removal to re-open, ``ValueError`` — superseding nothing is
+            almost always a mis-targeted entity path, and an explicit error
+            beats a dangling re-open marker.
 
         The stored event inherits the superseded event's ``entity_type`` so
         the trail stays coherent. Returns the stored :class:`ChangeEvent`.
@@ -688,8 +785,9 @@ class SelvedgeStorage:
             if target is None:
                 raise ValueError(
                     f"no reverted decision to supersede on {canonical!r} — "
-                    "no remove/delete event found; pass an explicit event id "
-                    "if you mean to override a non-removal event"
+                    "no removal event (remove/delete/index_remove/revert/"
+                    "reject) found; pass an explicit event id if you mean "
+                    "to override a non-removal event"
                 )
 
         event = ChangeEvent(
@@ -705,6 +803,7 @@ class SelvedgeStorage:
             changeset_id=changeset_id,
             supersedes=target["id"],
             revisit_after=revisit_after,
+            expires_when=expires_when,
             constraint=constraint,
             stale_when=stale_when,
         )
@@ -725,6 +824,7 @@ class SelvedgeStorage:
         project: str = "",
         changeset_id: str = "",
         revisit_after: str = "",
+        expires_when: str = "",
         constraint: str = "",
         stale_when: str = "",
     ) -> list[ChangeEvent]:
@@ -737,8 +837,8 @@ class SelvedgeStorage:
         surfaces the rename history instead of returning empty. Both paths run
         through the shared write chokepoint, so both land canonicalized.
 
-        ``revisit_after`` / ``constraint`` / ``stale_when`` land on the
-        ``create`` event only. The rename event on the old path is a
+        ``revisit_after`` / ``expires_when`` / ``constraint`` / ``stale_when``
+        land on the ``create`` event only. The rename event on the old path is a
         tombstone — the entity that survives the rename is the new path, so
         duplicating the decision onto both would make one rename surface
         twice in ``stale`` and leave the nudge reading a value on a path
@@ -772,6 +872,7 @@ class SelvedgeStorage:
             changeset_id=changeset_id,
             metadata=json.dumps({"renamed_from": canonical_old}),
             revisit_after=revisit_after,
+            expires_when=expires_when,
             constraint=constraint,
             stale_when=stale_when,
         )
@@ -952,13 +1053,40 @@ class SelvedgeStorage:
         where the user is, in :mod:`selvedge.prune`, and a storage method that
         also enforced policy would be two things that can disagree.
 
+        It does, however, append a count-only ``tombstone`` chain record in
+        the same transaction as the ``DELETE`` (v0.3.11) whenever CHAINED
+        rows were actually removed. The tombstone is not a gate — the
+        deliberately-dumb posture holds — it is the audit trail: a gated
+        prune becomes the first destructive operation that leaves a trace
+        *inside the database* rather than only in ``.selvedge/prune.log``,
+        and an ungated ``sqlite3`` deletion of chained rows now fails
+        ``selvedge verify``.
+
+        The tombstone counts only deleted rows that HAVE chain records.
+        Pre-genesis (unchained) rows leave "no gap and no tombstone" per
+        §5.2 of the tamper-evidence proposal — counting them would bank
+        allowance that ``verify_chain``'s absent-row accounting can never
+        consume, silently masking a later ungated deletion of chained rows.
+
         Callers must satisfy both the confirmation and ``SELVEDGE_DESTRUCTIVE``
         gates first; :func:`selvedge.prune.run_events_prune` is the supported
         entry point and re-checks the environment itself.
         """
-        with self._session() as conn:
+        with self._session(immediate=True) as conn:
+            # Count the chained casualties BEFORE the DELETE, in the same
+            # immediate transaction, so the tombstone matches exactly what
+            # this statement removes from the chain's coverage.
+            chained = conn.execute(
+                "SELECT COUNT(*) FROM events e WHERE e.timestamp < ? "
+                "AND EXISTS (SELECT 1 FROM event_chain c "
+                "            WHERE c.event_id = e.id AND c.kind = 'event')",
+                (cutoff,),
+            ).fetchone()[0]
             cursor = conn.execute("DELETE FROM events WHERE timestamp < ?", (cutoff,))
-            return cursor.rowcount
+            deleted = cursor.rowcount
+            if chained > 0:
+                chain.append_tombstone(conn, cutoff=cutoff, count=int(chained))
+            return deleted
 
     def prune_tool_calls(self, cutoff: str) -> int:
         """Delete ``tool_calls`` rows older than ``cutoff`` (exclusive).
@@ -1003,12 +1131,19 @@ class SelvedgeStorage:
         still records its own ``path_migrations`` audit row — the trail is the
         point.)
 
+        With ``apply=True`` the run also appends ONE covering ``amend``
+        chain record (v0.3.11) binding every rewritten row's id to its
+        recomputed ``core_hash``, in the same transaction as the rewrites and
+        the audit row — ``entity_path`` is inside the protected core, so a
+        legitimate rewrite must re-bind it or the next ``selvedge verify``
+        would read as tampering.
+
         Returns a report dict with ``applied``, ``rows_scanned``,
         ``rows_to_rewrite``, ``rows_rewritten`` (0 on a dry run), the
         ``rewrites`` list (``{id, from, to}``), and the ``collisions`` list
         (``{canonical, paths}``).
         """
-        with self._session() as conn:
+        with self._session(immediate=apply) as conn:
             rows = conn.execute("SELECT id, entity_path FROM events").fetchall()
             rows_scanned = len(rows)
 
@@ -1055,6 +1190,25 @@ class SelvedgeStorage:
                         json.dumps({"rewrites": rewrites, "collisions": collisions}),
                     ),
                 )
+                if rewrites:
+                    # One covering amend record per run (not per row), with
+                    # the full row list in detail. Recompute each rewritten
+                    # row's core hash from the RAW stored columns so the
+                    # binding covers exactly what is now on disk.
+                    chain.append_amend(
+                        conn,
+                        field="entity_path",
+                        rows=[
+                            {
+                                "event_id": rw["id"],
+                                "new_core_hash": chain.core_hash_for_event_id(
+                                    conn, rw["id"]
+                                ),
+                            }
+                            for rw in rewrites
+                        ],
+                        reason="migrate-paths",
+                    )
 
         return {
             "applied": apply,
@@ -1303,6 +1457,43 @@ class SelvedgeStorage:
             ).fetchall()
         return {r["entity_path"] for r in rows}
 
+    def get_session_truncated_paths(self, session_id: str) -> set[str]:
+        """Entity paths whose LATEST event in this session carries a truncation marker.
+
+        Powers the PreCompact reminder's truncation line (v0.3.11): a stored
+        event whose diff or reasoning ends in ``…[truncated NNKB]`` means the
+        clipped text now exists only in the session context that compaction
+        is about to destroy. The reminder names those entities separately
+        from the never-logged ones — "log exists but was cut" is a different
+        failure from "no log at all".
+
+        Only the path's most recent event in the session is considered, so
+        the reminder goes quiet for an entity once the agent follows its own
+        instruction and re-logs a concise (untruncated) version — the same
+        goes-quiet contract the unlogged list follows. The store stays
+        append-only: the old truncated event remains; it just stops being
+        the newest word on the path.
+        """
+        if not session_id:
+            return set()
+        pattern = f"%{_TRUNCATION_SENTINEL}%"
+        with self._session() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT e.entity_path
+                FROM events e
+                JOIN (
+                    SELECT entity_path, MAX(timestamp) AS latest
+                    FROM events WHERE session_id = ?
+                    GROUP BY entity_path
+                ) last
+                  ON e.entity_path = last.entity_path AND e.timestamp = last.latest
+                WHERE e.session_id = ? AND (e.diff LIKE ? OR e.reasoning LIKE ?)
+                """,
+                (session_id, session_id, pattern, pattern),
+            ).fetchall()
+        return {r["entity_path"] for r in rows}
+
     def count_truncated(self) -> int:
         """How many events carry a truncation marker (v0.3.10).
 
@@ -1357,6 +1548,41 @@ class SelvedgeStorage:
             if len(paths) > 1
         ]
 
+    @staticmethod
+    def _annotate_attempt(
+        event: dict,
+        *,
+        outcome: str,
+        confidence: str,
+        outcome_reasoning: str,
+        superseding: dict | None,
+        path_status: str,
+        match_type: str,
+    ) -> dict:
+        """Build one ``get_prior_attempts`` result row from an event dict.
+
+        Shared by the attempt rows and the standalone-reject rows (v0.3.11)
+        so the two can't drift on the eight always-present trail keys.
+        ``match_type`` records how the row was found (v0.3.9.1): "exact" for
+        entity-path lookups, "substring" for description mode; the optional
+        semantic layer contributes "fuzzy" rows with a real ``similarity`` —
+        0.0 here means "not a similarity match".
+        """
+        annotated = _coalesce_event_nullables(dict(event))
+        annotated["outcome"] = outcome
+        annotated["confidence"] = confidence
+        annotated["outcome_reasoning"] = outcome_reasoning
+        annotated["superseded_by"] = (
+            superseding["id"] if superseding is not None else ""
+        )
+        annotated["supersede_reasoning"] = (
+            superseding["reasoning"] if superseding is not None else ""
+        )
+        annotated["current_status"] = path_status
+        annotated["match_type"] = match_type
+        annotated["similarity"] = 0.0
+        return annotated
+
     def get_prior_attempts(
         self,
         *,
@@ -1378,18 +1604,33 @@ class SelvedgeStorage:
 
         For each candidate path the timeline is walked oldest-first and every
         non-removal event (the "attempt") is paired with the next removal
-        event (``remove`` / ``delete`` / ``index_remove``) on the same path. A
-        paired attempt reports ``outcome="reverted"`` — unless a later
-        ``supersede`` event re-opened the verdict, in which case it reports
-        ``outcome="reopened"`` (v0.3.9.1). An unpaired attempt reports
-        ``outcome="active"``. ``confidence`` is ``proximity_high`` when the
-        attempt->removal gap is within ``window_minutes``, else
-        ``proximity_low`` (active attempts are always ``proximity_low``).
+        event (``remove`` / ``delete`` / ``index_remove`` / ``revert`` /
+        ``reject``) on the same path. A paired attempt reports
+        ``outcome="reverted"`` — unless a later ``supersede`` event re-opened
+        the verdict, in which case it reports ``outcome="reopened"``
+        (v0.3.9.1). An unpaired attempt reports ``outcome="active"``.
+
+        **Confidence tiers (v0.3.11 classifier upgrade).** An attempt closed
+        by an *explicit* verdict event (``revert`` / ``reject``) reports
+        ``confidence="exact"`` — the outcome is stated, not inferred. The
+        v0.3.7 proximity heuristic is only the tiebreaker for the implicit
+        removal types: ``proximity_high`` when the attempt->removal gap is
+        within ``window_minutes``, else ``proximity_low`` (active attempts
+        are always ``proximity_low``).
+
+        **Standalone rejections (v0.3.11).** A ``reject`` event that closes
+        no earlier attempt — "we considered this and decided against it"
+        with nothing ever written — surfaces as its OWN row with
+        ``outcome="rejected"`` and ``confidence="exact"``; its
+        ``outcome_reasoning`` is its own reasoning (the rejection IS the
+        record). A later supersede re-opens it to ``outcome="reopened"``
+        like any other closed verdict.
 
         Conservative-recall posture: ``min_confidence="proximity_high"`` (the
         default) returns only the high-confidence "tried then rejected"
-        signal; pass ``"proximity_low"`` to include the noisy tail. An empty
-        list is the preferred answer over a false positive.
+        signal — the ``exact`` tier always clears that floor; pass
+        ``"proximity_low"`` to include the noisy tail. An empty list is the
+        preferred answer over a false positive.
 
         Each result is an event dict plus eight always-present keys —
         ``outcome``, ``confidence``, ``outcome_reasoning`` (the reverting
@@ -1402,8 +1643,10 @@ class SelvedgeStorage:
         semantic layer contributes ``fuzzy`` rows), and ``similarity``
         (``0.0`` unless the row came from a fuzzy match). Together they read
         as the full trail: tried → reverted → re-opened. Removal events are
-        folded into the attempt they close and never appear on their own.
-        Newest first, capped at ``limit``.
+        folded into the attempt they close and never appear on their own —
+        with the one v0.3.11 exception above: a ``reject`` closing nothing
+        appears as its own ``outcome="rejected"`` row. Newest first, capped
+        at ``limit``.
         """
         with self._session() as conn:
             if entity_path:
@@ -1451,6 +1694,47 @@ class SelvedgeStorage:
             removals = [e for e in events if e["change_type"] in _REMOVAL_CHANGE_TYPES]
             supersede_events = [e for e in events if e["change_type"] == "supersede"]
             path_status = _derive_path_status(events)
+
+            # Resolve each ID-LESS supersede to the single removal it
+            # re-opens: the most recent removal at its write time — the same
+            # rule log_supersede's auto-link applies (GitHub issue #30: the
+            # old timestamp fallback matched EVERY earlier removal on the
+            # path, so one hand-logged supersede flipped unrelated reverts
+            # to "reopened"). Events are timestamp-ASC within the path, so
+            # the last qualifying removal is the most recent one.
+            idless_targets: dict[str, str] = {}
+            for s in supersede_events:
+                if s["supersedes"]:
+                    continue
+                s_ts = _parse_iso(s["timestamp"])
+                preceding = [
+                    rm for rm in removals if _parse_iso(rm["timestamp"]) <= s_ts
+                ]
+                if preceding:
+                    idless_targets[s["id"]] = preceding[-1]["id"]
+
+            def _superseding_of(
+                closed: dict,
+                supersede_events: list[dict] = supersede_events,
+                idless_targets: dict[str, str] = idless_targets,
+            ) -> dict | None:
+                """The supersede that re-opens ``closed``, or None.
+
+                An explicit id-link only re-opens ITS removal; an id-less
+                supersede only re-opens the one removal it resolves to.
+                """
+                return next(
+                    (
+                        s
+                        for s in supersede_events
+                        if s["supersedes"] == closed["id"]
+                        or idless_targets.get(s["id"]) == closed["id"]
+                    ),
+                    None,
+                )
+
+            closing_ids: set[str] = set()
+            paired: list[tuple[dict, dict | None]] = []
             for e in events:
                 if e["change_type"] in _REMOVAL_CHANGE_TYPES:
                     continue  # removals surface via the attempt they close
@@ -1463,6 +1747,11 @@ class SelvedgeStorage:
                     ),
                     None,
                 )
+                if closing is not None:
+                    closing_ids.add(closing["id"])
+                paired.append((e, closing))
+
+            for e, closing in paired:
                 superseding: dict | None = None
                 if closing is None:
                     outcome, confidence, outcome_reasoning = (
@@ -1471,54 +1760,57 @@ class SelvedgeStorage:
                         "",
                     )
                 else:
-                    gap = _parse_iso(closing["timestamp"]) - attempt_ts
-                    confidence = (
-                        "proximity_high" if gap <= window else "proximity_low"
-                    )
+                    if closing["change_type"] in _EXPLICIT_VERDICT_CHANGE_TYPES:
+                        # Explicit reject/revert states the outcome outright —
+                        # the high-confidence tier, no window involved.
+                        confidence = "exact"
+                    else:
+                        gap = _parse_iso(closing["timestamp"]) - _parse_iso(
+                            e["timestamp"]
+                        )
+                        confidence = (
+                            "proximity_high" if gap <= window else "proximity_low"
+                        )
                     outcome = "reverted"
                     outcome_reasoning = closing["reasoning"]
-                    # A later supersede event re-opens the reverted verdict.
-                    # An explicit id-link only re-opens ITS removal; the
-                    # timestamp fallback applies only to hand-logged
-                    # supersede events with no id — otherwise a supersede of
-                    # one revert would flip every earlier, unrelated revert
-                    # on the same path to "reopened".
-                    closing_ts = _parse_iso(closing["timestamp"])
-                    superseding = next(
-                        (
-                            s
-                            for s in supersede_events
-                            if s["supersedes"] == closing["id"]
-                            or (
-                                not s["supersedes"]
-                                and _parse_iso(s["timestamp"]) >= closing_ts
-                            )
-                        ),
-                        None,
-                    )
+                    superseding = _superseding_of(closing)
                     if superseding is not None:
                         outcome = "reopened"
-                annotated = _coalesce_event_nullables(dict(e))
-                annotated["outcome"] = outcome
-                annotated["confidence"] = confidence
-                annotated["outcome_reasoning"] = outcome_reasoning
-                annotated["superseded_by"] = (
-                    superseding["id"] if superseding is not None else ""
+                results.append(
+                    self._annotate_attempt(
+                        e,
+                        outcome=outcome,
+                        confidence=confidence,
+                        outcome_reasoning=outcome_reasoning,
+                        superseding=superseding,
+                        path_status=path_status,
+                        match_type="exact" if entity_path else "substring",
+                    )
                 )
-                annotated["supersede_reasoning"] = (
-                    superseding["reasoning"] if superseding is not None else ""
+
+            # Standalone rejections: a reject that closed no earlier attempt
+            # is itself the record — surface it as its own exact-tier row.
+            for rj in removals:
+                if rj["change_type"] != "reject" or rj["id"] in closing_ids:
+                    continue
+                superseding = _superseding_of(rj)
+                results.append(
+                    self._annotate_attempt(
+                        rj,
+                        outcome="reopened" if superseding is not None else "rejected",
+                        confidence="exact",
+                        outcome_reasoning=rj["reasoning"],
+                        superseding=superseding,
+                        path_status=path_status,
+                        match_type="exact" if entity_path else "substring",
+                    )
                 )
-                annotated["current_status"] = path_status
-                # How this row was found (v0.3.9.1): "exact" for entity-path
-                # lookups, "substring" for free-text description mode. The
-                # optional semantic layer adds "fuzzy" rows with a real
-                # similarity; 0.0 here means "not a similarity match".
-                annotated["match_type"] = "exact" if entity_path else "substring"
-                annotated["similarity"] = 0.0
-                results.append(annotated)
 
         if min_confidence == "proximity_high":
-            results = [r for r in results if r["confidence"] == "proximity_high"]
+            # The explicit tier always clears the default floor.
+            results = [
+                r for r in results if r["confidence"] in ("exact", "proximity_high")
+            ]
 
         # Newest-first, then cap.
         results.sort(key=lambda r: r["timestamp"], reverse=True)
@@ -1586,6 +1878,36 @@ class SelvedgeStorage:
             "trail": trail,
         }
 
+    @staticmethod
+    def _entity_changed_after(
+        conn: sqlite3.Connection,
+        entity_path: str,
+        after_timestamp: str,
+        *,
+        exclude_id: str = "",
+    ) -> bool:
+        """True if ``entity_path`` has an event after ``after_timestamp``.
+
+        The log-derived probe behind ``expires_when``'s
+        ``entity:PATH:changes`` pattern (v0.3.11): exact path or dotted
+        prefix, same convention as every other read, over stored canonical
+        timestamps (fixed-width, so the text comparison is chronological).
+        ``exclude_id`` keeps the decision event itself from firing its own
+        condition.
+        """
+        canonical = canonicalize_entity_path(entity_path)
+        prefix = f"{_escape_like(canonical)}.%"
+        row = conn.execute(
+            """
+            SELECT 1 FROM events
+            WHERE (entity_path = ? OR entity_path LIKE ? ESCAPE '\\')
+              AND timestamp > ? AND id != ?
+            LIMIT 1
+            """,
+            (canonical, prefix, after_timestamp, exclude_id),
+        ).fetchone()
+        return row is not None
+
     def get_stale_decisions(
         self,
         *,
@@ -1597,7 +1919,7 @@ class SelvedgeStorage:
     ) -> list[dict]:
         """Return decisions due for a revisit — by date, or by stale-condition match.
 
-        Storage layer for the ``stale_decisions`` surface. Two independent
+        Storage layer for the ``stale_decisions`` surface. Three independent
         surfacing rules, each purely derived and LLM-free:
 
         **1. Date-based (v0.3.8) — flag ``"revisit_due"``.** A candidate is
@@ -1624,20 +1946,39 @@ class SelvedgeStorage:
         un-retired automatically; a human (or agent) follows up with
         ``supersede`` if the condition really has been triggered.
 
+        **3. Expiry-based (v0.3.11) — flag ``"expired"`` /
+        ``"manual_review"``.** A candidate is any event carrying a non-empty
+        ``expires_when`` (the closed grammar in
+        :mod:`selvedge.expires_when`). The condition is evaluated from local
+        state only: ``date:`` against ``now``, ``entity:PATH:changes``
+        against the event log (a later event on that path, exact or dotted
+        prefix), ``library:NAME>=VERSION`` against installed dist metadata.
+        A fired condition surfaces as ``flag="expired"`` with the pattern
+        kind that fired in ``expired_pattern``. A ``library:`` condition
+        whose dependency isn't locally observable surfaces as
+        ``flag="manual_review"`` — presented for a human rather than
+        guessed at. ``manual:LABEL`` never auto-fires and never
+        auto-surfaces. Surfacing only, same as rule 2.
+
         Filterable by ``entity_path`` (exact + ``.`` prefix), ``project``,
-        and ``agent``. ``expires_when`` is ignored here; its evaluator lands
-        in v0.3.11.
+        and ``agent``.
 
         Each result is the event dict (NULL columns coalesced to ``""``) plus
-        seven always-present keys: ``flag`` (``revisit_due`` /
-        ``review_suggested``), ``revisit_due`` (canonical UTC ISO, ``""`` for
+        ten always-present keys: ``flag`` (``expired`` / ``revisit_due`` /
+        ``review_suggested`` / ``manual_review`` — that precedence when
+        several rules fire), ``revisit_due`` (canonical UTC ISO, ``""`` for
         condition-only rows), ``days_overdue`` (int, ``0`` on the due day or
         for condition-only rows), ``active_use_signals`` (list of signal
         names), ``matched_terms`` (the overlapping keywords, ``[]`` when no
         condition matched), ``matched_event_id`` (the most recent matching
-        event, ``""`` when none), and ``stale_reason`` (a one-line
-        human-readable summary). Date-due rows first (most overdue leading),
-        then condition matches; capped at ``limit``.
+        event, ``""`` when none), ``expires_status`` (``""`` when the row
+        carries no ``expires_when``, else ``expired`` / ``pending`` /
+        ``manual_review``), ``expired_pattern`` (the grammar kind that fired
+        — ``date`` / ``entity`` / ``library`` — else ``""``),
+        ``expires_detail`` (the evaluator's one-line explanation, ``""``
+        when not evaluated), and ``stale_reason`` (a one-line human-readable
+        summary). Date-due rows first (most overdue leading), then
+        condition matches by decision time; capped at ``limit``.
         """
         now_dt = (
             _parse_iso(normalize_timestamp(now)) if now else datetime.now(timezone.utc)
@@ -1645,7 +1986,8 @@ class SelvedgeStorage:
 
         clauses = [
             "((revisit_after IS NOT NULL AND revisit_after != '') "
-            "OR (stale_when IS NOT NULL AND stale_when != ''))"
+            "OR (stale_when IS NOT NULL AND stale_when != '') "
+            "OR (expires_when IS NOT NULL AND expires_when != ''))"
         ]
         params: list = []
         if entity_path:
@@ -1762,11 +2104,59 @@ class SelvedgeStorage:
                             signals.append("stale_when_match")
                             break
 
-                if due_dt is None and not matched_event_id:
-                    continue  # neither rule fired
+                # Rule 3 (v0.3.11): evaluate the expires_when condition from
+                # local state. `manual:` never auto-fires; an unobservable
+                # `library:` presents as manual review rather than a guess.
+                expires_status = ""
+                expired_pattern = ""
+                expires_detail = ""
+                if ev["expires_when"]:
+                    try:
+                        evaluation = evaluate_expires_when(
+                            ev["expires_when"],
+                            decision_timestamp=ev["timestamp"],
+                            now=now_dt,
+                            entity_changed_after=functools.partial(
+                                self._entity_changed_after,
+                                conn,
+                                exclude_id=ev["id"],
+                            ),
+                        )
+                    except ValueError:
+                        # A value written around the validator (raw INSERT /
+                        # pre-grammar row) — skip the rule, not the row.
+                        evaluation = None
+                    if evaluation is not None:
+                        expires_status = evaluation.status
+                        expires_detail = evaluation.detail
+                        if evaluation.status == "expired":
+                            expired_pattern = evaluation.kind
+                            signals.append("expires_when_fired")
+                        elif (
+                            evaluation.status == "manual_review"
+                            and evaluation.kind == "library"
+                        ):
+                            signals.append("expires_manual_review")
+
+                expires_fired = "expires_when_fired" in signals
+                expires_manual = "expires_manual_review" in signals
+                if (
+                    due_dt is None
+                    and not matched_event_id
+                    and not expires_fired
+                    and not expires_manual
+                ):
+                    continue  # no rule fired
 
                 annotated = {k: ("" if v is None else v) for k, v in ev.items()}
-                annotated["flag"] = "revisit_due" if due_dt is not None else "review_suggested"
+                if expires_fired:
+                    annotated["flag"] = "expired"
+                elif due_dt is not None:
+                    annotated["flag"] = "revisit_due"
+                elif matched_event_id:
+                    annotated["flag"] = "review_suggested"
+                else:
+                    annotated["flag"] = "manual_review"
                 annotated["revisit_due"] = (
                     normalize_timestamp(due_dt.isoformat()) if due_dt is not None else ""
                 )
@@ -1776,8 +2166,13 @@ class SelvedgeStorage:
                 annotated["active_use_signals"] = signals
                 annotated["matched_terms"] = matched_terms
                 annotated["matched_event_id"] = matched_event_id
+                annotated["expires_status"] = expires_status
+                annotated["expired_pattern"] = expired_pattern
+                annotated["expires_detail"] = expires_detail
                 annotated["stale_reason"] = _stale_reason_text(
-                    signals, matched_terms=matched_terms
+                    signals,
+                    matched_terms=matched_terms,
+                    expires_detail=expires_detail,
                 )
                 results.append(annotated)
 

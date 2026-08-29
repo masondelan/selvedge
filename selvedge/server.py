@@ -40,6 +40,7 @@ from pydantic import Field
 
 from . import __version__
 from .config import get_db_path
+from .expires_when import validate_expires_when
 from .logging_config import configure_logging
 from .models import ChangeEvent
 from .presenters import (
@@ -53,7 +54,9 @@ from .timeutil import normalize_revisit_after, parse_time_string
 from .validation import (
     apply_event_limits,
     check_entity_path_shape,
+    check_invalidation_capture_nudge,
     check_reasoning_quality,
+    check_reject_reasoning,
     check_revisit_nudge,
 )
 
@@ -224,8 +227,10 @@ def log_change(
             description=(
                 "What kind of change. One of: add, remove, modify, rename, retype, "
                 "create, delete, index_add, index_remove, migrate, revert "
-                "(tried and rolled back), supersede (re-open a reverted "
-                "decision). Invalid values are rejected — pick the closest match."
+                "(tried and rolled back), reject (considered and decided "
+                "against, without writing the change), supersede (re-open a "
+                "reverted decision). Invalid values are rejected — pick the "
+                "closest match."
             ),
         ),
     ],
@@ -324,6 +329,25 @@ def log_change(
             ),
         ),
     ] = "",
+    expires_when: Annotated[
+        str,
+        Field(
+            default="",
+            description=(
+                "Optional machine-checkable expiry condition for this "
+                "decision. Closed grammar, validated at write time: "
+                "'library:NAME>=VERSION' (revisit when the named dependency "
+                "reaches a version, e.g. 'library:django>=5.0'), "
+                "'entity:PATH:changes' (revisit when that entity next "
+                "changes, e.g. 'entity:users.email:changes'), 'date:ISO' "
+                "(revisit on a date, e.g. 'date:2027-01-01'), or "
+                "'manual:LABEL' (opaque label for human review; never "
+                "auto-fires). `stale_decisions` evaluates these from local "
+                "state — no network, no LLM — and flags 'expired' with the "
+                "pattern that fired. Values outside the grammar are rejected."
+            ),
+        ),
+    ] = "",
     constraint: Annotated[
         str,
         Field(
@@ -352,8 +376,10 @@ def log_change(
             description=(
                 "Id of the prior event this change overrides; only valid with "
                 "change_type='supersede'. Empty auto-links the entity's most "
-                "recent remove/delete. Append-only — the old verdict is never "
-                "edited, just derived as superseded."
+                "recent removal event (remove/delete/index_remove/revert/"
+                "reject) — so after a standalone rejection it re-opens the "
+                "rejection. Append-only — the old verdict is never edited, "
+                "just derived as superseded."
             ),
         ),
     ] = "",
@@ -395,6 +421,28 @@ def log_change(
             reasoning="Split auth.py into an auth/ package; login moved.",
         )
 
+    Rejections: when you consider an approach and decide against it WITHOUT
+    writing the change, record the verdict with `change_type="reject"` — the
+    abandoned path is a first-class event, and the next agent's
+    `prior_attempts` query finds it as a high-confidence ("exact") row
+    instead of re-deriving the dead end. Name what was rejected AND what was
+    chosen instead, and record the condition that would invalidate the
+    verdict. Example:
+
+        log_change(
+            entity_path="users.card_pan",
+            change_type="reject",
+            entity_type="column",
+            reasoning="Rejected storing raw card PANs on the user row — "
+                      "went with provider tokens instead; PANs in our own "
+                      "DB put us in PCI scope.",
+            stale_when="payment provider changed",
+            expires_when="entity:deps/stripe:changes",
+        )
+
+    Use `change_type="revert"` for the sibling case — the change WAS written
+    and then rolled back (clearer than a plain remove).
+
     Superseding a reverted decision: when a reverted change becomes correct
     again (the constraint that killed it no longer holds), do NOT delete or
     edit history — log with `change_type="supersede"` and the reason. The
@@ -405,8 +453,9 @@ def log_change(
 
     On validation failure (invalid change_type, missing entity_path,
     `rename_from` set without change_type='rename', `supersedes` set without
-    change_type='supersede', or a supersede with nothing to re-open) the
-    result is `{"status": "error", "error": "..."}` with no event written.
+    change_type='supersede', a supersede with nothing to re-open, or an
+    `expires_when` outside the closed grammar) the result is
+    `{"status": "error", "error": "..."}` with no event written.
     """
     storage = get_storage()
     storage.record_tool_call("log_change", entity_path=entity_path, agent=agent)
@@ -427,10 +476,12 @@ def log_change(
         return _error("supersedes is only valid with change_type='supersede'")
 
     # Normalize revisit_after with the same grammar as `--since` (relative
-    # offsets are preserved, absolute dates canonicalized). A bad value is a
+    # offsets are preserved, absolute dates canonicalized), and validate
+    # expires_when against the closed grammar (v0.3.11). A bad value is a
     # validation error, not a silent drop.
     try:
         normalized_revisit = normalize_revisit_after(revisit_after)
+        normalized_expires = validate_expires_when(expires_when)
     except ValueError as e:
         return _error(str(e))
 
@@ -456,6 +507,7 @@ def log_change(
                 project=project,
                 changeset_id=changeset_id,
                 revisit_after=normalized_revisit,
+                expires_when=normalized_expires,
                 constraint=constraint,
                 stale_when=stale_when,
             )
@@ -470,6 +522,7 @@ def log_change(
                 constraint=constraint,
                 stale_when=stale_when,
                 revisit_after=normalized_revisit,
+                expires_when=normalized_expires,
                 supersedes=supersedes,
                 agent=agent,
                 session_id=session_id,
@@ -490,6 +543,7 @@ def log_change(
                 project=project,
                 changeset_id=changeset_id,
                 revisit_after=normalized_revisit,
+                expires_when=normalized_expires,
                 constraint=constraint,
                 stale_when=stale_when,
             )
@@ -499,9 +553,13 @@ def log_change(
 
     warnings = list(limit_warnings)
     warnings += check_reasoning_quality(reasoning)
+    warnings += check_reject_reasoning(stored.change_type, reasoning)
     warnings += check_entity_path_shape(stored.entity_path, stored.entity_type)
     warnings += check_revisit_nudge(
         stored.change_type, stored.entity_type, stored.revisit_after
+    )
+    warnings += check_invalidation_capture_nudge(
+        stored.change_type, stored.stale_when, stored.expires_when
     )
     return {
         "id": stored.id,
@@ -748,11 +806,12 @@ def prior_attempts(
         Field(
             default="proximity_high",
             description=(
-                "Confidence floor. 'proximity_high' (default) returns only "
-                "attempts that were clearly tried and then reverted within the "
-                "window — the high-signal 'rejected before' cases. Pass "
-                "'proximity_low' to also see the noisy tail (still-active changes "
-                "and far-apart reverts)."
+                "Confidence floor. 'proximity_high' (default) returns the "
+                "high-signal rows: attempts closed by an explicit revert/"
+                "reject (confidence 'exact' — always clears this floor, "
+                "including standalone rejections) plus attempts reverted "
+                "within the window. Pass 'proximity_low' to also see the "
+                "noisy tail (still-active changes and far-apart reverts)."
             ),
         ),
     ] = "proximity_high",
@@ -764,9 +823,11 @@ def prior_attempts(
             le=_MAX_LIMIT,
             description=(
                 "Proximity window in minutes for the add->remove revert "
-                "heuristic. An attempt removed within this many minutes is "
-                "'proximity_high'; beyond it, 'proximity_low'. Default 10080 "
-                "(7 days)."
+                "heuristic — the tiebreaker for IMPLICIT removal types only. "
+                "An attempt removed within this many minutes is "
+                "'proximity_high'; beyond it, 'proximity_low'. Attempts "
+                "closed by an explicit revert/reject are 'exact' regardless "
+                "of the window. Default 10080 (7 days)."
             ),
         ),
     ] = 10080,
@@ -783,20 +844,25 @@ def prior_attempts(
     rejected approach.
 
     Each result is a change event plus the trail fields: `outcome`
-    ("reverted" — a later removal on the path; "reopened" — reverted but a
-    later supersede re-opened it; "active"), `confidence` ("proximity_high"
-    / "proximity_low"), `outcome_reasoning` (WHY it was rejected),
+    ("reverted" — a later removal on the path; "reopened" — closed but a
+    later supersede re-opened it; "rejected" — a standalone `reject` event
+    that closed no earlier attempt, surfaced as its own row whose reasoning
+    IS the record; "active"), `confidence` ("exact" — the attempt was closed
+    by an explicit revert/reject, or the row is a standalone rejection;
+    "proximity_high" / "proximity_low" — the add->remove window heuristic
+    for implicit removals), `outcome_reasoning` (WHY it was rejected),
     `superseded_by` + `supersede_reasoning` (the re-open, when present), and
-    `current_status` — the entity's standing now. Treat "reverted" as
-    "don't repeat this without a supersede"; "reopened" means the old
-    revert no longer stands. Together they read: tried → reverted →
+    `current_status` — the entity's standing now. Treat "reverted" and
+    "rejected" as "don't repeat this without a supersede"; "reopened" means
+    the old verdict no longer stands. Together they read: tried → reverted →
     re-opened. Templated and deterministic — no LLM call; pull-only.
 
     Conservative by design — `min_confidence` defaults to "proximity_high",
     so an empty list (nothing clearly tried-and-rejected) is the normal,
-    preferred answer over a speculative false positive. Pass
-    `min_confidence="proximity_low"` to widen recall. Rows carry
-    `match_type` ("exact" / "substring" / "fuzzy") and `similarity`.
+    preferred answer over a speculative false positive; "exact" rows always
+    clear that default floor. Pass `min_confidence="proximity_low"` to widen
+    recall. Rows carry `match_type` ("exact" / "substring" / "fuzzy") and
+    `similarity`.
     """
     storage = get_storage()
     storage.record_tool_call("prior_attempts", entity_path=entity_path)
@@ -851,22 +917,30 @@ def stale_decisions(
         Field(default=20, ge=1, le=_MAX_LIMIT, description="Maximum number of results."),
     ] = 20,
 ) -> list[dict]:
-    """Decisions due for a revisit — past their date, or with a triggered stale condition.
+    """Decisions due for a revisit — expired, past their date, or with a triggered stale condition.
 
-    Two deterministic rules. Date-based (`flag="revisit_due"`): events whose
-    `revisit_after` has passed AND the entity is still live (queried via
-    `blame`/`diff`/`prior_attempts` after the decision, or its changeset saw
-    later activity) — pure age alone never surfaces. Condition-based
-    (`flag="review_suggested"`): events whose `stale_when` text shares
-    keywords with a LATER change event — the named invalidation evidence may
-    have happened. Surfacing only: nothing is un-retired automatically;
-    follow up with a `supersede` if the condition really was triggered.
+    Three deterministic rules. Expiry-based (`flag="expired"`): events whose
+    `expires_when` condition fired, evaluated from local state only —
+    `date:` against now, `entity:PATH:changes` against the event log,
+    `library:NAME>=VERSION` against installed dist metadata; the pattern
+    kind that fired is in `expired_pattern`. A `library:` condition whose
+    dependency isn't locally observable surfaces as `flag="manual_review"`
+    instead of a guess; `manual:LABEL` never auto-fires. Date-based
+    (`flag="revisit_due"`): events whose `revisit_after` has passed AND the
+    entity is still live (queried via `blame`/`diff`/`prior_attempts` after
+    the decision, or its changeset saw later activity) — pure age alone
+    never surfaces. Condition-based (`flag="review_suggested"`): events
+    whose `stale_when` text shares keywords with a LATER change event — the
+    named invalidation evidence may have happened. Surfacing only: nothing
+    is un-retired automatically; follow up with a `supersede` if the
+    condition really was triggered.
 
     Each result is the change event plus `flag`, `revisit_due`,
     `days_overdue`, `active_use_signals`, `matched_terms`,
-    `matched_event_id`, and a one-line `stale_reason`. Date-due rows first,
+    `matched_event_id`, `expires_status`, `expired_pattern`,
+    `expires_detail`, and a one-line `stale_reason`. Date-due rows first,
     most-overdue leading; filter by `entity_path`, `project`, or `agent`.
-    Templated and deterministic; no LLM call.
+    Templated and deterministic; no LLM call, no network.
     """
     storage = get_storage()
     storage.record_tool_call("stale_decisions", entity_path=entity_path)

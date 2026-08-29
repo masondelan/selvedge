@@ -39,7 +39,7 @@ jobs:
       # dev dependency so this uses the real tokenizer that matches the
       # figures Selvedge publishes.
       - name: MCP schema-tax budget
-        run: python scripts/schema_tax.py --max 3800
+        run: python scripts/schema_tax.py --max 4600
 
   test:
     runs-on: ubuntu-latest

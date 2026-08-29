@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selvedge"
-version = "0.3.10"
+version = "0.3.11"
 description = "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected."
 readme = "README.md"
 requires-python = ">=3.10"

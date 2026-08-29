@@ -3,7 +3,7 @@
   "name": "io.github.masondelan/selvedge",
   "title": "Selvedge",
   "description": "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected.",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "websiteUrl": "https://selvedge.sh",
   "repository": {
     "url": "https://github.com/masondelan/selvedge",
@@ -15,7 +15,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "selvedge",
-      "version": "0.3.10",
+      "version": "0.3.11",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

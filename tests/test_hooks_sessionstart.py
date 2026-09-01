@@ -196,6 +196,48 @@ def test_run_emits_absolutely_nothing_when_quiet(project):
     assert buf.getvalue() == ""
 
 
+def test_wire_stdout_is_strict_json_even_with_hostile_reasoning(project):
+    """Wire-path stdout is empty or strictly parseable JSON — nothing in between.
+
+    Claude Code v2.1.248 turned a stdout ``{…}`` object that fails to parse
+    from a silent plain-text fallback into a hook error carrying the parse
+    message. The digest embeds stored reasoning verbatim, and reasoning is
+    agent-authored free text, so a reason string full of braces, quotes,
+    newlines, control characters and even a literal embedded JSON object must
+    still leave the envelope strictly valid — the ``json.dumps`` wrapper is the
+    thing that guarantees it. This is the exact regression that would be
+    invisible on any Claude Code older than 2.1.248 (a stray ``print`` or an
+    f-string swapped in for ``json.dumps``) yet break every user on a newer
+    one.
+    """
+    hostile = (
+        'REVERTED } { "quoted" \n newline \t tab \\ backslash '
+        '— em-dash \x01 ctrl {"decision":"block","nested":[1,2]} \U0001f9f5'
+    )
+    st = _storage(project)
+    st.log_event(ChangeEvent(entity_path="users.sso_token", change_type="add",
+                             timestamp="2026-01-01T00:00:00Z",
+                             reasoning="Tried a dedicated SSO token column."))
+    st.log_event(ChangeEvent(entity_path="users.sso_token", change_type="remove",
+                             timestamp="2026-01-02T00:00:00Z",
+                             reasoning=hostile))
+
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        code = hook.run([], stdin=json.dumps(_payload(project)))
+    out = buf.getvalue()
+
+    assert code == 0
+    assert out.strip(), "expected a digest for the seeded revert"
+    assert out.lstrip().startswith("{")
+    # Must not raise — this is the v2.1.248 contract the hook has to satisfy.
+    payload = json.loads(out)
+    assert hostile in payload["hookSpecificOutput"]["additionalContext"]
+
+
 @pytest.mark.parametrize("bad", ["", "not json", "[]", "null", '{"cwd": 42}'])
 def test_fails_open_on_any_malformed_payload(bad, project):
     assert hook.run([], stdin=bad) == 0

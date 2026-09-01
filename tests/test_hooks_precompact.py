@@ -186,6 +186,32 @@ def test_reminder_is_deterministic(project):
 # ---------------------------------------------------------------------------
 
 
+def test_wire_stdout_is_strict_json_even_with_hostile_entity_names(project):
+    """Wire-path stdout is empty or strictly parseable JSON — nothing between.
+
+    Claude Code v2.1.248 made a non-parseable stdout ``{…}`` a hook error
+    instead of a silent plain-text fallback. Touched entity names flow into the
+    reminder verbatim, so a name full of braces, quotes and an embedded JSON
+    object must still leave the envelope strictly valid — ``json.dumps`` is what
+    guarantees it. Guards the regression (a stray ``print`` or an f-string in
+    place of ``json.dumps``) that is invisible on any Claude Code below 2.1.248.
+    """
+    hostile_entity = 'migrations/}{ "weird" {"decision":"block"}.sql'
+    _touch(project, "sess-1", [hostile_entity])
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        code = hook.run([], stdin=json.dumps(_payload(project)))
+    out = buf.getvalue()
+
+    assert code == 0
+    assert out.strip(), "expected a reminder for the touched-but-unlogged entity"
+    assert out.lstrip().startswith("{")
+    # Must not raise — this is the v2.1.248 contract the hook has to satisfy.
+    payload = json.loads(out)
+    assert hostile_entity in payload["hookSpecificOutput"]["additionalContext"]
+
+
 def test_end_to_end_through_the_hooks_cli(project):
     proc = subprocess.run(
         [sys.executable, "-m", "selvedge.hooks.cli", "precompact"],

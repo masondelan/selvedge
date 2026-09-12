@@ -27,8 +27,8 @@ reverted, and why. It's a `git blame` for AI agents, for the *why* rather
 than which model touched which line — captured live, by the agent, as the
 change happens, so nothing downstream has to guess at it.
 
-Selvedge is a local MCP server. AI coding agents (Claude Code, Cursor,
-Copilot) call it as they work to log structured change events with
+Selvedge is a local MCP server. AI coding agents (Claude Code, Codex, Copilot, Cursor,
+Gemini CLI and Windsurf) call it as they work to log structured change events with
 reasoning. Your data stays in a SQLite file under `.selvedge/` next to
 your code.
 
@@ -116,6 +116,16 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.13
+
+**Keep the review context with a recorded rejection.**
+
+- Session-start summaries show when a decision has expired or needs manual review, including in the rejection section.
+- Superseded decisions leave the revisit list without hiding unrelated decisions on the same path. History stays intact; reopening remains explicit.
+- [Feedback and correction guide](docs/community-feedback.md): how reports become product decisions, and how to reopen a mistaken rejection using `supersede`.
+
+---
+
 ## What's new in v0.3.12
 
 **Choose your coding agent. See a saved decision in seconds.**
@@ -124,44 +134,6 @@ made.** The diff is git's job. The why is Selvedge's.
 - `selvedge setup --agent codex` installs project MCP configuration and `AGENTS.md` instructions. Choose `claude-code`, `cursor`, `copilot`, `gemini`, or `windsurf`; repeat `--agent` for several tools. Existing automatic detection still works.
 - Copilot setup now registers its MCP server in `.vscode/mcp.json`. Codex TOML is appended conservatively, with backups and validation; custom entries are left for manual reconciliation. Status recognizes all six clients' registry formats.
 - Agent instructions and the CLI work across clients. Automatic session delivery and the edit gate remain Claude Code features.
-
----
-
-## What's new in v0.3.11
-
-**Abandoned alternatives are first-class, and the log can prove itself.**
-
-**Rejections and reverts are now stated outcomes, not inferences.**
-`change_type="reject"` records "we considered this and decided against it"
-without writing the change — the counterpart to `revert` for paths never
-taken. `prior_attempts` reads both as a new `confidence: "exact"` tier; the
-old proximity heuristic drops to tiebreaker. And the `expires_when` column
-that shipped dormant in v0.3.8 gets its evaluator: a closed, machine-checkable
-grammar — `library:NAME>=VERSION`, `entity:PATH:changes`, `date:ISO`,
-`manual:LABEL` — validated at write time, evaluated locally by
-`selvedge stale` with no network and no LLM. A rejection stored with the
-condition that would invalidate it is a decision that knows when to die.
-
-**The event log is now tamper-evident.** Every logged event gets a SHA-256
-chain record in a sidecar table, same transaction, over every field except the
-late-bound `git_commit` (git already witnesses that one). Two new
-`selvedge verify` checks: `chain_intact` fails hard when a chained row was
-edited, deleted, or reordered out-of-band — the check names the exact sequence
-number — and `chain_coverage` warns (never fails) about rows that predate the
-chain. Legitimate operations append boundary records instead of breaking the
-chain, so `migrate-paths` and a destructive-gated prune verify clean while a
-silent `sqlite3` edit does not. `selvedge verify --json` publishes the
-attestation manifest. Honest scope, stated in the module itself: this detects
-casual and accidental modification and produces an independently verifiable
-export; it is not proof against a motivated local attacker.
-
-**Also:** the PreCompact reminder now distinguishes "edited with no log" from
-"log exists but was truncated," and both hook surfaces have their determinism
-pinned byte-for-byte in tests; capture-time nudges suggest recording the
-invalidating condition when a reject/revert lands without one;
-`selvedge supersede` gains `-d/--diff`, `--revisit-after`, and
-`--expires-when` (#31); and an id-less supersede no longer re-opens every
-earlier revert on the path (#30). Tests 984 → 1114.
 
 ---
 
@@ -793,7 +765,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.12   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.13   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only
@@ -810,6 +782,8 @@ git history (`fetch-depth: 0`). Inputs: `since`, `window`, `limit`,
 ---
 
 ## Contributing
+
+Read the [feedback and review process](docs/community-feedback.md) for reporting problems, evaluating feature requests and following up on discussions.
 
 ```bash
 git clone https://github.com/masondelan/selvedge

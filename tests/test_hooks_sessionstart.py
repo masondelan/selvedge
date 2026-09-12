@@ -141,6 +141,52 @@ def test_digest_is_deterministic(project):
     assert hook.evaluate(_payload(project)) == hook.evaluate(_payload(project))
 
 
+@pytest.mark.parametrize("condition, marker", [
+    ("date:2020-01-01", "re-examine — expired:"),
+    ("library:selvedge-test-missing-package>=99.0", "manual review —"),
+])
+def test_expiry_context_survives_every_digest_mention(project, condition, marker):
+    """A pending review must not also appear as an unqualified prohibition."""
+    st = _storage(project)
+    st.log_event(ChangeEvent(
+        entity_path="users.test_key", change_type="reject",
+        reasoning="Rejected the original storage approach.", expires_when=condition))
+    before = st.count()
+    digest = hook.evaluate(_payload(project))
+    mentions = [line for line in digest.splitlines() if "users.test_key" in line]
+    assert len(mentions) == 2
+    assert all(marker in line for line in mentions)
+    assert st.count() == before
+    assert st.get_reverted_entities()[0]["change_type"] == "reject"
+
+
+def test_review_annotations_do_not_leak_between_same_path_decisions(project):
+    st = _storage(project)
+    st.log_event(ChangeEvent(
+        entity_path="users.test_key", change_type="reject",
+        timestamp="2020-01-01T00:00:00Z", expires_when="date:2020-02-01",
+        reasoning="Earlier expired rejection."))
+    st.log_event(ChangeEvent(
+        entity_path="users.test_key", change_type="reject",
+        timestamp="2026-01-01T00:00:00Z", reasoning="New independent rejection."))
+    digest = hook.evaluate(_payload(project))
+    current = next(line for line in digest.splitlines() if "New independent" in line)
+    assert "expired" not in current and "re-examine" not in current
+
+
+def test_standing_expiry_is_annotated_outside_first_five_revisit_rows(project):
+    st = _storage(project)
+    for i in range(6):
+        st.log_event(ChangeEvent(
+            entity_path=f"users.expired{i}", change_type="reject",
+            timestamp=f"2020-01-0{i + 1}T00:00:00Z",
+            expires_when="date:2020-02-01", reasoning=f"Decision {i}."))
+    digest = hook.evaluate(_payload(project))
+    newest = [line for line in digest.splitlines() if "users.expired5" in line]
+    assert len(newest) == 1
+    assert "re-examine — expired:" in newest[0]
+
+
 # ---------------------------------------------------------------------------
 # Size cap
 # ---------------------------------------------------------------------------

@@ -6,9 +6,11 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.3.13] - 2026-09-12
 
 ### Fixed
+
+- Session-start summaries retain expired/manual-review labels and their explanations in both review and rejection sections, matching by event ID rather than borrowing a sibling decision’s status. Conditions trigger review, never an automatic change of verdict.
 
 - **`get_stale_decisions` skips events later re-opened by `supersede`**
   (SEL-001). SessionStart section 1 ("Decisions due for a revisit") reads
@@ -20,8 +22,11 @@ Selvedge uses [semantic versioning](https://semver.org/).
   path — not a path+time "any later supersede on this entity" cut, which
   would hide an untargeted same-path sibling. Expired-but-not-superseded
   still surfaces; closing the loop remains an explicit `supersede`.
-  PreToolUse / `get_decision_status` and the SessionStart REVERTED
-  section were already correct and are unchanged.
+  PreToolUse and `get_decision_status` retain their existing supersession behavior.
+
+### Documentation
+
+- Added a feedback intake and publishing review process, a product-feedback issue form, and a guide to correcting mistaken rejections with the existing `supersede` operation. No new dependencies, migrations, MCP tools or default telemetry.
 
 ---
 

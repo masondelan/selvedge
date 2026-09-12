@@ -36,10 +36,6 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:  # heavy import stays lazy at runtime — see evaluate()
-    from ..storage import SelvedgeStorage
 
 EXIT_ALLOW = 0
 
@@ -82,10 +78,10 @@ def build_digest(db_path: object, max_bytes: int) -> str:
     ``test_selection_order_*`` in ``test_hooks_sessionstart.py``. Any
     smarter ranking waits on Phase 2.24's delivery-mode measurement.
 
-    A reverted row whose ``stale_when`` condition has since matched a later
-    change presents as *re-examine* instead of a bare warning — presentation
-    only, reusing the v0.3.8 active-memory surfacing. The stored verdict
-    never mutates; closing the loop still takes an explicit ``supersede``.
+    Preserve expiry and manual-review context wherever a decision appears,
+    including the standing-rejection section. Match annotations by event id:
+    another decision on the same path cannot invalidate this verdict.
+    Presentation only; closing the loop takes an explicit ``supersede``.
 
     Deterministic: same store, same string. Nothing here is generated.
     """
@@ -94,25 +90,28 @@ def build_digest(db_path: object, max_bytes: int) -> str:
     storage = SelvedgeStorage(db_path)  # type: ignore[arg-type]
     sections: list[str] = []
 
-    due = storage.get_stale_decisions(limit=_MAX_PER_SECTION)
+    # The storage query already evaluates all candidates before applying its
+    # limit. Keep their annotations for standing rows outside the first five,
+    # avoiding repeated per-entity queries and mismatched sibling verdicts.
+    review_rows = storage.get_stale_decisions(limit=storage.count())
+    review_by_id = {row["id"]: row for row in review_rows}
+    due = review_rows[:_MAX_PER_SECTION]
     if due:
         lines = ["Decisions due for a revisit:"]
         for row in due:
             entity = row["entity_path"]
             why = row["reasoning"] or "(no reasoning recorded)"
-            lines.append(f"  - {entity}: {why}")
+            lines.append(f"  - {entity} [{_review_note(row)}]: {why}")
         sections.append("\n".join(lines))
 
     reverted = storage.get_reverted_entities(limit=_MAX_PER_SECTION)
     if reverted:
-        lines = ["Tried before and REVERTED — check prior_attempts before touching:"]
+        lines = ["Recorded as REJECTED or REVERTED — check prior_attempts and review flags:"]
         for row in reverted:
             why = row["reasoning"] or "(no reasoning recorded)"
-            if _stale_condition_matched(storage, row["entity_path"]):
-                lines.append(
-                    f"  - {row['entity_path']} [re-examine — a later change "
-                    f"matched its stale_when condition]: {why}"
-                )
+            review = review_by_id.get(row["id"])
+            if review:
+                lines.append(f"  - {row['entity_path']} [{_review_note(review)}]: {why}")
             else:
                 lines.append(f"  - {row['entity_path']}: {why}")
         sections.append("\n".join(lines))
@@ -135,16 +134,15 @@ def build_digest(db_path: object, max_bytes: int) -> str:
     return _cap(digest, max_bytes)
 
 
-def _stale_condition_matched(storage: SelvedgeStorage, entity_path: str) -> bool:
-    """Whether a later change has matched this entity's ``stale_when`` condition.
-
-    Reuses the v0.3.8 active-memory surfacing — ``get_stale_decisions``
-    rule 2's deterministic keyword overlap — rather than re-implementing any
-    matching here. Read-only, presentation input only: a ``True`` changes how
-    a reverted row is *worded* in the digest, never what the store says.
-    """
-    rows = storage.get_stale_decisions(entity_path=entity_path)
-    return any("stale_when_match" in r["active_use_signals"] for r in rows)
+def _review_note(row: dict) -> str:
+    """Explain the current review signal without changing the stored verdict."""
+    if row["expires_status"] == "expired":
+        return f"re-examine — expired: {row['expires_detail']}"
+    if row["expires_status"] == "manual_review":
+        return f"manual review — {row['expires_detail']}"
+    if "stale_when_match" in row["active_use_signals"]:
+        return "re-examine — a later change matched its stale_when condition"
+    return "revisit due"
 
 
 def _cap(text: str, max_bytes: int) -> str:

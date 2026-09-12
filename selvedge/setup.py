@@ -36,10 +36,16 @@ touches the real ``~/.claude/`` or ``~/.cursor/``.
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 from .prompt import _write_backup, install_to_file, render_block
 
@@ -48,7 +54,7 @@ from .prompt import _write_backup, install_to_file, render_block
 # ---------------------------------------------------------------------------
 
 
-AgentName = Literal["claude-code", "cursor", "copilot"]
+AgentName = Literal["claude-code", "cursor", "copilot", "codex", "gemini", "windsurf"]
 
 
 @dataclass(frozen=True)
@@ -97,21 +103,18 @@ class AgentTarget:
         return False
 
 
-def detect_agents(
+def agent_targets(
     *,
     home: Path | None = None,
     project: Path | None = None,
 ) -> list[AgentTarget]:
-    """Return the list of agents we've detected on this machine.
+    """Return supported agent configurations, including tools not yet detected.
 
     ``home`` and ``project`` are exposed so the test suite can point
     them at ``tmp_path`` and never touch real ``~/.claude/`` or the
     real CWD. Production callers should leave them as None.
 
-    The returned list is filtered to the subset that actually appears
-    installed (per ``AgentTarget.is_installed``). The order is
-    deterministic — Claude Code first, then Cursor, then Copilot — so
-    interactive-mode prompts always appear in the same sequence.
+    The order is stable so interactive prompts appear in the same sequence.
     """
     home = home or Path.home()
     project = project or Path.cwd()
@@ -136,14 +139,55 @@ def detect_agents(
         AgentTarget(
             name="copilot",
             label="GitHub Copilot",
-            # Copilot doesn't expose a JSON MCP registry today — we only
-            # write the prompt block. Setting config_path to None makes
-            # the wizard skip the MCP-install step for this agent.
-            config_path=None,
+            config_path=project / ".vscode" / "mcp.json",
             prompt_path=project / ".github" / "copilot-instructions.md",
+            detect_path=project / ".github" / "copilot-instructions.md",
+        ),
+        AgentTarget(
+            name="codex",
+            label="Codex",
+            config_path=project / ".codex" / "config.toml",
+            prompt_path=project / "AGENTS.md",
+            detect_path=home / ".codex",
+        ),
+        AgentTarget(
+            name="gemini",
+            label="Gemini CLI",
+            config_path=project / ".gemini" / "settings.json",
+            prompt_path=project / "GEMINI.md",
+            detect_path=home / ".gemini",
+        ),
+        AgentTarget(
+            name="windsurf",
+            label="Windsurf",
+            config_path=home / ".codeium" / "windsurf" / "mcp_config.json",
+            prompt_path=project / ".windsurfrules",
         ),
     ]
-    return [c for c in candidates if c.is_installed()]
+    return candidates
+
+
+def detect_agents(
+    *, home: Path | None = None, project: Path | None = None,
+) -> list[AgentTarget]:
+    """Return supported agents whose configuration or instructions exist."""
+    return [c for c in agent_targets(home=home, project=project) if c.is_installed()]
+
+
+def has_mcp_entry(agent: AgentTarget) -> bool:
+    """Check the agent's native registry without modifying its configuration."""
+    if agent.config_path is None or not agent.config_path.exists():
+        return False
+    try:
+        raw = agent.config_path.read_text(encoding="utf-8")
+        data = tomllib.loads(raw) if agent.name == "codex" else json.loads(raw or "{}")
+    except (ValueError, OSError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    key = "mcp_servers" if agent.name == "codex" else "servers" if agent.name == "copilot" else "mcpServers"
+    servers = data.get(key)
+    return isinstance(servers, dict) and isinstance(servers.get("selvedge"), dict)
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +212,8 @@ def install_mcp_entry(
     command: str = "selvedge-server",
     write_backup: bool = True,
     overwrite_existing: bool = False,
+    config_key: str = "mcpServers",
+    server_type: str | None = None,
 ) -> ConfigWriteResult:
     """Idempotently merge a Selvedge MCP entry into ``config_path``.
 
@@ -187,11 +233,13 @@ def install_mcp_entry(
     where it landed (``None`` when no backup was needed).
     """
     desired = {"command": command}
+    if server_type is not None:
+        desired["type"] = server_type
 
     if not config_path.exists():
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
-            json.dumps({"mcpServers": {server_name: desired}}, indent=2) + "\n"
+            json.dumps({config_key: {server_name: desired}}, indent=2) + "\n"
         )
         return ConfigWriteResult("created", config_path)
 
@@ -215,7 +263,7 @@ def install_mcp_entry(
             detail="existing config is JSON but the top level is not an object",
         )
 
-    servers = data.get("mcpServers")
+    servers = data.get(config_key)
     if not isinstance(servers, dict):
         # Either missing or wrong type — replace with a fresh dict.
         # Replacing a wrong-type value is intentional; leaving a
@@ -233,7 +281,7 @@ def install_mcp_entry(
             "conflict",
             config_path,
             detail=(
-                f"existing 'mcpServers.{server_name}' differs from what "
+                f"existing '{config_key}.{server_name}' differs from what "
                 "Selvedge wants to write; rerun with --force or update "
                 "manually"
             ),
@@ -241,12 +289,49 @@ def install_mcp_entry(
 
     backup_path = _write_backup(config_path, raw) if write_backup else None
     servers[server_name] = desired
-    data["mcpServers"] = servers
+    data[config_key] = servers
     config_path.write_text(json.dumps(data, indent=2) + "\n")
     action: Literal["added", "updated"] = (
         "updated" if existing_entry is not None else "added"
     )
     return ConfigWriteResult(action, config_path, backup_path)
+
+
+def install_codex_entry(config_path: Path) -> ConfigWriteResult:
+    """Append a project MCP entry without rewriting unrelated TOML or comments.
+
+    Existing custom Selvedge entries require manual reconciliation, even with
+    --force. A lossy TOML rewrite could discard settings or credentials.
+    """
+    existed = config_path.exists()
+    raw = config_path.read_text(encoding="utf-8") if existed else ""
+    try:
+        data = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        return ConfigWriteResult("error", config_path, detail=f"Invalid TOML: {exc}")
+    servers = data.get("mcp_servers", {})
+    if not isinstance(servers, dict):
+        return ConfigWriteResult("error", config_path, detail="mcp_servers must be a TOML table")
+    desired = {"command": "selvedge-server"}
+    if "selvedge" in servers:
+        if servers["selvedge"] == desired:
+            return ConfigWriteResult("unchanged", config_path)
+        return ConfigWriteResult(
+            "conflict", config_path,
+            detail="Existing mcp_servers.selvedge differs; reconcile this TOML entry manually. --force does not rewrite TOML.",
+        )
+    updated = raw.rstrip() + '\n\n[mcp_servers.selvedge]\ncommand = "selvedge-server"\n'
+    try:
+        parsed = tomllib.loads(updated)
+    except tomllib.TOMLDecodeError as exc:
+        return ConfigWriteResult("error", config_path, detail=f"Cannot append MCP table safely: {exc}")
+    expected = {**data, "mcp_servers": {**servers, "selvedge": desired}}
+    if parsed != expected:
+        return ConfigWriteResult("error", config_path, detail="Appending would alter other TOML settings; update manually")
+    backup = _write_backup(config_path, raw) if existed else None
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(updated.lstrip("\n") if not existed else updated, encoding="utf-8")
+    return ConfigWriteResult("added" if existed else "created", config_path, backup)
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +504,7 @@ def run_wizard(
     install_hook: bool = True,
     init_project_dir: bool = True,
     install_enforcement_hook: bool = True,
+    selected_agents: tuple[str, ...] = (),
     confirm: Callable[[str, bool], bool] | None = None,
     init_fn: Callable[[Path], None] | None = None,
     install_hook_fn: Callable[[Path], None] | None = None,
@@ -446,7 +532,14 @@ def run_wizard(
     outcome = WizardOutcome()
 
     # --- Step 1: detect agents and install MCP entries ---
-    agents = detect_agents(home=home, project=project)
+    if selected_agents:
+        available = agent_targets(home=home, project=project)
+        unknown = set(selected_agents) - {a.name for a in available}
+        if unknown:
+            raise ValueError(f"Unsupported agent(s): {', '.join(sorted(unknown))}")
+        agents = [a for a in available if a.name in selected_agents]
+    else:
+        agents = detect_agents(home=home, project=project)
 
     if not agents:
         outcome.add(
@@ -455,7 +548,7 @@ def run_wizard(
                 "skipped",
                 detail=(
                     "No supported AI tools detected on this machine. "
-                    "Install Claude Code, Cursor, or Copilot first, then rerun."
+                    "Choose your tool explicitly, e.g. selvedge setup --agent codex."
                 ),
             )
         )
@@ -652,10 +745,15 @@ def _install_for_agent(
                 )
             )
         else:
-            result = install_mcp_entry(
-                agent.config_path,
-                overwrite_existing=force,
-            )
+            if agent.name == "codex":
+                result = install_codex_entry(agent.config_path)
+            else:
+                result = install_mcp_entry(
+                    agent.config_path,
+                    overwrite_existing=force,
+                    config_key="servers" if agent.name == "copilot" else "mcpServers",
+                    server_type="stdio" if agent.name == "copilot" else None,
+                )
             status_for: dict[str, Literal["ok", "noop", "error", "skipped"]] = {
                 "created": "ok",
                 "added": "ok",

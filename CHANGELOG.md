@@ -6,6 +6,22 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.12] - 2026-09-12
+
+### Added
+- Explicit, repeatable `setup --agent` selection for Codex, Claude Code, Cursor, Copilot, Gemini CLI and Windsurf. Codex gets project TOML + AGENTS.md; Gemini and Windsurf get native MCP configuration and instructions.
+- `selvedge demo [--json]`: record a rejected approach, retrieve it from a new storage connection, and clean up the temporary database without touching project state.
+
+### Fixed
+- Copilot setup now installs its actual VS Code MCP registry entry using `servers` and `type: stdio`.
+- Status recognizes Codex TOML and Copilot JSON instead of incorrectly suggesting setup again.
+- `setup --yes` honors confirmations with or without `--non-interactive`.
+
+### Changed
+- Setup gives a concrete restart and first-decision prompt. Codex TOML writes preserve existing text and reject conflicting or unsafe edits, including with `--force`.
+- Quickstart distinguishes common MCP support from Claude Code lifecycle hooks. No new dependencies, MCP tools, migrations, or default telemetry.
+
+
 ## [0.3.11] — 2026-08-29
 
 **Abandoned alternatives are first-class, and the log can prove itself.** The

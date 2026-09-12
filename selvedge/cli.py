@@ -2352,32 +2352,20 @@ def _diagnose_empty_state(storage: SelvedgeStorage) -> list[str]:
         wiring instead of guessing.
 
     The returned list is rendered one item per line by ``status``.
-    Reused by ``doctor`` so both commands give consistent advice.
     """
     from datetime import datetime, timezone
 
-    from .setup import detect_agents
+    from .setup import detect_agents, has_mcp_entry
 
     try:
         agents = detect_agents(project=Path.cwd())
     except OSError:
         agents = []
 
-    # Find any detected agent whose config file actually contains a
-    # ``selvedge`` mcpServers entry. Skip agents without a config_path
-    # (Copilot doesn't have a JSON registry).
+    # Check each agent's native JSON or TOML registry.
     installed_in: list[Path] = []
     for agent in agents:
-        if agent.config_path is None or not agent.config_path.exists():
-            continue
-        try:
-            data = json.loads(agent.config_path.read_text() or "{}")
-        except (json.JSONDecodeError, OSError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        servers = data.get("mcpServers")
-        if isinstance(servers, dict) and "selvedge" in servers:
+        if agent.config_path is not None and has_mcp_entry(agent):
             installed_in.append(agent.config_path)
 
     if installed_in:
@@ -2415,6 +2403,11 @@ def _diagnose_empty_state(storage: SelvedgeStorage) -> list[str]:
 
 
 @cli.command("setup")
+@click.option(
+    "--agent", "selected_agents", multiple=True,
+    type=click.Choice(["codex", "claude-code", "cursor", "copilot", "gemini", "windsurf"]),
+    help="Configure only this agent, even if not detected. Repeat to configure several.",
+)
 @click.option(
     "--path",
     "-p",
@@ -2458,12 +2451,12 @@ def _diagnose_empty_state(storage: SelvedgeStorage) -> list[str]:
     help="Don't install the Claude Code PreToolUse enforcement hook "
     "(.claude/settings.json).",
 )
-def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook, skip_enforcement_hook):
+def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook, skip_enforcement_hook, selected_agents):
     """Interactive first-run wizard — wires Selvedge into your AI tools.
 
     \b
-    Detects which AI tools you have installed (Claude Code, Cursor,
-    GitHub Copilot), offers to:
+    Detects installed AI tools, or use --agent codex (repeatable) to
+    choose Codex, Claude Code, Cursor, Copilot, Gemini CLI or Windsurf:
       • install Selvedge's MCP entry into each tool's config
       • drop the canonical agent-instructions block into CLAUDE.md /
         .cursorrules / copilot-instructions.md
@@ -2495,6 +2488,8 @@ def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook, skip_e
             confirm: Callable[[str, bool], bool] | None = lambda *_: True  # noqa: E731
         else:
             confirm = lambda *_: False  # noqa: E731
+    elif assume_yes:
+        confirm = lambda *_: True  # noqa: E731
     else:
         confirm = None  # use the default click.confirm
 
@@ -2505,12 +2500,41 @@ def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook, skip_e
         install_hook=not skip_hook,
         init_project_dir=not skip_init,
         install_enforcement_hook=not skip_enforcement_hook,
+        selected_agents=selected_agents,
         confirm=confirm,
     )
 
     _render_wizard_summary(outcome)
     if outcome.exit_code:
         sys.exit(outcome.exit_code)
+    if any(step.status in ("ok", "noop") for step in outcome.steps):
+        console.print("\nRestart your agent in this project and approve the Selvedge MCP server if prompted.")
+        console.print('[dim]Then ask: "Use Selvedge to record a rejected approach and look it up with prior_attempts."[/dim]')
+
+
+@cli.command("demo")
+@click.option("--json", "json_output", is_flag=True, help="Emit the demo result as JSON.")
+def demo(json_output: bool) -> None:
+    """Try a saved decision across two sessions in a temporary database.
+
+    No setup or agent needed. Your project, configuration and real database
+    are untouched. The temporary database is removed after the demo.
+    """
+    from .demo import run_demo
+
+    result = run_demo()
+    if json_output:
+        console.print_json(data=result)
+        return
+    console.print("\n[bold]One decision. Two sessions.[/bold]\n")
+    console.print("[bold]Session 1 · your agent saves a rejected approach[/bold]")
+    console.print(result["reasoning"])
+    console.print("\n[bold]Session 2 · a fresh connection asks prior_attempts[/bold]")
+    console.print(f"[green]{result['outcome']}[/green] · confidence: {result['confidence']}")
+    console.print(f"Revisit when: {result['stale_when']}")
+    console.print("\n[dim]Demo complete. Temporary database removed; your project is untouched.[/dim]")
+    console.print("\nTry it in your repo: [bold]selvedge setup --agent codex[/bold]")
+    console.print("[dim]Also: claude-code, cursor, copilot, gemini, windsurf. Then restart your agent.[/dim]")
 
 
 def _render_wizard_summary(outcome) -> None:

@@ -69,7 +69,10 @@ def build_digest(db_path: object, max_bytes: int) -> str:
 
       1. Revisit rows come from ``get_stale_decisions``: date-due rows
          first, **most overdue leading** (ascending due date), then
-         condition-only matches by decision time.
+         condition-only matches by decision time. Superseded candidates
+         are already excluded there (explicit id-link or the issue #30
+         auto-link), so a re-opened reject/revert does not reappear as a
+         live revisit nudge.
       2. Reverted rows come from ``get_reverted_entities``: **most recent
          revert first** (descending timestamp of the standing verdict).
       3. Changesets: most recently active first.

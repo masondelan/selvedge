@@ -12,6 +12,8 @@ For everything else:
 
 ## Sources of truth
 
+- **Community feedback and publishing review** → [`docs/community-feedback.md`](docs/community-feedback.md). Track substantive feedback through a reasoned decision and follow-up; check released behavior before proposing features or publishing claims.
+
 - **What's shipped** → `CHANGELOG.md`. The phase-plan checkboxes in `docs/architecture.md` can drift; trust the changelog when they disagree.
 - **Current MCP tool count and shape** → `selvedge/server.py`. Don't infer from `manifest.json` — the bundle can lag the live server.
 - **Version string** → `pyproject.toml` AND `selvedge/__init__.py` AND `manifest.json` must all match.

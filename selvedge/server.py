@@ -933,7 +933,10 @@ def stale_decisions(
     whose `stale_when` text shares keywords with a LATER change event — the
     named invalidation evidence may have happened. Surfacing only: nothing
     is un-retired automatically; follow up with a `supersede` if the
-    condition really was triggered.
+    condition really was triggered. A later `supersede` that re-opens the
+    candidate (explicit `supersedes` id, or the same id-less auto-link
+    `prior_attempts` uses) drops it from this list; a same-path sibling
+    the supersede did not target still surfaces.
 
     Each result is the change event plus `flag`, `revisit_due`,
     `days_overdue`, `active_use_signals`, `matched_terms`,

@@ -340,6 +340,68 @@ def _derive_path_status(events: list[dict]) -> str:
     return "active"
 
 
+def _idless_supersede_target_id(
+    removals_on_path: Iterable[dict],
+    supersede_timestamp: str,
+) -> str:
+    """The single removal an id-less supersede re-opens, or ``""``.
+
+    Same rule as :meth:`SelvedgeStorage.log_supersede` and
+    :meth:`SelvedgeStorage.get_prior_attempts` (issue #30): an id-less
+    supersede re-opens at most the most recent removal on that path at or
+    before its write time. ``removals_on_path`` must be timestamp-ascending
+    so the last qualifying row is the latest. Empty string when nothing
+    precedes the supersede — a dangling re-open marker flips nothing.
+    """
+    s_ts = _parse_iso(supersede_timestamp)
+    preceding = [
+        rm for rm in removals_on_path if _parse_iso(rm["timestamp"]) <= s_ts
+    ]
+    return preceding[-1]["id"] if preceding else ""
+
+
+def _reopened_event_ids(
+    supersede_events: Iterable[dict],
+    removals: Iterable[dict],
+) -> set[str]:
+    """Ids of events a later supersede re-opens (explicit id or auto-link).
+
+    Conservative precision, matching ``log_supersede`` / issue #30:
+
+    * **Explicit** — ``change_type == "supersede"`` and ``supersedes == E.id``.
+      The id is the source of truth; path is not re-checked here (the
+      writer already constrained the target).
+    * **Auto-link** — an id-less supersede (``supersedes`` empty) re-opens
+      at most the single removal it would have auto-linked: the latest
+      prior removal on the *same* ``entity_path`` among
+      :data:`_REMOVAL_CHANGE_TYPES`. Earlier unrelated siblings on that
+      path stay un-reopened.
+
+    A weaker "any later supersede on the same path" filter is deliberately
+    not used — it over-filters a same-path ``revisit_after`` / ``stale_when``
+    sibling the supersede did not target.
+    """
+    reopened: set[str] = set()
+    removals_by_path: dict[str, list[dict]] = {}
+    for rm in removals:
+        removals_by_path.setdefault(rm["entity_path"], []).append(rm)
+    for path_removals in removals_by_path.values():
+        path_removals.sort(key=lambda e: e["timestamp"])
+
+    for s in supersede_events:
+        target = s.get("supersedes") or ""
+        if target:
+            reopened.add(target)
+            continue
+        linked = _idless_supersede_target_id(
+            removals_by_path.get(s["entity_path"], []),
+            s["timestamp"],
+        )
+        if linked:
+            reopened.add(linked)
+    return reopened
+
+
 def _trail_phase(change_type: str) -> str:
     """Map a change_type to its phase label in a decision trail.
 
@@ -1421,13 +1483,15 @@ class SelvedgeStorage:
         Powers the session-start digest's wedge section. Derived from the
         append-only log the same way `get_decision_status` derives it — an
         entity counts as reverted when its latest event is a removal, so a
-        later `supersede` correctly drops it off this list.
+        later `supersede` correctly drops it off this list. Include the
+        source event id so review annotations cannot leak between decisions
+        on the same entity path.
         """
         placeholders = ",".join("?" for _ in _REMOVAL_CHANGE_TYPES)
         with self._session() as conn:
             rows = conn.execute(
                 f"""
-                SELECT e.entity_path, e.reasoning, e.timestamp, e.change_type
+                SELECT e.id, e.entity_path, e.reasoning, e.timestamp, e.change_type
                 FROM events e
                 JOIN (
                     SELECT entity_path, MAX(timestamp) AS latest
@@ -1706,12 +1770,9 @@ class SelvedgeStorage:
             for s in supersede_events:
                 if s["supersedes"]:
                     continue
-                s_ts = _parse_iso(s["timestamp"])
-                preceding = [
-                    rm for rm in removals if _parse_iso(rm["timestamp"]) <= s_ts
-                ]
-                if preceding:
-                    idless_targets[s["id"]] = preceding[-1]["id"]
+                linked = _idless_supersede_target_id(removals, s["timestamp"])
+                if linked:
+                    idless_targets[s["id"]] = linked
 
             def _superseding_of(
                 closed: dict,
@@ -1963,6 +2024,14 @@ class SelvedgeStorage:
         Filterable by ``entity_path`` (exact + ``.`` prefix), ``project``,
         and ``agent``.
 
+        **Superseded events are excluded.** A candidate ``E`` is skipped
+        when a later ``supersede`` re-opens it — explicit
+        (``supersedes == E.id``) or the issue #30 auto-link (an id-less
+        supersede re-opens at most the latest prior removal on that path).
+        A same-path sibling the supersede did not target still surfaces.
+        Expired-but-not-superseded still surfaces: closing the loop takes
+        an explicit ``supersede``.
+
         Each result is the event dict (NULL columns coalesced to ``""``) plus
         ten always-present keys: ``flag`` (``expired`` / ``revisit_due`` /
         ``review_suggested`` / ``manual_review`` — that precedence when
@@ -2011,6 +2080,31 @@ class SelvedgeStorage:
             if not candidates:
                 return []
 
+            # Events a later supersede re-opens — explicit id-link or the
+            # issue #30 auto-link (id-less → latest prior removal on that
+            # path). Fetched once so the per-candidate loop stays a set
+            # membership test. Same rule as log_supersede / prior_attempts;
+            # not a path+time filter, which would drop untargeted siblings.
+            supersede_rows = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT id, entity_path, timestamp, supersedes "
+                    "FROM events WHERE change_type = 'supersede'"
+                ).fetchall()
+            ]
+            reopened_ids: set[str] = set()
+            if supersede_rows:
+                removal_placeholders = ",".join("?" for _ in _REMOVAL_CHANGE_TYPES)
+                removal_rows = [
+                    dict(r)
+                    for r in conn.execute(
+                        f"SELECT id, entity_path, timestamp FROM events "
+                        f"WHERE change_type IN ({removal_placeholders})",
+                        tuple(sorted(_REMOVAL_CHANGE_TYPES)),
+                    ).fetchall()
+                ]
+                reopened_ids = _reopened_event_ids(supersede_rows, removal_rows)
+
             # Active-use telemetry, fetched once: all entity-scoped read-tool
             # calls. Small in practice; matched in Python so the dotted-prefix
             # logic isn't tangled up in LIKE-escaping both directions.
@@ -2056,6 +2150,8 @@ class SelvedgeStorage:
             for row in candidates:
                 ev = dict(row)
                 ev_ts = _parse_iso(ev["timestamp"])
+                if ev["id"] in reopened_ids:
+                    continue  # later supersede re-opened this verdict
 
                 # Rule 1: revisit date passed + active use.
                 due_dt = None

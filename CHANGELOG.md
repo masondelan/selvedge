@@ -6,6 +6,25 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **`get_stale_decisions` skips events later re-opened by `supersede`**
+  (SEL-001). SessionStart section 1 ("Decisions due for a revisit") reads
+  that method, so a superseded reject/revert whose `expires_when` had
+  fired, `revisit_after` was due, or `stale_when` had matched still
+  appeared as a live revisit nudge. The filter mirrors `log_supersede` /
+  `prior_attempts` issue #30: an explicit `supersedes == E.id` link, or an
+  id-less supersede auto-linking at most the latest prior removal on that
+  path — not a path+time "any later supersede on this entity" cut, which
+  would hide an untargeted same-path sibling. Expired-but-not-superseded
+  still surfaces; closing the loop remains an explicit `supersede`.
+  PreToolUse / `get_decision_status` and the SessionStart REVERTED
+  section were already correct and are unchanged.
+
+---
+
 ## [0.3.12] - 2026-09-12
 
 ### Added

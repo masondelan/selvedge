@@ -1483,13 +1483,15 @@ class SelvedgeStorage:
         Powers the session-start digest's wedge section. Derived from the
         append-only log the same way `get_decision_status` derives it — an
         entity counts as reverted when its latest event is a removal, so a
-        later `supersede` correctly drops it off this list.
+        later `supersede` correctly drops it off this list. Include the
+        source event id so review annotations cannot leak between decisions
+        on the same entity path.
         """
         placeholders = ",".join("?" for _ in _REMOVAL_CHANGE_TYPES)
         with self._session() as conn:
             rows = conn.execute(
                 f"""
-                SELECT e.entity_path, e.reasoning, e.timestamp, e.change_type
+                SELECT e.id, e.entity_path, e.reasoning, e.timestamp, e.change_type
                 FROM events e
                 JOIN (
                     SELECT entity_path, MAX(timestamp) AS latest

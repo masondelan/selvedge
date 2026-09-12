@@ -14,7 +14,7 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ### Fixed
 - Copilot setup now installs its actual VS Code MCP registry entry using `servers` and `type: stdio`.
-- Status and doctor recognize Codex TOML and Copilot JSON instead of incorrectly suggesting setup again.
+- Status recognizes Codex TOML and Copilot JSON instead of incorrectly suggesting setup again.
 - `setup --yes` honors confirmations with or without `--non-interactive`.
 
 ### Changed

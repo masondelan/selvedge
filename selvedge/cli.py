@@ -2352,7 +2352,6 @@ def _diagnose_empty_state(storage: SelvedgeStorage) -> list[str]:
         wiring instead of guessing.
 
     The returned list is rendered one item per line by ``status``.
-    Reused by ``doctor`` so both commands give consistent advice.
     """
     from datetime import datetime, timezone
 

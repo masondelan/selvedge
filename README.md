@@ -122,7 +122,7 @@ made.** The diff is git's job. The why is Selvedge's.
 
 - `selvedge demo` saves a rejected approach and retrieves it through a fresh connection to an isolated temporary database. It never touches your project or configured database. Add `--json` for machine-readable output.
 - `selvedge setup --agent codex` installs project MCP configuration and `AGENTS.md` instructions. Choose `claude-code`, `cursor`, `copilot`, `gemini`, or `windsurf`; repeat `--agent` for several tools. Existing automatic detection still works.
-- Copilot setup now registers its MCP server in `.vscode/mcp.json`. Codex TOML is appended conservatively, with backups and validation; custom entries are left for manual reconciliation. Status and doctor recognize all six clients' registry formats.
+- Copilot setup now registers its MCP server in `.vscode/mcp.json`. Codex TOML is appended conservatively, with backups and validation; custom entries are left for manual reconciliation. Status recognizes all six clients' registry formats.
 - Agent instructions and the CLI work across clients. Automatic session delivery and the edit gate remain Claude Code features.
 
 ---

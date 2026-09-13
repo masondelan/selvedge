@@ -6,6 +6,19 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.14] - 2026-09-12
+
+### Fixed
+
+- MCP `prior_attempts` accepts an explicit `window_minutes=10080`, matching the documented seven-day default. Its time-window ceiling is now 10,080 minutes rather than the unrelated 1,000-result pagination limit. Values from 1 through 10,080 are accepted; pagination limits remain capped at 1,000. Protocol regression tests cover schema bounds, omitted versus explicit defaults, invalid bounds, and an implicit reversal more than 1,000 minutes later ([#47](https://github.com/masondelan/selvedge/pull/47)).
+
+### Distribution
+
+- Refreshed bundled tool metadata and synchronized the Python, plugin, npm and MCP Registry version pins. The npm maintainer notes now distinguish its package version from the Python `pypiVersion` pin.
+- No new dependencies, migrations, MCP tools or default telemetry.
+
+---
+
 ## [0.3.13] - 2026-09-12
 
 ### Fixed
@@ -13,7 +26,7 @@ Selvedge uses [semantic versioning](https://semver.org/).
 - Session-start summaries retain expired/manual-review labels and their explanations in both review and rejection sections, matching by event ID rather than borrowing a sibling decision’s status. Conditions trigger review, never an automatic change of verdict.
 
 - **`get_stale_decisions` skips events later re-opened by `supersede`**
-  (SEL-001). SessionStart section 1 ("Decisions due for a revisit") reads
+  ([#43](https://github.com/masondelan/selvedge/pull/43)). SessionStart section 1 ("Decisions due for a revisit") reads
   that method, so a superseded reject/revert whose `expires_when` had
   fired, `revisit_after` was due, or `stale_when` had matched still
   appeared as a live revisit nudge. The filter mirrors `log_supersede` /

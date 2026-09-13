@@ -59,7 +59,7 @@ dev = [
     "hatchling",
     # Dev-only (NOT a runtime dependency): gives scripts/schema_tax.py the real
     # tokenizer so the CI MCP-footprint gate matches the published figure.
-    "tiktoken>=0.7.0",
+    "tiktoken>=0.13.0",
 ]
 
 [project.scripts]

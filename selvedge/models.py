@@ -28,6 +28,12 @@ class ChangeType(str, Enum):
     # seeds pre-Selvedge reverts from commit history. Counts as a removal
     # for outcome inference, so a revert closes prior attempts on the path.
     REVERT = "revert"
+    # "We considered this and decided against it" WITHOUT writing the change
+    # (v0.3.11) — the counterpart to REVERT for paths never taken. Counts as
+    # a removal for status derivation (the standing verdict is negative, and
+    # a later supersede can re-open it); surfaces in prior_attempts as its
+    # own high-confidence ("exact") row so the next agent finds the verdict.
+    REJECT = "reject"
 
 
 class EntityType(str, Enum):
@@ -76,6 +82,10 @@ class ChangeEvent:
       - ``timestamp`` is normalized to canonical UTC (``...Z`` suffix) so
         lexicographic ordering matches chronological ordering across
         mixed timezones.
+      - ``expires_when``, when non-empty, must match the closed grammar in
+        :mod:`selvedge.expires_when` (raises ValueError otherwise). This is
+        the single write chokepoint every path routes through — MCP tool,
+        CLI, importers — so a value outside the grammar can never be stored.
     """
     entity_path: str
     change_type: str
@@ -149,6 +159,14 @@ class ChangeEvent:
         except (ValueError, TypeError):
             # Fall back to "now" if the caller assigned an unparseable value
             self.timestamp = utc_now_iso()
+
+        # expires_when: closed grammar, rejected (not coerced) on mismatch.
+        # Imported lazily so constructing a ChangeEvent without the field
+        # stays as cheap as before (the hook constructs events per call).
+        if self.expires_when:
+            from .expires_when import validate_expires_when
+
+            self.expires_when = validate_expires_when(self.expires_when)
 
     def to_dict(self) -> dict:
         return {

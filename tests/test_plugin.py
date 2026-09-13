@@ -595,6 +595,19 @@ def _canonical_description() -> str:
     return match.group(1)
 
 
+@pytest.mark.asyncio
+async def test_bundle_tool_metadata_matches_registered_server():
+    """Smithery must advertise the same parameters and behavior as the server."""
+    from selvedge.server import mcp
+
+    manifest = json.loads((_REPO_ROOT / "manifest.json").read_text())
+    actual = {
+        tool.name: tool.model_dump(mode="json", exclude_none=True)
+        for tool in await mcp.list_tools()
+    }
+    assert {tool["name"]: tool for tool in manifest["tools"]} == actual
+
+
 def test_description_sync_across_manifests():
     """Every short-description surface carries the identical canonical line."""
     import json

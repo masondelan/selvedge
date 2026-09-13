@@ -27,8 +27,8 @@ reverted, and why. It's a `git blame` for AI agents, for the *why* rather
 than which model touched which line — captured live, by the agent, as the
 change happens, so nothing downstream has to guess at it.
 
-Selvedge is a local MCP server. AI coding agents (Claude Code, Cursor,
-Copilot) call it as they work to log structured change events with
+Selvedge is a local MCP server. AI coding agents (Claude Code, Codex, Copilot, Cursor,
+Gemini CLI and Windsurf) call it as they work to log structured change events with
 reasoning. Your data stays in a SQLite file under `.selvedge/` next to
 your code.
 
@@ -116,85 +116,25 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
-## What's new in v0.3.10
+## What's new in v0.3.14
 
-**The memory comes to the agent, and the store gets its dials.** Two themes,
-shipped together because the config half is what the rest needed to read
-settings from.
+**Explicit seven-day lookups work as documented.**
 
-**Delivery.** Selvedge already blocked re-edits of reverted entities. What was
-missing was delivery when there is nothing to veto. Two new hooks:
-
-- **SessionStart** injects a compact digest as a session begins — decisions due
-  for a revisit, entities that were tried and reverted, recent changesets.
-- **PreCompact** fires just before context compaction destroys this session's
-  reasoning and names the watched entities you edited but never logged.
-
-Both are quiet when they have nothing to say, size-capped, read-only, and
-templated. Neither can block anything — PreCompact deliberately declines the
-veto the hook API offers it. This is the answer to a measured failure mode: two
-2026 papers recorded pull-model memory tools going unused entirely (zero
-voluntary memory operations across 114 turns against a pre-seeded store) while
-deterministic injection landed every time.
-
-**`selvedge export --format markdown`** renders the store as a reviewable
-digest to commit next to it, so captured intent shows up in a pull request
-instead of hiding inside a binary. Deterministic — regenerating with no new
-events is a zero-line diff.
-
-**Config.** `.selvedge/config.toml` is now first-class, with a canonical
-precedence chain that `selvedge doctor` prints per setting. It brings:
-
-- **`selvedge prune --include-events`** — the first path that can delete
-  captured reasoning, so it needs *both* a confirmation and
-  `SELVEDGE_DESTRUCTIVE=1`. Neither alone is enough, because `--yes` in a cron
-  entry defeats a prompt and a shell profile defeats an env var. Events
-  retention defaults to never.
-- **Event-size bounds** (`diff_bytes`, `reasoning_bytes`) that truncate loudly
-  — a marker in the text, a warning at write time, a count in `selvedge stats`.
-- **Secret-shape warnings** at `log_change`, extendable via
-  `redaction_patterns`, plus a `doctor` row that scans what's already stored.
-  Warn, never reject.
-
-**Also:** five review issues closed. The enforcement hook's allow path is
-**40% faster** (33.6 ms → 20.1 ms per gated call) and `SELVEDGE_HOOK_DISABLE=1`
-finally short-circuits before the imports it was documented to skip;
-`log_change` no longer discards `revisit_after` / `constraint` / `stale_when`
-on renames and supersedes; the CLI's `--json` and the MCP tools now return
-identical structures; and the Docker image no longer ships the maintainer's
-own database. Tests 826 → 984.
+The MCP `prior_attempts` tool now accepts `window_minutes=10080`, matching its
+seven-day default. Previously, sending that value explicitly failed validation
+because the time window incorrectly shared the 1,000-result pagination cap.
+The allowed window is 1–10,080 minutes; result limits remain capped at 1,000.
+No new dependencies, migrations or MCP tools.
 
 ---
 
-## What's new in v0.3.9.3
+## What's new in v0.3.13
 
-**Fixes a broken install, and lands a full code-quality pass.** `mcp` 2.0.0
-(released 2026-07-28) removed `mcp.server.fastmcp`, and Selvedge declared
-`mcp>=1.0.0` with no upper bound — so any `pip install selvedge` after that date
-pulled 2.0.0 and `selvedge-server` failed at import. This release pins the
-dependency. **If your server stopped starting, this is why — upgrade.**
+**Keep the review context with a recorded rejection.**
 
-It ships alongside a review that put nine independent passes over the codebase
-and then tried to *disprove* every finding before acting on it. Seventeen
-confirmed defects fixed. The ones you would actually have noticed:
-
-- **The enforcement hook stopped blocking things it shouldn't.** Reading a
-  tracked file — `cat`, `git diff`, `pytest`, `ruff check` — was blocked, and
-  the remediation the error message told you to run was blocked by the same
-  gate, so there was no way out from the CLI. Two more paths fed the same
-  false blocks: a commented-out line of SQL counted as a real deletion, and any
-  commit message merely containing the word "revert" marked every file it
-  touched as reverted.
-- **Lookups got fast at scale.** The main entity read was scanning every row —
-  measured 7.4 ms → 0.35 ms at 100k events, and the hook had been taking
-  seconds on large stores.
-- **`selvedge setup` can no longer delete parts of your `CLAUDE.md`**, an
-  interrupted backup can no longer destroy your last good one, and upgrading
-  while two Selvedge processes are running no longer crashes with an error that
-  looked like database corruption.
-
-Tests went 739 → 826. No schema change and no tool-surface change, so this is
-**drop-in for anyone on 0.3.9.x**.
+- Session-start summaries show when a decision has expired or needs manual review, including in the rejection section.
+- Superseded decisions leave the revisit list without hiding unrelated decisions on the same path. History stays intact; reopening remains explicit.
+- [Feedback and correction guide](docs/community-feedback.md): how reports become product decisions, and how to reopen a mistaken rejection using `supersede`.
 
 ---
 
@@ -206,7 +146,7 @@ Tests went 739 → 826. No schema change and no tool-surface change, so this is
 
 AI agents call Selvedge as they work. Selvedge captures the *why*
 into a durable, queryable store and emits it back out — as
-[Agent Trace](https://github.com/cursor/agent-trace) records for
+[Agent Trace](https://agent-trace.dev/) records for
 cross-tool readers, as observability metadata that links into
 Sentry/Datadog stack traces, and as compliance artifacts for SOC 2
 and EU AI Act audits.
@@ -281,16 +221,17 @@ functions across the codebase. Tag every event with `changeset:add-stripe-billin
 and you can pull the entire scope back later — even if the original PR was
 broken into eight smaller ones over a month.
 
-**Selvedge ↔ Agent Trace.** [Agent Trace](https://github.com/cursor/agent-trace)
-(Cursor + Cognition AI, RFC Jan 2026, backed by Cloudflare, Vercel, Google
-Jules, Amp, OpenCode, and git-ai) is an emerging *open standard* for AI
-code attribution traces. Selvedge isn't a competitor to it — it's a
-compatible producer. As of **v0.3.9**, `selvedge export --format agent-trace`
-emits Agent Trace v0.1.0 records (and `selvedge import --format agent-trace`
-reads them back); the mapping is in
-[`docs/agent-trace-interop.md`](docs/agent-trace-interop.md). Agent
-Trace is the wire format. Selvedge is the live capture + query layer that
-emits it.
+**Selvedge ↔ Agent Trace.** [Agent Trace](https://agent-trace.dev/) is an
+open AI code-attribution wire format published by Cursor (RFC, Jan 2026). Its
+original GitHub home went 404 in August 2026 and the multi-vendor momentum
+behind it has faded, but the spec and schema still resolve at agent-trace.dev,
+frozen at v0.1.0. Since **v0.3.9**, `selvedge export --format agent-trace`
+emits Agent Trace v0.1.0 records and `selvedge import --format agent-trace`
+reads them back — a portable, documented interchange format for file/line AI
+attribution, with reasoning and entity-level provenance carried in each
+record's `dev.selvedge` metadata. The mapping is in
+[`docs/agent-trace-interop.md`](docs/agent-trace-interop.md); Selvedge vendors
+the schema and has no runtime dependency on the upstream project.
 
 ---
 
@@ -329,26 +270,40 @@ launcher then prefers over `uvx` for an exact pinned version.
 > the one that updates itself. If you're on the plugin and only want the
 > post-commit commit-hash stamping, run `selvedge install-hook` on its own.
 
-### Any other MCP client — `selvedge setup`
+### Choose your coding agent
 
-Cursor, Copilot, Windsurf, Codex CLI, Gemini CLI, and the rest:
+With [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
 
 ```bash
-pip install selvedge
+uv tool install --upgrade selvedge
+selvedge demo
 cd your-project
-selvedge setup
+selvedge setup --agent codex
 ```
 
-That's it. `selvedge setup` is an interactive wizard: it detects which AI
-tools you have (Claude Code, Cursor, Copilot), writes the MCP entry into
-each one's config, drops the canonical agent-instructions block into your
-project's prompt file (`CLAUDE.md` / `.cursorrules` /
-`copilot-instructions.md`), installs the PreToolUse enforcement hook into
-`.claude/settings.json` (Claude Code only — blocks schema/migration edits
-until `prior_attempts` has been checked; `--skip-enforcement-hook` to opt
-out), runs `selvedge init`, and installs the post-commit hook. Every
-modified file gets a `.bak` written next to it before any change reaches
-disk. Re-running is a no-op.
+Use `codex`, `claude-code`, `cursor`, `copilot`, `gemini` or `windsurf`.
+Repeat `--agent` for multiple tools, or omit it to detect installed agents.
+Prefer pip? Use `python -m pip install --upgrade selvedge` in a virtual environment.
+The `selvedge-server` executable must be on your editor's PATH; launch the editor
+from that environment or use the executable's absolute path in its MCP config.
+
+Setup asks before changing files, backs up existing content, installs MCP and
+agent instructions, initializes the project, and offers a Git post-commit hook.
+For Codex it writes `.codex/config.toml` and `AGENTS.md`; Gemini CLI gets
+`.gemini/settings.json` and `GEMINI.md`; Copilot gets `.vscode/mcp.json` and
+`.github/copilot-instructions.md`. Custom Codex TOML entries require manual
+reconciliation, even with `--force`.
+
+Restart your agent in the project and approve Selvedge's tools if prompted.
+Codex must trust the project to load project-scoped configuration. Ask the agent:
+
+> Use Selvedge to record one approach we considered and rejected in this project.
+> Include why, and what would change our mind. Then look it up with prior_attempts.
+
+Start a new session and look up the same entity to verify that the decision carries
+forward. MCP access does not automatically capture every decision: the installed
+instructions guide the agent to use it. Session delivery and enforcement hooks
+are currently Claude Code integrations.
 
 For CI bootstrap or `devcontainer.json` `postCreateCommand`:
 ```bash
@@ -811,7 +766,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.10   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.14   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only
@@ -828,6 +783,8 @@ git history (`fetch-depth: 0`). Inputs: `since`, `window`, `limit`,
 ---
 
 ## Contributing
+
+Read the [feedback and review process](docs/community-feedback.md) for reporting problems, evaluating feature requests and following up on discussions.
 
 ```bash
 git clone https://github.com/masondelan/selvedge

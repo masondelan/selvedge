@@ -116,6 +116,8 @@ already paid to learn.
   after a response-shape change is obvious.
 - `prior_attempts` is **pull-only** in v0.3.7 — the agent chose to call it. The
   push-model variant (auto-warn on `log_change`) is deferred; see the roadmap.
-- The `outcome` is inferred from add→remove proximity in v0.3.7. Explicit
-  `reject` / `revert` change types (v0.3.11) will upgrade the high-confidence
-  tier without changing this transcript's shape.
+- The `outcome` here is inferred from add→remove proximity (the v0.3.7
+  heuristic), which is still what an implicit removal like this one gets.
+  Since v0.3.11, explicit `reject` / `revert` change types report
+  `confidence: "exact"` instead — stated outcome, not inference — without
+  changing this transcript's shape.

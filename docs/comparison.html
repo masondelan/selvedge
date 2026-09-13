@@ -179,7 +179,7 @@
             <td>Git AI</td>
             <td>Attribution metadata</td>
             <td>Line</td>
-            <td>Git hook + Agent Trace alliance</td>
+            <td>Agent-invoked checkpoint → Git notes (own Git AI standard)</td>
             <td>None</td>
             <td>None</td>
             <td>Git notes</td>
@@ -270,18 +270,19 @@
 
     <h2 class="h-section text-2xl mt-14 mb-4">Selvedge ↔ Agent Trace</h2>
     <p class="text-inkwell max-w-prose mb-4" style="font-size:16px;line-height:1.6;">
-      <a class="linky" href="https://github.com/cursor/agent-trace">Agent Trace</a>
-      (Cursor + Cognition AI, RFC Jan 2026, backed by Cloudflare, Vercel,
-      Google Jules, Amp, OpenCode, and git-ai) is an emerging <em>open
-      standard</em> for AI code attribution traces. Selvedge isn't a
-      competitor to it — it's a compatible producer. Agent Trace is the wire
-      format. Selvedge is the live capture + query layer that emits it.
+      <a class="linky" href="https://agent-trace.dev/">Agent Trace</a>
+      (Cursor, RFC Jan 2026) is an open wire format for AI code-attribution
+      traces. Its original GitHub home went 404 in August 2026 and the
+      multi-vendor momentum behind it has faded, but the spec and schema still
+      resolve at agent-trace.dev, frozen at v0.1.0. Selvedge can emit and read
+      that format — a portable interchange shape, not a live standard it tracks.
     </p>
     <p class="text-inkwell max-w-prose mb-10" style="font-size:16px;line-height:1.6;">
-      The design for <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">selvedge export --format agent-trace</code>
-      is published at
-      <a class="linky" href="https://github.com/masondelan/selvedge/blob/main/docs/agent-trace-interop.md">docs/agent-trace-interop.md</a>
-      and lands in v0.4.0.
+      Since v0.3.9, <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">selvedge export --format agent-trace</code>
+      emits Agent Trace v0.1.0 records and <code class="font-mono text-sm bg-ecruDeep px-1.5 py-0.5">selvedge import --format agent-trace</code>
+      reads them back. The mapping is documented at
+      <a class="linky" href="https://github.com/masondelan/selvedge/blob/main/docs/agent-trace-interop.md">docs/agent-trace-interop.md</a>;
+      Selvedge vendors the schema and has no runtime dependency on the upstream project.
     </p>
 
     <h2 class="h-section text-2xl mt-14 mb-4">When you'd pick Selvedge</h2>

@@ -129,6 +129,35 @@ def test_change_event_to_dict_includes_active_memory_fields():
 
 
 # ---------------------------------------------------------------------------
+# ChangeType enum surface — pins the full value set so a member can't be
+# dropped (or renamed) without an intentional change + CHANGELOG note.
+# `reject` joined in v0.3.11 (Phase 2.17): abandoned alternatives are
+# first-class events.
+# ---------------------------------------------------------------------------
+
+
+def test_change_type_values_are_pinned():
+    assert selvedge.VALID_CHANGE_TYPES == frozenset({
+        "add", "remove", "modify", "rename", "retype", "create", "delete",
+        "index_add", "index_remove", "migrate", "supersede", "revert",
+        "reject",
+    })
+
+
+def test_reject_change_type_constructs_a_valid_event():
+    """The v0.3.11 member round-trips through the constructor's validation —
+    both as the enum and as its string value."""
+    assert selvedge.ChangeType.REJECT.value == "reject"
+    ev = selvedge.ChangeEvent(
+        entity_path="users.card_pan", change_type=selvedge.ChangeType.REJECT
+    )
+    assert ev.change_type == "reject"
+    assert selvedge.ChangeEvent(
+        entity_path="users.card_pan", change_type="reject"
+    ).change_type == "reject"
+
+
+# ---------------------------------------------------------------------------
 # Lazy resolution (PEP 562)
 #
 # The surface resolves through a module `__getattr__` so `import selvedge`

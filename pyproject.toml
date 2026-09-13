@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selvedge"
-version = "0.3.10"
+version = "0.3.14"
 description = "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -52,14 +52,14 @@ semantic = [
 ]
 dev = [
     "pytest>=9.1.1",
-    "pytest-asyncio>=0.21.0",
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
-    "ruff>=0.6.0",
+    "ruff>=0.16.2",
     "mypy>=2.3.0",
     "hatchling",
     # Dev-only (NOT a runtime dependency): gives scripts/schema_tax.py the real
     # tokenizer so the CI MCP-footprint gate matches the published figure.
-    "tiktoken>=0.7.0",
+    "tiktoken>=0.13.0",
 ]
 
 [project.scripts]

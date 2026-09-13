@@ -7,6 +7,8 @@ operates on *data correctness* rather than *ambient state*:
   - corruption (``PRAGMA integrity_check``)
   - schema migrations match what the running version declares
   - per-row invariants on ``events`` and ``tool_calls``
+  - the tamper-evidence hash chain recomputes end to end (v0.3.11 —
+    ``chain_intact`` / ``chain_coverage``, backed by :mod:`selvedge.chain`)
 
 Each check declares a tier in :data:`CHECK_TIERS`:
 
@@ -28,6 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from . import chain
 from .migrations import MIGRATIONS, get_applied_versions, latest_version
 from .models import VALID_CHANGE_TYPES
 
@@ -43,6 +46,14 @@ CHECK_TIERS: dict[str, str] = {
     "tool_calls_integrity": "must_fail",
     "orphan_changeset_id": "should_warn",
     "missing_git_commit": "should_warn",
+    # Tamper evidence (v0.3.11). The split is deliberate: nothing legitimate
+    # produces a chain_intact failure — every legitimate mutation either
+    # stays outside the protected core (git_commit) or appends a boundary
+    # record (migrate-paths amend, prune tombstone) — so must_fail is
+    # defensible. Unchained rows, by contrast, are EXPECTED on every
+    # upgraded install, so chain_coverage warns and never breaks CI.
+    "chain_intact": "must_fail",
+    "chain_coverage": "should_warn",
 }
 
 # How far back ``git_commit`` is allowed to be empty before we warn. Mirrors
@@ -249,6 +260,60 @@ def _check_missing_git_commit(conn: sqlite3.Connection) -> CheckResult:
     )
 
 
+def _check_chain_intact(conn: sqlite3.Connection) -> CheckResult:
+    """Recompute the tamper-evidence chain end to end (v0.3.11).
+
+    Fails when a chained row's recomputed ``core_hash`` differs from the
+    committed one, when ``prev_hash`` threading or ``seq`` contiguity breaks,
+    or when a chained events row is absent without tombstone accounting.
+    Streaming and paginated — see :func:`selvedge.chain.verify_chain`.
+    """
+    res = chain.verify_chain(conn)
+    if not res["table_present"] or res["records"] == 0:
+        return _ok(
+            "chain_intact",
+            "no chain records yet — chain not enabled on this store",
+        )
+    if res["intact"]:
+        detail = (
+            f"{res['records']} chain record(s) verified, "
+            f"{res['chained_events']} chained event(s)"
+        )
+        if res["absent_events"]:
+            detail += (
+                f"; {res['absent_events']} pruned row(s) accounted for by tombstones"
+            )
+        return _ok("chain_intact", detail)
+    shown = "; ".join(res["failures"])
+    extra = res["failure_count"] - len(res["failures"])
+    if extra > 0:
+        shown += f" (+{extra} more)"
+    return _fail("chain_intact", shown)
+
+
+def _check_chain_coverage(conn: sqlite3.Connection) -> CheckResult:
+    """Events rows with no chain record — unchained, not invalid (v0.3.11).
+
+    Expected on every install that predates the chain: pre-genesis rows and
+    rows written by a downgraded Selvedge have no chain record. Warn-only so
+    upgraders' CI doesn't break on day one.
+    """
+    cov = chain.chain_coverage(conn)
+    if cov["unchained"] == 0:
+        return _ok(
+            "chain_coverage",
+            f"all {cov['total_events']} event row(s) have chain records",
+        )
+    return _fail(
+        "chain_coverage",
+        f"{cov['unchained']} of {cov['total_events']} event row(s) have no chain "
+        f"record (genesis pre_chain_count={cov['pre_chain_count']}) — unchained, "
+        f"not invalid: written before the chain was enabled or by an older "
+        f"Selvedge. The chain makes no claim about pre-genesis rows, including "
+        f"whether they still exist.",
+    )
+
+
 def run_checks(db_path: Path) -> list[CheckResult]:
     """
     Run every verify check and return them in display order.
@@ -278,6 +343,8 @@ def run_checks(db_path: Path) -> list[CheckResult]:
             _check_tool_calls,
             _check_orphan_changesets,
             _check_missing_git_commit,
+            _check_chain_intact,
+            _check_chain_coverage,
         ):
             try:
                 results.append(check_fn(conn))

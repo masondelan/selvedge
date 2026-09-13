@@ -125,5 +125,79 @@ def test_neither_arg_returns_empty(storage):
     assert storage.get_prior_attempts() == []
 
 
+# ---------------------------------------------------------------------------
+# GitHub issue #30 — an id-less supersede must re-open at most the single
+# removal it auto-links to (the most recent one at its write time, matching
+# log_supersede's own auto-link rule), never every earlier revert on the path.
+# ---------------------------------------------------------------------------
+
+
+def test_issue_30_idless_supersede_reopens_only_the_latest_revert(storage):
+    # Decision A: tried and reverted.
+    _ev(storage, "users.auth_token", "add", "2026-01-01T00:00:00Z", "Attempt A.")
+    _ev(storage, "users.auth_token", "remove", "2026-01-02T00:00:00Z", "Reverted A.")
+    # Decision B: independent, also tried and reverted.
+    _ev(storage, "users.auth_token", "add", "2026-02-01T00:00:00Z", "Attempt B.")
+    _ev(storage, "users.auth_token", "remove", "2026-02-02T00:00:00Z", "Reverted B.")
+    # A hand-logged supersede with NO id link (log_event bypasses the
+    # auto-linking writer — the shape importers and pre-v0.3.9.1 rows have).
+    storage.log_event(
+        ChangeEvent(
+            entity_path="users.auth_token",
+            change_type="supersede",
+            timestamp="2026-03-01T00:00:00Z",
+            reasoning="Re-opening the auth token question.",
+        )
+    )
+
+    rows = storage.get_prior_attempts(entity_path="users.auth_token")
+    by_reason = {r["reasoning"]: r for r in rows if r["change_type"] == "add"}
+    # Only B — the removal the supersede would have auto-linked — re-opens.
+    assert by_reason["Attempt B."]["outcome"] == "reopened"
+    # A's revert still stands: the whole point of the fix.
+    assert by_reason["Attempt A."]["outcome"] == "reverted"
+    assert by_reason["Attempt A."]["superseded_by"] == ""
+
+
+def test_issue_30_explicit_link_still_reopens_exactly_its_removal(storage):
+    """The explicit-id path was already correct — pin it alongside the fix."""
+    _ev(storage, "users.auth_token", "add", "2026-01-01T00:00:00Z", "Attempt A.")
+    _ev(storage, "users.auth_token", "remove", "2026-01-02T00:00:00Z", "Reverted A.")
+    _ev(storage, "users.auth_token", "add", "2026-02-01T00:00:00Z", "Attempt B.")
+    _ev(storage, "users.auth_token", "remove", "2026-02-02T00:00:00Z", "Reverted B.")
+    reverted_a = next(
+        r
+        for r in storage.get_entity_history("users.auth_token")
+        if r["reasoning"] == "Reverted A."
+    )
+    storage.log_supersede(
+        "users.auth_token",
+        supersedes=reverted_a["id"],
+        reasoning="Re-opening A specifically.",
+    )
+    rows = storage.get_prior_attempts(entity_path="users.auth_token")
+    by_reason = {r["reasoning"]: r for r in rows if r["change_type"] == "add"}
+    assert by_reason["Attempt A."]["outcome"] == "reopened"
+    assert by_reason["Attempt B."]["outcome"] == "reverted"
+
+
+def test_idless_supersede_before_any_removal_reopens_nothing(storage):
+    """A dangling id-less supersede (nothing precedes it) flips nothing."""
+    storage.log_event(
+        ChangeEvent(
+            entity_path="users.token",
+            change_type="supersede",
+            timestamp="2026-01-01T00:00:00Z",
+            reasoning="Dangling re-open marker.",
+        )
+    )
+    _ev(storage, "users.token", "add", "2026-02-01T00:00:00Z", "Attempt.")
+    _ev(storage, "users.token", "remove", "2026-02-02T00:00:00Z", "Reverted.")
+    rows = storage.get_prior_attempts(entity_path="users.token")
+    attempt = next(r for r in rows if r["change_type"] == "add")
+    assert attempt["outcome"] == "reverted"
+    assert attempt["superseded_by"] == ""
+
+
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])

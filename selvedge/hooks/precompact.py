@@ -39,34 +39,64 @@ DISABLE_ENV = "SELVEDGE_HOOK_DISABLE"
 _MAX_ENTITIES = 8
 
 
-def build_reminder(entities: list[str], logged_count: int) -> str:
+def build_reminder(
+    entities: list[str], logged_count: int, truncated: list[str] | None = None
+) -> str:
     """Render the reminder, or ``""`` when there is nothing to say.
 
     ``entities`` are watched entities this session touched that have no event
     in the store. ``logged_count`` is how many events the session did log —
     used only to make the message accurate about what is already captured.
+    ``truncated`` are entities whose NEWEST session event carries a v0.3.10
+    ``…[truncated NNKB]`` marker: the log exists, but the clipped text lives
+    only in the context that is about to be compacted. Named on their own
+    line — "log was cut" is a different failure from "no log at all", and
+    the fix (re-log a concise version) is different too. Once that concise
+    re-log lands, the entity drops off this list on the next fire — the same
+    goes-quiet contract as the unlogged list, so a compliant agent is never
+    told to re-log the same entity twice.
+
+    Deterministic: same inputs, same string. Two consecutive fires with an
+    unchanged store therefore emit byte-identical reminders — pinned by
+    ``test_repeat_fire_is_byte_identical_until_the_store_changes``.
     """
-    if not entities:
+    truncated = truncated or []
+    if not entities and not truncated:
         return ""
 
-    shown = entities[:_MAX_ENTITIES]
-    more = len(entities) - len(shown)
     lines = [
         "Selvedge: context is about to be compacted, which destroys the "
         "reasoning behind this session's changes.",
-        "",
-        "These watched entities were edited this session but have no "
-        "log_change recorded:",
     ]
-    lines += [f"  - {e}" for e in shown]
-    if more:
-        lines.append(f"  (+{more} more)")
-    lines += [
-        "",
-        "Call log_change for each one now, with the constraint or bug that "
-        "prompted the change — not a description of the diff. After "
-        "compaction that context is gone.",
-    ]
+    if entities:
+        shown = entities[:_MAX_ENTITIES]
+        more = len(entities) - len(shown)
+        lines += [
+            "",
+            "These watched entities were edited this session but have no "
+            "log_change recorded:",
+        ]
+        lines += [f"  - {e}" for e in shown]
+        if more:
+            lines.append(f"  (+{more} more)")
+        lines += [
+            "",
+            "Call log_change for each one now, with the constraint or bug that "
+            "prompted the change — not a description of the diff. After "
+            "compaction that context is gone.",
+        ]
+    if truncated:
+        shown_t = truncated[:_MAX_ENTITIES]
+        more_t = len(truncated) - len(shown_t)
+        listed = ", ".join(shown_t) + (f" (+{more_t} more)" if more_t else "")
+        if not entities:
+            lines.append("")
+        lines.append(
+            f"Log exists but was truncated for: {listed} — the stored event "
+            "carries a …[truncated NNKB] marker, so the clipped reasoning "
+            "survives only in this session's context. Re-log a concise "
+            "version now if the cut part matters."
+        )
     if logged_count:
         lines.append(f"({logged_count} change(s) from this session are already logged.)")
     return "\n".join(lines)
@@ -101,7 +131,8 @@ def evaluate(payload: dict) -> str:
     storage = SelvedgeStorage(db_path)
     logged = storage.get_session_logged_paths(session_id)
     unlogged = [e for e in touched if e not in logged]
-    return build_reminder(unlogged, len(logged))
+    truncated = sorted(storage.get_session_truncated_paths(session_id))
+    return build_reminder(unlogged, len(logged), truncated=truncated)
 
 
 def run(argv: list[str] | None = None, stdin: str | None = None) -> int:

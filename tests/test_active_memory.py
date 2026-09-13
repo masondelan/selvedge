@@ -343,3 +343,130 @@ def test_nudge_silent_for_non_architectural_change_type():
     # remove/delete/rename aren't "decisions worth a revisit date."
     assert check_revisit_nudge("remove", "table", "") == []
     assert check_revisit_nudge("delete", "schema", "") == []
+
+
+# ---------------------------------------------------------------------------
+# Active memory v2 (v0.3.11, Phase 2.17): reject/revert round-trip + the
+# prior_attempts outcome-classifier upgrade. Abandoned alternatives are
+# first-class events: an explicit reject/revert is the high-confidence
+# ("exact") tier; the v0.3.7 proximity window is only a tiebreaker.
+# ---------------------------------------------------------------------------
+
+
+def _log(storage, path, change_type, ts, reasoning="", **kwargs):
+    ev = ChangeEvent(
+        entity_path=path, change_type=change_type, timestamp=ts,
+        reasoning=reasoning, **kwargs,
+    )
+    storage.log_event(ev)
+    return ev
+
+
+def test_standalone_reject_round_trips_as_exact_rejected(storage):
+    """'We considered this and decided against it' — nothing was ever
+    written, and the rejection itself is the prior_attempts record."""
+    _log(
+        storage, "users.card_pan", "reject", "2026-01-01T00:00:00Z",
+        "Rejected storing raw PANs — went with provider tokens instead.",
+    )
+    rows = storage.get_prior_attempts(entity_path="users.card_pan")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["change_type"] == "reject"
+    assert r["outcome"] == "rejected"
+    assert r["confidence"] == "exact"
+    assert r["outcome_reasoning"].startswith("Rejected storing raw PANs")
+    assert r["current_status"] == "reverted"  # standing verdict is negative
+
+
+def test_reject_clears_the_default_confidence_floor(storage):
+    """The exact tier passes min_confidence='proximity_high' (the default) —
+    an explicit verdict is never filtered out as low-signal."""
+    _log(storage, "x.y", "reject", "2026-01-01T00:00:00Z", "Decided against it.")
+    assert storage.get_prior_attempts(entity_path="x.y") != []
+
+
+def test_explicit_revert_is_exact_even_outside_the_window(storage):
+    """A revert 60 days after the attempt: the old classifier called this
+    proximity_low and the default floor hid it. Explicit verdicts don't
+    depend on the window at all."""
+    _log(storage, "api/v1/beta", "add", "2026-01-01T00:00:00Z", "Shipped beta route.")
+    _log(
+        storage, "api/v1/beta", "revert", "2026-03-01T00:00:00Z",
+        "Rolled back: beta route leaked internal ids.",
+    )
+    rows = storage.get_prior_attempts(entity_path="api/v1/beta")
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "reverted"
+    assert rows[0]["confidence"] == "exact"
+    assert rows[0]["outcome_reasoning"].startswith("Rolled back")
+
+
+def test_attempt_closed_by_reject_is_exact(storage):
+    _log(storage, "a.b", "add", "2026-01-01T00:00:00Z", "Tried it.")
+    _log(storage, "a.b", "reject", "2026-04-01T00:00:00Z", "Decided against after all.")
+    rows = storage.get_prior_attempts(entity_path="a.b")
+    closed = next(r for r in rows if r["change_type"] == "add")
+    assert closed["outcome"] == "reverted"
+    assert closed["confidence"] == "exact"
+    # The reject was consumed as the closing — it does not ALSO surface as
+    # its own standalone row (no double-counting of one verdict).
+    assert [r["change_type"] for r in rows] == ["add"]
+
+
+def test_proximity_heuristic_still_ties_break_implicit_removals(storage):
+    """The v0.3.7 window still classifies plain removes — tiebreaker only,
+    unchanged for the implicit types."""
+    _log(storage, "p.q", "add", "2026-01-01T00:00:00Z", "Tried.")
+    _log(storage, "p.q", "remove", "2026-03-01T00:00:00Z", "Dropped much later.")
+    tail = storage.get_prior_attempts(
+        entity_path="p.q", min_confidence="proximity_low"
+    )
+    assert tail[0]["confidence"] == "proximity_low"
+    assert storage.get_prior_attempts(entity_path="p.q") == []
+
+
+def test_supersede_reopens_a_standalone_rejection(storage):
+    """A rejection is not a permanent ban either — the trail reads
+    considered → rejected → re-opened."""
+    _log(
+        storage, "users.card_pan", "reject", "2026-01-01T00:00:00Z",
+        "Rejected: PANs in our DB put us in PCI scope.",
+    )
+    superseding = storage.log_supersede(
+        "users.card_pan", reasoning="Provider now vaults PANs; constraint gone."
+    )
+    rows = storage.get_prior_attempts(entity_path="users.card_pan")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["outcome"] == "reopened"
+    assert r["superseded_by"] == superseding.id
+    assert "constraint gone" in r["supersede_reasoning"]
+    assert r["current_status"] == "reopened"
+
+
+def test_reject_round_trips_through_every_read_surface(storage):
+    """blame / diff / decision_status agree on the rejection's verdict."""
+    ev = _log(
+        storage, "deps/leftpad", "reject", "2026-01-01T00:00:00Z",
+        "Rejected the dependency — wrote the two-line helper instead.",
+    )
+    blame = storage.get_blame("deps/leftpad")
+    assert blame is not None and blame["id"] == ev.id
+    assert blame["change_type"] == "reject"
+    assert storage.get_entity_history("deps/leftpad")[0]["change_type"] == "reject"
+    status = storage.get_decision_status("deps/leftpad")
+    assert status["status"] == "reverted"  # negative verdict stands
+    assert status["trail"][0]["phase"] == "reverted"
+
+
+def test_rejected_path_appears_in_reverted_entities_digest_feed(storage):
+    """The digest's dead-path list includes rejections — a path decided
+    against is exactly what the next session must not re-derive."""
+    _log(
+        storage, "users.card_pan", "reject", "2026-01-01T00:00:00Z",
+        "Rejected raw PAN storage.",
+    )
+    assert [r["entity_path"] for r in storage.get_reverted_entities()] == [
+        "users.card_pan"
+    ]

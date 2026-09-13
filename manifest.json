@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "selvedge",
   "display_name": "Selvedge",
-  "version": "0.3.10",
+  "version": "0.3.14",
   "description": "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected. A local MCP server: agents call `prior_attempts` before editing an entity — \"was this tried here before, and how did it turn out?\" — and the trail reads tried → reverted → re-opened, because a reverted decision is not a permanent ban. Entity-level rather than line-level: DB columns, functions, env vars, dependencies, API routes. An append-only, queryable audit trail — a git blame for decisions. Local SQLite, and no LLM anywhere in the storage or retrieval path, so the same query returns the same answer in two years.",
   "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning — the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code — your data stays yours.",
   "author": {
@@ -54,7 +54,7 @@
     {
       "name": "log_change",
       "title": "Log a code change",
-      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), or the entity_path doesn't match the\nusual shape for its entity_type, the result includes a `warnings`\narray — the event is still stored.\n\nRenames: pass the new path in `entity_path`, set `change_type=\"rename\"`,\nand pass the old path in `rename_from`. Selvedge then writes two events —\na `rename` on the old path and a `create` on the new path with\n`metadata.renamed_from` set — so the entity's history follows it. Example:\n\n    log_change(\n        entity_path=\"src/auth/session.py::login\",   # new path\n        change_type=\"rename\",\n        rename_from=\"src/auth.py::login\",            # old path\n        entity_type=\"function\",\n        reasoning=\"Split auth.py into an auth/ package; login moved.\",\n    )\n\nOn validation failure (invalid change_type, missing entity_path, or\n`rename_from` set without change_type='rename') the result is\n`{\"status\": \"error\", \"error\": \"...\"}` with no event written.",
+      "description": "Record a change to a codebase entity.\n\nCall this immediately after making any meaningful change. The event is\nwritten to the local SQLite store and returned with its assigned id and\ntimestamp. If the reasoning fails the quality validator (empty, too\nshort, or a generic placeholder), or the entity_path doesn't match the\nusual shape for its entity_type, the result includes a `warnings`\narray — the event is still stored.\n\nRenames: pass the new path in `entity_path`, set `change_type=\"rename\"`,\nand pass the old path in `rename_from`. Selvedge then writes two events —\na `rename` on the old path and a `create` on the new path with\n`metadata.renamed_from` set — so the entity's history follows it. Example:\n\n    log_change(\n        entity_path=\"src/auth/session.py::login\",   # new path\n        change_type=\"rename\",\n        rename_from=\"src/auth.py::login\",            # old path\n        entity_type=\"function\",\n        reasoning=\"Split auth.py into an auth/ package; login moved.\",\n    )\n\nRejections: when you consider an approach and decide against it WITHOUT\nwriting the change, record the verdict with `change_type=\"reject\"` — the\nabandoned path is a first-class event, and the next agent's\n`prior_attempts` query finds it as a high-confidence (\"exact\") row\ninstead of re-deriving the dead end. Name what was rejected AND what was\nchosen instead, and record the condition that would invalidate the\nverdict. Example:\n\n    log_change(\n        entity_path=\"users.card_pan\",\n        change_type=\"reject\",\n        entity_type=\"column\",\n        reasoning=\"Rejected storing raw card PANs on the user row — \"\n                  \"went with provider tokens instead; PANs in our own \"\n                  \"DB put us in PCI scope.\",\n        stale_when=\"payment provider changed\",\n        expires_when=\"entity:deps/stripe:changes\",\n    )\n\nUse `change_type=\"revert\"` for the sibling case — the change WAS written\nand then rolled back (clearer than a plain remove).\n\nSuperseding a reverted decision: when a reverted change becomes correct\nagain (the constraint that killed it no longer holds), do NOT delete or\nedit history — log with `change_type=\"supersede\"` and the reason. The\nnew event links the prior revert (auto-resolved when `supersedes` is\nempty) and every read surface then reports the trail\ntried → reverted → re-opened. Never re-apply a reverted change without\nsuperseding it first.\n\nOn validation failure (invalid change_type, missing entity_path,\n`rename_from` set without change_type='rename', `supersedes` set without\nchange_type='supersede', a supersede with nothing to re-open, or an\n`expires_when` outside the closed grammar) the result is\n`{\"status\": \"error\", \"error\": \"...\"}` with no event written.",
       "inputSchema": {
         "properties": {
           "entity_path": {
@@ -63,7 +63,7 @@
             "type": "string"
           },
           "change_type": {
-            "description": "What kind of change. One of: add, remove, modify, rename, retype, create, delete, index_add, index_remove, migrate. Invalid values are rejected — pick the closest match.",
+            "description": "What kind of change. One of: add, remove, modify, rename, retype, create, delete, index_add, index_remove, migrate, revert (tried and rolled back), reject (considered and decided against, without writing the change), supersede (re-open a reverted decision). Invalid values are rejected — pick the closest match.",
             "title": "Change Type",
             "type": "string"
           },
@@ -121,6 +121,30 @@
             "title": "Revisit After",
             "type": "string"
           },
+          "expires_when": {
+            "default": "",
+            "description": "Optional machine-checkable expiry condition for this decision. Closed grammar, validated at write time: 'library:NAME>=VERSION' (revisit when the named dependency reaches a version, e.g. 'library:django>=5.0'), 'entity:PATH:changes' (revisit when that entity next changes, e.g. 'entity:users.email:changes'), 'date:ISO' (revisit on a date, e.g. 'date:2027-01-01'), or 'manual:LABEL' (opaque label for human review; never auto-fires). `stale_decisions` evaluates these from local state — no network, no LLM — and flags 'expired' with the pattern that fired. Values outside the grammar are rejected.",
+            "title": "Expires When",
+            "type": "string"
+          },
+          "constraint": {
+            "default": "",
+            "description": "Optional: the testable principle behind the decision, kept queryable (e.g. 'card data in our own DB = PCI scope').",
+            "title": "Constraint",
+            "type": "string"
+          },
+          "stale_when": {
+            "default": "",
+            "description": "Optional: what would invalidate this decision (e.g. 'payment provider changed'). stale_decisions matches it against later events and flags 'review suggested' — surfacing only.",
+            "title": "Stale When",
+            "type": "string"
+          },
+          "supersedes": {
+            "default": "",
+            "description": "Id of the prior event this change overrides; only valid with change_type='supersede'. Empty auto-links the entity's most recent removal event (remove/delete/index_remove/revert/reject) — so after a standalone rejection it re-opens the rejection. Append-only — the old verdict is never edited, just derived as superseded.",
+            "title": "Supersedes",
+            "type": "string"
+          },
           "rename_from": {
             "default": "",
             "description": "The entity's previous path, when this change is a rename. Set it together with change_type='rename' and put the NEW path in entity_path. Selvedge records the dual-event rename pattern: a 'rename' event on the old path and a 'create' event on the new path whose metadata.renamed_from points back to the old one, so blame/diff/prior_attempts on the new path still see the history. Leave empty for any non-rename change.",
@@ -159,6 +183,10 @@
             },
             "title": "Warnings",
             "type": "array"
+          },
+          "supersedes": {
+            "title": "Supersedes",
+            "type": "string"
           }
         },
         "required": [
@@ -166,7 +194,8 @@
           "timestamp",
           "status",
           "error",
-          "warnings"
+          "warnings",
+          "supersedes"
         ],
         "title": "LogChangeResult",
         "type": "object"
@@ -181,17 +210,18 @@
     {
       "name": "diff",
       "title": "Diff an entity's history",
-      "description": "Get change history for a codebase entity, newest first.\n\nSupports prefix matching — e.g. 'users' returns all events for the users\ntable and any users.* column.",
+      "description": "Get change history for a codebase entity, newest first.\n\nSupports prefix matching — e.g. 'users' returns all events for the users\ntable and any users.* column. Each event carries a derived\n`superseded_by` id (\"\" when nothing overrode it), so the\ntried → reverted → re-opened trail reads straight off the history.",
       "inputSchema": {
         "properties": {
           "entity_path": {
-            "description": "Entity path or path prefix. Prefix matching is supported: 'users' returns history for the users table AND all its columns ('users.email', 'users.created_at', etc.). Use a more specific path to narrow the result.",
+            "description": "Entity path, or a DOTTED prefix of one: 'users' also covers 'users.email'. Not a raw string prefix — 'src/' matches nothing, and 'src/auth.py' does not cover 'src/auth.py::login'.",
             "title": "Entity Path",
             "type": "string"
           },
           "limit": {
             "default": 20,
             "description": "Maximum number of events to return.",
+            "maximum": 1000,
             "minimum": 1,
             "title": "Limit",
             "type": "integer"
@@ -230,7 +260,7 @@
     {
       "name": "blame",
       "title": "Blame an entity",
-      "description": "Most recent change to an entity — what changed, when, who, why.\n\nLike `git blame` but for semantic entities (DB columns, functions, env\nvars, dependencies) and AI agents. If no history exists for the entity,\nreturns `{\"error\": \"...\"}` with protocol-level `isError: false`.",
+      "description": "Most recent change to an entity — what changed, when, who, why.\n\nLike `git blame` but for semantic entities (DB columns, functions, env\nvars, dependencies) and AI agents. Also carries the derived decision\nstate: `status` (`active` / `reverted` / `reopened`) and\n`superseded_by` (id of a later supersede overriding this change, or\n\"\"). If no history exists for the entity, returns `{\"error\": \"...\"}`\nwith protocol-level `isError: false`.",
       "inputSchema": {
         "properties": {
           "entity_path": {
@@ -308,6 +338,26 @@
             "title": "Expires When",
             "type": "string"
           },
+          "supersedes": {
+            "title": "Supersedes",
+            "type": "string"
+          },
+          "constraint": {
+            "title": "Constraint",
+            "type": "string"
+          },
+          "stale_when": {
+            "title": "Stale When",
+            "type": "string"
+          },
+          "superseded_by": {
+            "title": "Superseded By",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
           "error": {
             "title": "Error",
             "type": "string"
@@ -329,6 +379,11 @@
           "metadata",
           "revisit_after",
           "expires_when",
+          "supersedes",
+          "constraint",
+          "stale_when",
+          "superseded_by",
+          "status",
           "error"
         ],
         "title": "BlameResult",
@@ -355,7 +410,7 @@
           },
           "entity_path": {
             "default": "",
-            "description": "Filter to a specific entity or path prefix.",
+            "description": "Filter to an entity, or a DOTTED prefix of one ('users' also covers 'users.email'). Not a raw string prefix.",
             "title": "Entity Path",
             "type": "string"
           },
@@ -374,6 +429,7 @@
           "limit": {
             "default": 50,
             "description": "Maximum number of results.",
+            "maximum": 1000,
             "minimum": 1,
             "title": "Limit",
             "type": "integer"
@@ -462,6 +518,7 @@
           "limit": {
             "default": 20,
             "description": "Maximum number of results.",
+            "maximum": 1000,
             "minimum": 1,
             "title": "Limit",
             "type": "integer"
@@ -500,7 +557,7 @@
     {
       "name": "prior_attempts",
       "title": "Prior attempts on an entity",
-      "description": "Prior change attempts on an entity, each with an inferred outcome.\n\nCall this BEFORE editing an entity. If the same change was tried before\nand reverted, you get the prior `reasoning` and `change_type` plus an\ninferred `outcome` — so you can change your plan instead of repeating a\nrejected approach.\n\nEach result is a change event with three extra fields:\n\n  - `outcome`           — \"reverted\" (a later remove/delete on the same\n                          path) or \"active\" (no later removal seen).\n  - `confidence`        — \"proximity_high\" or \"proximity_low\".\n  - `outcome_reasoning` — the reverting event's reasoning (WHY it was\n                          rejected), or \"\" while still active.\n\nOutcome is inferred from add->remove proximity — v0.3.7 has no explicit\nreject/revert change types yet (those arrive in v0.3.11). Output is\ntemplated, deterministic, and makes no LLM call. This is a pull-only\ntool: it never writes and never pushes; you decide when to ask.\n\nConservative by design — `min_confidence` defaults to \"proximity_high\",\nso an empty list (nothing clearly tried-and-rejected) is the normal,\npreferred answer over a speculative false positive. Pass\n`min_confidence=\"proximity_low\"` to widen recall.",
+      "description": "Prior change attempts on an entity, each with an inferred outcome.\n\nCall this BEFORE editing an entity. If the same change was tried before\nand reverted, you get the prior `reasoning` and `change_type` plus an\ninferred `outcome` — so you can change your plan instead of repeating a\nrejected approach.\n\nEach result is a change event plus the trail fields: `outcome`\n(\"reverted\" — a later removal on the path; \"reopened\" — closed but a\nlater supersede re-opened it; \"rejected\" — a standalone `reject` event\nthat closed no earlier attempt, surfaced as its own row whose reasoning\nIS the record; \"active\"), `confidence` (\"exact\" — the attempt was closed\nby an explicit revert/reject, or the row is a standalone rejection;\n\"proximity_high\" / \"proximity_low\" — the add->remove window heuristic\nfor implicit removals), `outcome_reasoning` (WHY it was rejected),\n`superseded_by` + `supersede_reasoning` (the re-open, when present), and\n`current_status` — the entity's standing now. Treat \"reverted\" and\n\"rejected\" as \"don't repeat this without a supersede\"; \"reopened\" means\nthe old verdict no longer stands. Together they read: tried → reverted →\nre-opened. Templated and deterministic — no LLM call; pull-only.\n\nConservative by design — `min_confidence` defaults to \"proximity_high\",\nso an empty list (nothing clearly tried-and-rejected) is the normal,\npreferred answer over a speculative false positive; \"exact\" rows always\nclear that default floor. Pass `min_confidence=\"proximity_low\"` to widen\nrecall. Rows carry `match_type` (\"exact\" / \"substring\" / \"fuzzy\") and\n`similarity`.",
       "inputSchema": {
         "properties": {
           "entity_path": {
@@ -515,15 +572,22 @@
             "title": "Description",
             "type": "string"
           },
+          "fuzzy": {
+            "default": "",
+            "description": "Optional semantic query: also return attempts on entities whose prior reasoning is similar to this text — catches renames (payment_token vs card_token). Rows are labeled match_type='fuzzy' with a similarity score; without the selvedge[semantic] extra it falls back to substring matching and says so in a leading note row.",
+            "title": "Fuzzy",
+            "type": "string"
+          },
           "min_confidence": {
             "default": "proximity_high",
-            "description": "Confidence floor. 'proximity_high' (default) returns only attempts that were clearly tried and then reverted within the window — the high-signal 'rejected before' cases. Pass 'proximity_low' to also see the noisy tail (still-active changes and far-apart reverts).",
+            "description": "Confidence floor. 'proximity_high' (default) returns the high-signal rows: attempts closed by an explicit revert/reject (confidence 'exact' — always clears this floor, including standalone rejections) plus attempts reverted within the window. Pass 'proximity_low' to also see the noisy tail (still-active changes and far-apart reverts).",
             "title": "Min Confidence",
             "type": "string"
           },
           "window_minutes": {
             "default": 10080,
-            "description": "Proximity window in minutes for the add->remove revert heuristic. An attempt removed within this many minutes is 'proximity_high'; beyond it, 'proximity_low'. Default 10080 (7 days).",
+            "description": "Proximity window in minutes for the add->remove revert heuristic — the tiebreaker for IMPLICIT removal types only. An attempt removed within this many minutes is 'proximity_high'; beyond it, 'proximity_low'. Attempts closed by an explicit revert/reject are 'exact' regardless of the window. Default 10080 (7 days).",
+            "maximum": 10080,
             "minimum": 1,
             "title": "Window Minutes",
             "type": "integer"
@@ -531,6 +595,7 @@
           "limit": {
             "default": 20,
             "description": "Maximum number of results.",
+            "maximum": 1000,
             "minimum": 1,
             "title": "Limit",
             "type": "integer"
@@ -566,7 +631,7 @@
     {
       "name": "stale_decisions",
       "title": "Stale decisions due for revisit",
-      "description": "Decisions whose `revisit_after` has passed AND that are still in active use.\n\nThe date-based half of active memory (v0.3.8). Returns events with a\n`revisit_after` now in the past — but ONLY when the entity is still live, so\nan old-but-correct decision nobody touches never nags. The required\nactive-use signal is one of: the entity was queried (`blame` / `diff` /\n`prior_attempts`) at or after the decision, or its `changeset_id` saw later\nactivity. Pure age alone does NOT surface.\n\nEach result is the change event plus four fields: `revisit_due` (UTC ISO),\n`days_overdue` (int, 0 on the due day), `active_use_signals` (list), and\n`stale_reason` (a one-line summary). Most-overdue first; filter by\n`entity_path`, `project`, or `agent`. Date-based only — `expires_when`\nevaluation lands in v0.3.11. Templated and deterministic; no LLM call.",
+      "description": "Decisions due for a revisit — expired, past their date, or with a triggered stale condition.\n\nThree deterministic rules. Expiry-based (`flag=\"expired\"`): events whose\n`expires_when` condition fired, evaluated from local state only —\n`date:` against now, `entity:PATH:changes` against the event log,\n`library:NAME>=VERSION` against installed dist metadata; the pattern\nkind that fired is in `expired_pattern`. A `library:` condition whose\ndependency isn't locally observable surfaces as `flag=\"manual_review\"`\ninstead of a guess; `manual:LABEL` never auto-fires. Date-based\n(`flag=\"revisit_due\"`): events whose `revisit_after` has passed AND the\nentity is still live (queried via `blame`/`diff`/`prior_attempts` after\nthe decision, or its changeset saw later activity) — pure age alone\nnever surfaces. Condition-based (`flag=\"review_suggested\"`): events\nwhose `stale_when` text shares keywords with a LATER change event — the\nnamed invalidation evidence may have happened. Surfacing only: nothing\nis un-retired automatically; follow up with a `supersede` if the\ncondition really was triggered. A later `supersede` that re-opens the\ncandidate (explicit `supersedes` id, or the same id-less auto-link\n`prior_attempts` uses) drops it from this list; a same-path sibling\nthe supersede did not target still surfaces.\n\nEach result is the change event plus `flag`, `revisit_due`,\n`days_overdue`, `active_use_signals`, `matched_terms`,\n`matched_event_id`, `expires_status`, `expired_pattern`,\n`expires_detail`, and a one-line `stale_reason`. Date-due rows first,\nmost-overdue leading; filter by `entity_path`, `project`, or `agent`.\nTemplated and deterministic; no LLM call, no network.",
       "inputSchema": {
         "properties": {
           "entity_path": {
@@ -590,6 +655,7 @@
           "limit": {
             "default": 20,
             "description": "Maximum number of results.",
+            "maximum": 1000,
             "minimum": 1,
             "title": "Limit",
             "type": "integer"

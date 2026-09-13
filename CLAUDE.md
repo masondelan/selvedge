@@ -12,6 +12,8 @@ For everything else:
 
 ## Sources of truth
 
+- **Community feedback and publishing review** → [`docs/community-feedback.md`](docs/community-feedback.md). Track substantive feedback through a reasoned decision and follow-up; check released behavior before proposing features or publishing claims.
+
 - **What's shipped** → `CHANGELOG.md`. The phase-plan checkboxes in `docs/architecture.md` can drift; trust the changelog when they disagree.
 - **Current MCP tool count and shape** → `selvedge/server.py`. Don't infer from `manifest.json` — the bundle can lag the live server.
 - **Version string** → `pyproject.toml` AND `selvedge/__init__.py` AND `manifest.json` must all match.
@@ -62,6 +64,7 @@ When the user asks for a version bump:
 3. Tag the commit; the PyPI publish workflow runs on tag push (OIDC trusted publisher is pinned to the workflow filename — don't rename that file without updating PyPI config first). After the PyPI job succeeds, the `publish-mcp-registry` job in the same workflow publishes/updates the listing on the official MCP Registry (`registry.modelcontextprotocol.io`) — no manual step.
 4. For Smithery: hand-zip the bundle (NOT `mcpb pack` — there's an MCPB-vs-Smithery schema mismatch around per-tool `inputSchema`), then `smithery mcp publish`. The npm shim (`selvedge-mcp`, in `npm/`) is a separate manual `npm publish` — only needed when its code or `pypiVersion` changes. It **was first published 2026-07-26 at npm 0.3.9**, so `npx selvedge-mcp` already works; the note that it was unpublished is retired. Its own `version` is an independent semver line and npm rejects republishing an existing one, so **bump `version` as well as `pypiVersion`** or the publish fails.
 5. Add a "What's new in vX.Y.Z" section to `README.md`. Cap at 2 versions — oldest drops off stack-style (so v0.3.2 ship → v0.3.0 drops).
+6. Follow [docs/releasing.md](docs/releasing.md) to verify all four registry channels. A successful PyPI/MCP Registry workflow does not complete npm or Smithery publication. Refresh the bundle's tool metadata from the live server and record actual registry receipts before marking a release complete.
 
 ---
 

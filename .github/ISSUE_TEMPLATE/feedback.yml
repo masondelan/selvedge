@@ -1,0 +1,23 @@
+name: Product feedback
+description: Report a workflow problem or suggest an improvement.
+title: "[Feedback] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What were you trying to do?
+      description: Describe the problem and expected behavior, before proposing a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened?
+      description: Include the Selvedge version, coding agent, minimal reproduction or discussion link, and any workaround. Remove secrets and private project content.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and possible improvement
+      description: How often does this happen, what does it prevent, and what would a useful outcome look like?

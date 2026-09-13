@@ -87,8 +87,12 @@ You have access to Selvedge (MCP server: `selvedge`) for change tracking.
 - A reverted decision is not a permanent ban. If the constraint that
   killed it no longer holds, re-open it explicitly with
   `change_type="supersede"` (never re-apply a reverted change without
-  superseding it first). Use `change_type="revert"` when you roll a
-  change back — clearer than a plain remove.
+  superseding it first).
+- Log abandoned paths too: use `change_type="reject"` when you considered
+  an approach and decided against it without writing it, and
+  `change_type="revert"` when you rolled a change back — ideally with
+  `stale_when` or `expires_when` naming the condition that would
+  invalidate the verdict, so `stale_decisions` can surface it later.
 - Then call `selvedge.diff` or `selvedge.blame` for the entity's broader
   history before conflicting with past decisions.
 
@@ -102,8 +106,8 @@ or you just want to keep context light, use the equivalents:
   for its broader history.
 - Log a change: `selvedge log <entity> <change_type> --reasoning "<why>"`
   (change_type: add, remove, modify, rename, retype, create, delete,
-  index_add, index_remove, migrate, revert, supersede; for a rename add
-  `--rename-from <old>`).
+  index_add, index_remove, migrate, revert, reject, supersede; for a
+  rename add `--rename-from <old>`).
 - Re-open a reverted decision: `selvedge supersede <entity> --reasoning "<why>"`.
 - Find things: `selvedge search "<query>"`, `selvedge history --since 7d`,
   `selvedge stale` (decisions now due for a revisit).

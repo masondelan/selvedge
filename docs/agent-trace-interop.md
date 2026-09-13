@@ -35,14 +35,21 @@ from archive.org.
 Treat agent-trace.dev as the surviving publication home; treat every
 `github.com/cursor/agent-trace` link in this repo as dead.
 
-Full forensics, the salvage options, and the decision:
-[`docs/outreach/agent-trace-listing.md`](outreach/agent-trace-listing.md).
-**Nothing in Selvedge breaks** — see the *Resilience* section below.
+The decision memo (2026-08-10) weighed three options — keep the exporter and
+re-document it against the frozen spec, republish our vendored schema as "the"
+public reference, or deprecate the surface — and chose the first: carrying
+cost is near zero, removal would break a shipped CLI surface for no gain, and
+republishing would assert stewardship we don't have over a schema upstream
+itself contradicts. The full forensics live in an internal note (not shipped
+with the repo). **Nothing in Selvedge breaks** — see the *Resilience* section
+below.
 
 ### Corrections to the text below
 
 The shipped mapping table and the v0.1.0 record shape in this doc are still
-correct and are deliberately left in place. These specific claims are not:
+correct. The prose errors listed here were **corrected inline on 2026-08-11**
+(as part of the keep + demote decision); this list is kept as the record of
+what was fixed and why:
 
 - **"drafted by Cognition AI"** (opening paragraph of *Why interop with Agent
   Trace at all*) — not supported. Cognition's own
@@ -71,21 +78,23 @@ correct and are deliberately left in place. These specific claims are not:
 - **"25 tests"** (*Implementation status*, item 3) —
   `tests/test_agent_trace_export.py` now defines 35 `test_` functions with no
   parametrisation, and `pytest tests/test_agent_trace_export.py` reports
-  `35 passed`. 25 was the v0.3.9 figure; `CHANGELOG.md:566`,
-  `docs/architecture.md:896`, and `docs/architecture.md:1939` repeat the stale
-  number.
+  `35 passed`. 25 was the v0.3.9 figure. Corrected to 35 here and in
+  `docs/architecture.md`; `CHANGELOG.md:566` is left at 25 as an append-only
+  record of the v0.3.9 release (accurate at ship time).
 - **The Cognition announcement URL** (*References*, at the end) —
   `cognition.ai/blog/agent-trace` now 301s to `cognition.com/blog/agent-trace`.
   Stale but functional.
 
 ## Why interop with Agent Trace at all
 
-[Agent Trace](https://github.com/cursor/agent-trace) is the open RFC released
-by Cursor on 2026-01-29, drafted by Cognition AI, and backed by Cloudflare,
-Vercel, Google Jules, Amp, OpenCode, and git-ai.  It defines a JSON-based
-"trace record" format for AI code attribution — file/line ranges tied to
-contributors (human, AI, mixed, unknown), with a content hash for tracking
-code movement.
+[Agent Trace](https://agent-trace.dev/) is the open RFC published by Cursor on
+2026-01-29, with design input from ten partners (Amp, Amplitude, Cline,
+Cloudflare, Cognition, git-ai, Jules, OpenCode, Tapes, Vercel — "partners for
+helping shape Agent Trace," per the upstream acknowledgements, not backers). It
+defines a JSON-based "trace record" format for AI code attribution — file/line
+ranges tied to contributors (human, AI, mixed, unknown), with a content hash
+for tracking code movement. Its GitHub home is gone (404 as of 2026-08-10); the
+spec now lives, frozen at v0.1.0, only at agent-trace.dev.
 
 It is **a wire format, not a tool.** The spec deliberately doesn't say where
 traces live (local files, git notes, a database, anything). The point is for
@@ -101,9 +110,13 @@ has.
 
 Concretely, supporting `selvedge export --format agent-trace` means:
 
-1. **Discoverability.** When the Agent Trace alliance publishes its list of
-   "compatible producers," Selvedge is on it. That's a category-level marketing
-   surface we don't otherwise have access to.
+1. ~~**Discoverability.** When the Agent Trace alliance publishes its list of
+   "compatible producers," Selvedge is on it.~~ **Void as of 2026-08-11:** no
+   "compatible producers" registry ever existed (verified against the archived
+   README and the live spec page — zero occurrences of *producer*, *registry*,
+   *adopter*, or *compatible*; full forensics in an internal note), and the
+   alliance has since scattered (upstream repo 404; git-ai left for its own
+   standard). This discoverability rationale no longer applies.
 2. **Compliance posture.** If the EU AI Act / California AB 2013 push
    companies toward Agent Trace as the de-facto attribution audit format,
    shipping a Selvedge → Agent Trace exporter turns Selvedge into an
@@ -118,7 +131,7 @@ is purely an export format.
 
 ## Mapping: ChangeEvent → Agent Trace
 
-Per the [v0.1.0 Agent Trace spec](https://github.com/cursor/agent-trace),
+Per the [v0.1.0 Agent Trace spec](https://agent-trace.dev/),
 a trace record is JSON with this shape (line ranges live *inside* a file's
 `conversations[]`, and vendor data lives in `metadata` under reverse-domain
 keys — there is no top-level `contributors[]` or `extensions`):
@@ -260,9 +273,10 @@ A new `tests/test_agent_trace_export.py`:
 1. Round-trip: log_event → export agent-trace → import agent-trace → assert
    semantic equality of the events that AT can express (entity_path stays
    if file-typed, otherwise lands in extensions).
-2. Spec validation: every emitted trace record passes the
-   [official validator](https://github.com/cursor/agent-trace/tree/main/validator)
-   when present, or a vendored copy of the JSON schema when not.
+2. Spec validation: every emitted trace record passes Selvedge's hand-rolled
+   `validate_trace_record` against a vendored copy of the v0.1.0 JSON schema.
+   (No "official validator" was ever published — see *Corrections* above; the
+   upstream repo described only a `reference/` directory.)
 3. Non-file entity preservation: a `users.email` ChangeEvent → AT export →
    AT import → ChangeEvent should equal the original by every field.
 4. Multi-event session: 5 events sharing a `session_id` collapse correctly
@@ -284,7 +298,7 @@ All of the originally-planned work landed together in v0.3.9:
    gated by tests).
 3. **Diff-to-line-range extractor** for unified diffs; vendored AT v0.1.0 JSON
    Schema at `selvedge/exporters/agent_trace_schema.json`;
-   `tests/test_agent_trace_export.py` (25 tests).
+   `tests/test_agent_trace_export.py` (35 tests).
 
 Pulled forward from the v0.4.0 plan; Postgres + HTTP remain the v0.4.0 markers.
 
@@ -437,8 +451,10 @@ call and no change has been made.**
   Keyword scan of the live page: *producer* 0 hits, *registry* 0, *adopter* 0,
   *compatible* 0. The PR target is 404 regardless. The **Discoverability**
   payoff claimed in *Why interop with Agent Trace at all* has no path to
-  realization and should not be cited in positioning. Decision memo:
-  [`docs/outreach/agent-trace-listing.md`](outreach/agent-trace-listing.md).
+  realization and should not be cited in positioning. The decision memo
+  (2026-08-10) closed this as "keep the exporter, frozen" — the format stays a
+  portable, documented export, not a live multi-vendor standard; the full
+  forensics live in an internal note.
 - ~~**`extensions.selvedge.*` namespace name.**  AT spec recommends reverse
   domain notation (`com.example.foo`). We could use `dev.selvedge.*` if
   we register the domain, otherwise `selvedge.*` is fine — multiple
@@ -468,6 +484,8 @@ call and no change has been made.**
 ---
 
 References:
-- [Agent Trace repo (cursor/agent-trace)](https://github.com/cursor/agent-trace)
-- [Cognition AI announcement post](https://cognition.ai/blog/agent-trace)
+- [Agent Trace spec (agent-trace.dev)](https://agent-trace.dev/) — the surviving
+  publication home; the original `github.com/cursor/agent-trace` repo is 404 as
+  of 2026-08-10
+- [Cognition announcement post](https://cognition.com/blog/agent-trace)
 - [InfoQ summary of the RFC](https://www.infoq.com/news/2026/02/agent-trace-cursor/)

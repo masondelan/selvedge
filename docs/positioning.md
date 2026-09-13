@@ -1,7 +1,9 @@
 # Positioning — canonical
 
-**Status:** current as of 2026-08-06 (OpenLore purge scoping amended against the
-2026-08-05 source-verified brief). Supersedes the differentiator framing in
+**Status:** current as of 2026-08-29 (prior-art fold-in — Zero-Mem and the
+pull-model-memory evidence, per `docs/prior-art.md`; OpenLore purge scoping
+amended 2026-08-06 against the 2026-08-05 source-verified brief). Supersedes
+the differentiator framing in
 `README.md` §"How Selvedge compares", `docs/comparison.html`, and
 `docs/index.html`. This file is the source of truth; if copy anywhere disagrees
 with this doc, the copy is wrong.
@@ -99,6 +101,71 @@ elsewhere:
 One genuine convergence: `verify_claim(decision-current)` is functionally
 `stale_decisions` — two products independently shipping decision-currency
 checking is validation for the staleness bet, not a loss.
+
+### Update 2026-08-29 — the literature arrives: Zero-Mem and the delivery evidence
+
+`docs/prior-art.md` (committed 2026-08-11) is the companion source of truth
+for what the literature says — five papers, every quoted string verified at
+source. This update folds its consequences into the positioning argument; if
+a post cites a paper in a way that file does not support, the post is wrong.
+
+**Determinism is scoped a second time, now from the literature.** The
+2026-08-06 update above scoped "zero-LLM determinism" against products
+(OpenLore). Zero-Mem (arXiv:2607.29377, submitted 2026-07-31) scopes it
+against research: a published memory pipeline in which "no step outside final
+question answering invokes an LLM or consumes LLM input or output tokens."
+That is the strongest external validation the determinism claim has — a
+deterministic, zero-generative-call memory architecture is now a published
+result, not a Selvedge idiosyncrasy — and it is also the final word on
+determinism-as-differentiator: shared ground in the unfunded product tier
+(OpenLore), shared ground in the literature (Zero-Mem). It builds nothing in
+our lane — long-context QA over conversation logs, no notion of a rejected
+path — so the separation stays where the OpenLore update put it: append-only
+testimony, rejected paths retained and queryable. One precision rule travels
+with any citation: Zero-Mem's "zero-token" means zero *generative* calls —
+encoders still run, and the paper says so plainly. The precise paraphrase
+("no generative model call in the memory path") also happens to describe
+Selvedge, so precision costs nothing and the loose version is falsifiable in
+one click.
+
+**The delivery-vs-storage evidence joins the argument — cited with its
+tension stated.** "Delivery, Not Storage" (arXiv:2607.20972) measured
+agent-voluntary memory use against a pre-seeded store at "0 memory operations
+in 114 turns," while deterministic injection delivered in every seeded run.
+That is the measured justification for the v0.3.10 SessionStart/PreCompact
+hooks: memory as a harness property, not an agent choice. But `log_change`
+is an agent-invoked tool — the paper's failure column contains our own write
+path — so citing it as unqualified support for Selvedge is a positioning
+error. The defensible framing: this is *why* capture and delivery are pushed
+at the agent by the harness (prompt block, hooks, capture-time nudges)
+rather than left to its discretion. And it is **one** paper, not two:
+nothing else in `docs/prior-art.md` measures pull-model memory going unused
+(PROJECTMEM is convergent design, not an adoption measurement). The "two
+2026 papers" phrasing in the v0.3.10 changelog and README overcounts; the
+changelog stands as an append-only record, the README line is a live
+correction to make (`docs/outreach/determinism-copy-changes.md` § R3).
+
+**Rejected paths now has prior art in the literature — cite it as prior art,
+never as evidence.** MERIT (arXiv:2608.05906) stores "observed unsuccessful
+directions" alongside verified corrections in text-to-SQL repair — and its
+own ablations are substantially negative: "negative memory contributes
+modestly," the typed memory is not reliably separated from untyped
+retrieval, and a Reflexion baseline beats it on one of its two benchmarks
+(at substantially higher inference cost). PROJECTMEM (arXiv:2606.12329) is
+the nearest architectural neighbor — local-first, append-only, typed events
+over MCP, with a deterministic pre-action gate that "warns an agent before
+it repeats a previously failed fix or edits a known-fragile file" — and it
+is evaluated only as a self-study by its own authors. Two consequences.
+First, "nobody else surfaces rejected paths" is a claim about the
+line-attribution *competitors* — where it remains true, and structural (see
+the next section) — not a claim to make about the literature. Second,
+Selvedge's version of the bet is a *different* claim from MERIT's:
+agent-stated rejections retained in the codebase they belong to, versus
+model-generated failure records on a QA-style benchmark. Different, and
+untested — say untested; Phase 2.24 exists to change that. PAST-Bench
+(arXiv:2608.04003) is the standing reason we ship demo transcripts instead
+of a benchmark table: a headline gain is not evidence the memory pathway
+caused it.
 
 ## Why "rejected paths" leads, not the blame metaphor
 
@@ -214,6 +281,30 @@ mode is nondeterministic labels."
   approved decisions only. The "no durable record at all" claim may be made
   **only** with that never-approved scoping attached; unscoped, keep the
   annotation-survives phrasing.
+- That "two 2026 papers" recorded pull-model memory tools going unused
+  (added 2026-08-29). Only one — "Delivery, Not Storage" (arXiv:2607.20972)
+  — measures that; PROJECTMEM is convergent design, not an adoption
+  measurement. Name the one paper or drop the count.
+- That research shows storing rejected paths / negative memory improves
+  agent performance (added 2026-08-29). MERIT's own ablations contradict
+  it. Approved form: "an idea the literature has begun testing, with mixed
+  results in text-to-SQL repair" — prior art on the idea, never evidence
+  the idea works. The same rule caps the Selvedge claim itself: retained
+  agent-stated rejections are a different, *untested* claim, and we say
+  untested until Phase 2.24 gives it a control.
+- That Zero-Mem — or Selvedge — involves "no neural computation," "no
+  model," or "no inference" (added 2026-08-29). Zero-Mem's encoders run
+  and its paper concedes so explicitly; Selvedge's opt-in fuzzy ranking is
+  a local embedding model. The accurate claim for both: no *generative*
+  model call in the memory path.
+- That PROJECTMEM is evidence that event-sourced agent memory works (added
+  2026-08-29). It is a self-study with no control condition, no baseline,
+  no external users. Cite it as independent arrival at the same
+  architecture — nothing more.
+- A benchmark number for Selvedge's memory effect (added 2026-08-29).
+  PAST-Bench's finding — agents with the same headline gain differ in
+  whether the intended pathway caused it — is the reason. Transcripts
+  until the bench exists.
 
 ---
 
@@ -283,3 +374,4 @@ canonical illustration and should be linked from every post.
 | `selvedge-site/src/content/docs/compare/*` | Same reorder; `selvedge-vs-agentdiff.md` needs the two-AgentDiffs disambiguation. |
 | Next release post | Open with the 0x457 quote; make rejected paths the spine. |
 | README comparison table | OpenLore row added 2026-08-06 (purge claim source-verified — see Update above). Keep the row's wording aligned with the "Never claim" precision rules. |
+| `README.md` lines ~135–138 ("two 2026 papers") | Name the one paper ("Delivery, Not Storage") or drop the count — see Update 2026-08-29 and `docs/outreach/determinism-copy-changes.md` § R3. The v0.3.10 changelog entry stays as written (append-only record). |

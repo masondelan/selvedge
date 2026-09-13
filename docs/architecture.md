@@ -849,8 +849,8 @@ github.com).
   require a second migration. Documented in v0.3.8's release notes.
 
 ### Phase 2.15 — Agent Trace export interop (v0.3.9)
-> Selvedge becomes a compatible **producer** of [Agent Trace](https://github.com/cursor/agent-trace),
-> the open RFC (Cursor + Cognition AI, Jan 2026) for AI code
+> Selvedge becomes a **producer** of [Agent Trace](https://agent-trace.dev/),
+> the open RFC (Cursor, Jan 2026) for AI code
 > attribution traces. **Pulled forward from Phase 3.2 (v0.4.2).** The
 > exporter was originally scheduled for the post-backend window, but the
 > standard gained backing (Cloudflare, Vercel, Google Jules, Amp,
@@ -893,10 +893,10 @@ github.com).
       `trace_record_to_event`, `extract_line_ranges`,
       `events_to_trace_records`, `validate_trace_record`) plus a vendored
       v0.1.0 JSON Schema (`selvedge/exporters/agent_trace_schema.json`).
-- [x] **Tests** — `test_agent_trace_export.py` (25): round-trip, non-file
+- [x] **Tests** — `test_agent_trace_export.py` (35): round-trip, non-file
       entity preservation, line-range extraction, collapse-by-session,
       reasoning-quality passthrough, schema validation, CLI integration.
-      Over the ≤20 Phase 3.2 budget by 5 — called out in the CHANGELOG.
+      Over the ≤20 Phase 3.2 budget by 15 — called out in the CHANGELOG.
 
 #### Risks acknowledged & mitigations
 
@@ -1162,7 +1162,7 @@ github.com).
 > promote-when conditions — coverage argument accepted, current
 > build shape refused on the zero-network and determinism lines.
 
-- [ ] **`expires_when` evaluation in `stale_decisions`** — column
+- [x] **`expires_when` evaluation in `stale_decisions`** — column
       exists since v0.3.8; v0.3.11 ships the evaluator. **Closed
       grammar in v1** (NOT free-form): `library:NAME>=VERSION`
       (revisit when a named dependency hits a version),
@@ -1174,7 +1174,7 @@ github.com).
       deliberately, versioned in this doc. Patterns chosen because
       they can be evaluated from local state only — no network, no
       LLM.
-- [ ] **New `change_type` values: `reject` and `revert`** — added
+- [x] **New `change_type` values: `reject` and `revert`** — added
       to the `ChangeType` enum. *(Update: `revert` shipped early in
       v0.3.9.1 — the git-history importer needed it; see CHANGELOG.
       `reject` remains this phase's item, alongside `supersede`
@@ -1190,17 +1190,17 @@ github.com).
       reasoning-quality validator gets a `reject`-specific rule
       that encourages reasoning to name *what was rejected* and
       *what was chosen instead*.
-- [ ] **`prior_attempts` outcome-classifier upgrade** — proximity
+- [x] **`prior_attempts` outcome-classifier upgrade** — proximity
       heuristic from v0.3.7 becomes a tiebreaker; explicit
       `reject`/`revert` events become the high-confidence tier
       directly. No API change for callers; existing
       `confidence: proximity_high` results now sometimes come back
       as `confidence: exact` instead.
-- [ ] **`tests/test_prompt.py` update** — `PROMPT_BLOCK` change for
+- [x] **`tests/test_prompt.py` update** — `PROMPT_BLOCK` change for
       `reject`/`revert` adoption ships in this PR. The sentinel-
       bracketed `--install` path must continue to work idempotently
       across the new content.
-- [ ] **PreCompact invariants** *(release-thread feedback: Zira;
+- [x] **PreCompact invariants** *(release-thread feedback: Zira;
       serves **Robust** — the handoff between sessions is exactly
       the "trusting captured intent six months later" surface)* —
       two contracts the current behavior implies but nothing
@@ -1215,7 +1215,7 @@ github.com).
       (`…[truncated NNKB]`) make the truncated case detectable, so
       name it instead of lumping it with the unlogged case. Zero
       new surface: tests plus one reminder line.
-- [ ] **SessionStart digest regression fixture** *(release-thread
+- [x] **SessionStart digest regression fixture** *(release-thread
       feedback: Zira; serves **Robust** — failure modes observable,
       determinism asserted rather than assumed)* — seed a store
       with a reverted decision, render the digest, and assert: the
@@ -1228,7 +1228,7 @@ github.com).
       change the agent's path) is deliberately deferred to Phase
       2.24's delivery-mode arms, where it gets a control — model
       behavior does not belong in this suite.
-- [ ] **`stale_when` capture nudge** *(release-thread feedback:
+- [x] **`stale_when` capture nudge** *(release-thread feedback:
       Skillselion — "the reason a decision was made is also the
       condition under which it should die"; serves **Robust** — a
       rejection stored without its invalidating condition is data
@@ -1244,7 +1244,7 @@ github.com).
       rather than a bare *reverted* — presentation only; the
       verdict itself never mutates, append-only stays append-only,
       a human (or agent) still closes the loop with `supersede`.
-- [ ] **Digest selection order as documented contract** *(release-
+- [x] **Digest selection order as documented contract** *(release-
       thread feedback: Rulestack; serves **Robust** — predictable,
       observable behavior under growth)* — the digest is bounded by
       construction (5/section + `digest_max_bytes`), so store
@@ -1258,7 +1258,7 @@ github.com).
       measure whether ranking moves failure-repeat rate at all
       before any ranking design is entertained. No semantic or
       prompt-conditioned ranking while the measurement is absent.
-- [ ] **Tests** — `test_expires_when_grammar.py` covering each
+- [x] **Tests** — `test_expires_when_grammar.py` covering each
       recognized pattern + a rejection case per malformed shape
       (~8), `test_active_memory.py` extension for `reject`/`revert`
       round-trip + classifier upgrade (~10), `test_prompt.py`
@@ -1268,6 +1268,26 @@ github.com).
       seeded fixture + supersede-boundary (~5), validator nudge
       (~3). Soft budget: ≤40 new tests (raised from ≤25 to absorb
       the release-thread cluster).
+
+> **Pulled forward into this phase (noted 2026-08-29).** The
+> tamper-evidence hash chain — design (d) of
+> `docs/design/tamper-evidence-proposal.md`: a SHA-256 chain over
+> an asymmetric 17-field cut of the events columns (everything
+> except late-bound `git_commit`), stored in a sidecar
+> `event_chain` table with `amend`/`tombstone` boundary records for
+> the two legitimate mutators — ships in **v0.3.11** rather than
+> waiting for 2.18's verifiable-claims theme, where its
+> `test_append_only.py` sibling still lives, or for an unscheduled
+> slot. With it come two new `selvedge verify` checks
+> (`chain_intact`, must-fail; `chain_coverage`, warn-only) and the
+> SEP-3004 §2.7-shaped attestation manifest. The chain brings ~33
+> tests of its own (`tests/test_tamper_evidence.py` — the review
+> pass added threading-attack, transactional-coupling, and
+> mixed-prune cases on top of the §10 plan's ~25), on top of a
+> phase already at its raised ceiling — so v0.3.11 **overruns the
+> ≤40 soft budget deliberately**, and the release notes call the
+> overrun out, per the budget discipline in `CLAUDE.md` and the
+> risk register below.
 
 #### Risks acknowledged & mitigations
 
@@ -1342,18 +1362,27 @@ github.com).
       literature is cost/latency at accuracy parity, so the
       economics page *is* the evidence surface.
 - [ ] **`dev.selvedge` namespace as a stable contract; upstream
-      proposal parked.** The v0.3.9 Agent Trace exporter already
-      emits reasoning + entity provenance under
+      dead, exporter kept frozen.** The v0.3.9 Agent Trace exporter
+      already emits reasoning + entity provenance under
       `metadata["dev.selvedge"]`. Document that namespace as a
       versioned public contract in `docs/agent-trace-interop.md`
       (field-by-field, semver'd) — that part stands regardless,
-      for consumers of our own exports. The upstream proposal on
-      `cursor/agent-trace` is **parked as of 2026-08-06**: the
-      spec repo is dormant (10 commits total, last 2026-02-06, no
-      tags or releases ever, still 0.1.0 RFC; producer issue #32
-      unanswered since June). Wake condition: the repo shows life
-      — a release, a tag, or sustained commits. The exporter
-      itself stays shipped; it's additive interop either way.
+      for consumers of our own exports. Upstream is now **gone**, not
+      merely parked: `github.com/cursor/agent-trace` returns HTTP 404
+      as of 2026-08-10 (deletion or made-private, not a rename; the
+      steward, Cursor/Anysphere, is mid-acquisition by SpaceX). The
+      spec + schema survive frozen at agent-trace.dev; the launch
+      coalition has scattered (git-ai left for its own Git AI Standard
+      v3.0.0). **Decision 2026-08-11 (keep + demote):** keep the
+      shipped exporter/importer frozen — dependency-free, offline, its
+      output stays valid — but stop marketing it as a live multi-vendor
+      standard; it is now just a portable, documented export format. No
+      wake condition remains; if an attribution standard reconsolidates
+      later it will be a different wire format, so retention is
+      optionality, not a hedge on this one. Removal was considered and
+      rejected: it would break a shipped CLI surface for ~zero runtime
+      saving. See `docs/agent-trace-interop.md` § Resilience and
+      `docs/outreach/agent-trace-listing.md`.
 - [ ] **`test_append_only.py` — the retention claim,
       machine-checkable.** Asserts no code path deletes `reject` /
       `revert` / superseded events except the destructive-gated
@@ -1363,6 +1392,17 @@ github.com).
       newcomer purges rejected decisions after sync — verified at
       source) is the moment it needs a test. Same theme as the
       no-network test: the positioning claim, backed by CI.
+      *(Update 2026-08-29: this item's tamper-evidence sibling
+      landed early — v0.3.11 ships the hash chain from
+      `docs/design/tamper-evidence-proposal.md` design (d), with
+      `chain_intact`/`chain_coverage` verify checks and
+      `tests/test_tamper_evidence.py`; see the pulled-forward note
+      under Phase 2.17. So the silent-deletion half of the
+      retention claim is already machine-checkable: a bare
+      `sqlite3` deletion of a chained row now fails verify. This
+      item's remaining scope is the code-path assertion — no
+      Selvedge path deletes `reject`/`revert`/superseded events
+      except the destructive-gated prune.)*
 
 ##### Git-import provenance + trust tiers
 > Follow-up to the v0.3.9.1 git-import feature, from design feedback on the
@@ -1936,7 +1976,7 @@ github.com).
       migration-imported events carry
       `metadata["dev.selvedge"].range_unknown: true` and an empty
       `files[]` rather than fabricating `[1, 1]` placeholders.
-- [x] **Tests** — `test_agent_trace_export.py` (25) shipped in v0.3.9.
+- [x] **Tests** — `test_agent_trace_export.py` (35) shipped in v0.3.9.
 
 #### Risks acknowledged & mitigations
 
@@ -1995,14 +2035,24 @@ and fed, one is a watch item, one is parked.
   least-defined priority, scoped verbatim to "audit trails,
   SSO-integrated authentication, gateway behavior, configuration
   portability," expected to ship as Extensions (reverse-DNS
-  namespaces) rather than core spec. **No working group exists for
-  it** — as of 2026-08-06 the project lists 8 WGs and 6 IGs, none
-  audit-related; the roadmap's "seeking enterprise infrastructure
-  leaders" line never became a formed group. Artifact until that
-  changes: an audit-trail extension sketch under the Extensions
-  framework, drawing on the Phase 2.18 provenance tiers, plus a
-  governance watch — participate if and when a group forms; don't
-  budget hours for a table that doesn't exist.
+  namespaces) rather than core spec. **No dedicated working group
+  exists for it** — the roadmap's "seeking enterprise
+  infrastructure leaders" line never became a formed WG. But the
+  earlier claim here that none of the project's groups is
+  audit-related was **wrong** (corrected 2026-08-29; caught by
+  `docs/design/tamper-evidence-proposal.md` §9): the **Security
+  Interest Group** exists, its charter contains the phrase
+  "tamper-evident," and its scope line reads "Auditability and
+  observability: requirements for tamper-evident records of what a
+  tool call did and under what authority, for compliance and
+  incident review" (`docs/community/interest-groups/security.mdx`).
+  Its Office Hours purpose list includes deployment reports, and
+  SEP-3004 does not currently appear on its Discussion Topics
+  table. Artifact: an audit-trail extension sketch under the
+  Extensions framework, drawing on the Phase 2.18 provenance
+  tiers — and the Security IG is the venue that exists today, so
+  the governance watch is for a *dedicated* enterprise-readiness
+  group forming, not for a table with no seats at all.
 - **Agent Trace — rationale-resolution namespace. Parked.** The
   spec (v0.1.0, RFC) defines where AI code came from and points at
   a `url` for the conversation, deliberately declining to define
@@ -2076,7 +2126,7 @@ release-scope restructure (2026-05-10) replaced 4 broad phases with
 | 2.14 | v0.3.8  | ≤ 25 new tests |
 | 2.15 | v0.3.9  | ≤ 20 new tests (Agent Trace export, pulled forward from 3.2; actual 25) |
 | 2.16 | v0.3.10 | ≤ 45 new tests (two-theme combine: config + delivery; overrun called out) |
-| 2.17 | v0.3.11 | ≤ 25 new tests |
+| 2.17 | v0.3.11 | ≤ 40 new tests (raised from ≤25 for the release-thread cluster; overrun by the pulled-forward tamper-evidence chain — called out in release notes) |
 | 2.18 | v0.3.12 | ≤ 35 new tests (raised to absorb the git-import cluster + context-cost CI) |
 | 2.19 | v0.3.13 | ≤ 30 new tests |
 | 2.20 | v0.3.14 | ≤ 25 new tests |

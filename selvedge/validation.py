@@ -170,6 +170,91 @@ def check_revisit_nudge(
     ]
 
 
+# ---------------------------------------------------------------------------
+# Reject-quality rule + invalidation-condition capture nudge (v0.3.11)
+#
+# Two more warn-never-reject nudges riding the same surfaces as the rules
+# above. Abandoned alternatives are first-class events in v0.3.11, and both
+# rules defend their value: a rejection that doesn't say what WAS chosen is
+# half a decision, and a reject/revert stored without its invalidating
+# condition is data that silently rots.
+# ---------------------------------------------------------------------------
+
+#: Phrases whose presence suggests the reasoning names the chosen alternative.
+#: Deterministic substring check — dumb on purpose, no LLM.
+REJECT_ALTERNATIVE_MARKERS: tuple[str, ...] = (
+    "instead",
+    "went with",
+    "chose",
+    "chosen",
+    "opted",
+    "in favor of",
+    "in favour of",
+    "rather than",
+    "picked",
+    "alternative",
+)
+
+#: change_types that record an abandoned path — the ones whose invalidating
+#: condition is worth capturing at log time.
+INVALIDATION_NUDGE_CHANGE_TYPES: frozenset[str] = frozenset({"reject", "revert"})
+
+
+def check_reject_reasoning(change_type: str, reasoning: str) -> list[str]:
+    """Nudge a ``reject`` event to name what was chosen instead (v0.3.11).
+
+    A rejection reads best when the reasoning names BOTH what was rejected
+    AND what was chosen instead — the future agent asking prior_attempts
+    needs the winning alternative, not just the losing one. Fires only on
+    ``change_type="reject"`` when none of the
+    :data:`REJECT_ALTERNATIVE_MARKERS` phrases appear in the reasoning.
+    Advisory only — the event is logged regardless, exactly like
+    :func:`check_reasoning_quality`. Empty reasoning is left to the
+    empty-reasoning warning; no double-fire.
+    """
+    if change_type != "reject":
+        return []
+    stripped = reasoning.strip()
+    if not stripped:
+        return []
+    lowered = stripped.lower()
+    if any(marker in lowered for marker in REJECT_ALTERNATIVE_MARKERS):
+        return []
+    return [
+        "this reject names what was rejected but maybe not what was chosen "
+        "instead — a rejection is most useful when the reasoning carries "
+        "both (e.g. 'Rejected storing raw card PANs — went with provider "
+        "tokens instead; PANs in our DB put us in PCI scope')."
+    ]
+
+
+def check_invalidation_capture_nudge(
+    change_type: str, stale_when: str, expires_when: str
+) -> list[str]:
+    """Nudge a ``reject``/``revert`` to record its invalidating condition.
+
+    The reason a decision was made is also the condition under which it
+    should die. Fires when an abandoned-path event
+    (:data:`INVALIDATION_NUDGE_CHANGE_TYPES`) carries neither ``stale_when``
+    nor ``expires_when`` — the two ways `selvedge stale` can surface the
+    verdict for review once the world changes. Warns, never rejects — same
+    posture as the secret-shape warnings. Empty list when the change type
+    isn't an abandoned path or either condition is already set.
+    """
+    if change_type not in INVALIDATION_NUDGE_CHANGE_TYPES:
+        return []
+    if stale_when.strip() or expires_when.strip():
+        return []
+    return [
+        f"consider recording the condition that would invalidate this "
+        f"{change_type}: set stale_when (a short phrase, e.g. 'payment "
+        "provider changed') or expires_when (machine-checkable, e.g. "
+        "'library:django>=5.0', 'entity:users.email:changes', "
+        "'date:2027-01-01', 'manual:security-review') so `selvedge stale` "
+        "can surface the decision when the world changes."
+    ]
+
+
 def check_entity_path_shape(entity_path: str, entity_type: str) -> list[str]:
     """Return soft warnings when ``entity_path`` doesn't fit ``entity_type``.
 

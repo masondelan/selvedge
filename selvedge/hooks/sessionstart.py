@@ -59,6 +59,30 @@ def build_digest(db_path: object, max_bytes: int) -> str:
          about to re-implement one of these is the expensive failure),
       3. the most recent changesets, for orientation.
 
+    **Selection order — a documented contract, not an accident.** Each
+    section is capped at ``_MAX_PER_SECTION`` (5), so store growth changes
+    *which* five surface, not *how many*:
+
+      1. Revisit rows come from ``get_stale_decisions``: date-due rows
+         first, **most overdue leading** (ascending due date), then
+         condition-only matches by decision time. Superseded candidates
+         are already excluded there (explicit id-link or the issue #30
+         auto-link), so a re-opened reject/revert does not reappear as a
+         live revisit nudge.
+      2. Reverted rows come from ``get_reverted_entities``: **most recent
+         revert first** (descending timestamp of the standing verdict).
+      3. Changesets: most recently active first.
+
+    That order is deliberately dumb — overdue-ness and recency, nothing
+    semantic, nothing prompt-conditioned. Pinned by
+    ``test_selection_order_*`` in ``test_hooks_sessionstart.py``. Any
+    smarter ranking waits on Phase 2.24's delivery-mode measurement.
+
+    Preserve expiry and manual-review context wherever a decision appears,
+    including the standing-rejection section. Match annotations by event id:
+    another decision on the same path cannot invalidate this verdict.
+    Presentation only; closing the loop takes an explicit ``supersede``.
+
     Deterministic: same store, same string. Nothing here is generated.
     """
     from ..storage import SelvedgeStorage
@@ -66,21 +90,30 @@ def build_digest(db_path: object, max_bytes: int) -> str:
     storage = SelvedgeStorage(db_path)  # type: ignore[arg-type]
     sections: list[str] = []
 
-    due = storage.get_stale_decisions(limit=_MAX_PER_SECTION)
+    # The storage query already evaluates all candidates before applying its
+    # limit. Keep their annotations for standing rows outside the first five,
+    # avoiding repeated per-entity queries and mismatched sibling verdicts.
+    review_rows = storage.get_stale_decisions(limit=storage.count())
+    review_by_id = {row["id"]: row for row in review_rows}
+    due = review_rows[:_MAX_PER_SECTION]
     if due:
         lines = ["Decisions due for a revisit:"]
         for row in due:
             entity = row["entity_path"]
             why = row["reasoning"] or "(no reasoning recorded)"
-            lines.append(f"  - {entity}: {why}")
+            lines.append(f"  - {entity} [{_review_note(row)}]: {why}")
         sections.append("\n".join(lines))
 
     reverted = storage.get_reverted_entities(limit=_MAX_PER_SECTION)
     if reverted:
-        lines = ["Tried before and REVERTED — check prior_attempts before touching:"]
+        lines = ["Recorded as REJECTED or REVERTED — check prior_attempts and review flags:"]
         for row in reverted:
             why = row["reasoning"] or "(no reasoning recorded)"
-            lines.append(f"  - {row['entity_path']}: {why}")
+            review = review_by_id.get(row["id"])
+            if review:
+                lines.append(f"  - {row['entity_path']} [{_review_note(review)}]: {why}")
+            else:
+                lines.append(f"  - {row['entity_path']}: {why}")
         sections.append("\n".join(lines))
 
     # `list_changesets` has no limit parameter — it is a grouped summary, and
@@ -99,6 +132,17 @@ def build_digest(db_path: object, max_bytes: int) -> str:
     )
     digest = header + "\n\n" + "\n\n".join(sections)
     return _cap(digest, max_bytes)
+
+
+def _review_note(row: dict) -> str:
+    """Explain the current review signal without changing the stored verdict."""
+    if row["expires_status"] == "expired":
+        return f"re-examine — expired: {row['expires_detail']}"
+    if row["expires_status"] == "manual_review":
+        return f"manual review — {row['expires_detail']}"
+    if "stale_when_match" in row["active_use_signals"]:
+        return "re-examine — a later change matched its stale_when condition"
+    return "revisit due"
 
 
 def _cap(text: str, max_bytes: int) -> str:

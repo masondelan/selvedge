@@ -777,6 +777,24 @@ def test_prior_attempts_cli_all_widens_recall(runner):
     assert data[0]["outcome"] == "active"
 
 
+def test_prior_attempts_cli_renders_standalone_rejection_as_rejected_not_tried(runner):
+    """A standalone reject's whole definition is "decided against WITHOUT
+    writing the change" — its reasoning must not print under 'tried:'."""
+    seed(
+        entity="users.card_pan", change_type="reject",
+        reasoning="Rejected storing raw PANs; chose tokenization — PCI scope.",
+    )
+
+    result = runner.invoke(cli, ["prior-attempts", "users.card_pan"])
+    assert result.exit_code == 0
+    assert "rejected" in result.output
+    assert "(exact)" in result.output
+    assert "rejected:" in result.output
+    assert "Rejected storing raw PANs" in result.output
+    # The exact misreading the reject type exists to prevent.
+    assert "tried:" not in result.output
+
+
 # ---------------------------------------------------------------------------
 # stale (dated decisions due for a revisit — v0.3.8)
 # ---------------------------------------------------------------------------
@@ -1018,3 +1036,88 @@ def test_log_supersede_keeps_diff_and_revisit_after(runner):
     assert payload["change_type"] == "supersede"
     assert payload["diff"] == "ALTER TABLE pay ADD COLUMN token TEXT;"
     assert payload["revisit_after"] == "180d"
+
+
+# ---------------------------------------------------------------------------
+# supersede — guided command gets --diff / --revisit-after parity with the
+# log command's supersede branch (#31)
+# ---------------------------------------------------------------------------
+
+
+def test_supersede_keeps_diff_and_revisit_after(runner):
+    seed(entity="pay.token", change_type="add")
+    seed(entity="pay.token", change_type="remove")
+
+    result = runner.invoke(cli, [
+        "supersede", "pay.token",
+        "--diff", "ALTER TABLE pay ADD COLUMN token TEXT;",
+        "--revisit-after", "180d",
+        "-r", "Provider vaults cards now.",
+    ])
+    assert result.exit_code == 0
+
+    blamed = runner.invoke(cli, ["blame", "pay.token", "--json"])
+    payload = json.loads(blamed.output)
+    assert payload["change_type"] == "supersede"
+    assert payload["diff"] == "ALTER TABLE pay ADD COLUMN token TEXT;"
+    assert payload["revisit_after"] == "180d"
+
+
+def test_supersede_short_diff_flag_and_json_output(runner):
+    seed(entity="pay.token", change_type="remove")
+
+    result = runner.invoke(cli, [
+        "supersede", "pay.token",
+        "-d", "re-apply: token column",
+        "--revisit-after", "2027-01-01",
+        "-r", "Provider vaults cards now.",
+        "--json",
+    ])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["change_type"] == "supersede"
+    assert payload["diff"] == "re-apply: token column"
+    # Absolute dates canonicalize to UTC, same normalization as `selvedge log`.
+    assert payload["revisit_after"].startswith("2027-01-01")
+
+
+def test_supersede_rejects_malformed_revisit_after(runner):
+    seed(entity="pay.token", change_type="remove")
+
+    result = runner.invoke(cli, [
+        "supersede", "pay.token",
+        "-r", "Provider vaults cards now.",
+        "--revisit-after", "not-a-date",
+    ])
+    assert result.exit_code == 2
+    assert "revisit_after" in result.output
+
+
+def test_supersede_keeps_expires_when(runner):
+    """#31 parity: the guided flow records the machine-checkable half of the
+    invalidation condition, same as `selvedge log X supersede --expires-when`."""
+    seed(entity="pay.token", change_type="remove")
+
+    result = runner.invoke(cli, [
+        "supersede", "pay.token",
+        "-r", "Provider vaults cards now.",
+        "--expires-when", "date:2027-01-01",
+        "--json",
+    ])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["change_type"] == "supersede"
+    # Validated + canonicalized by the same closed grammar as `selvedge log`.
+    assert payload["expires_when"].startswith("date:2027-01-01")
+
+
+def test_supersede_rejects_expires_when_outside_the_grammar(runner):
+    seed(entity="pay.token", change_type="remove")
+
+    result = runner.invoke(cli, [
+        "supersede", "pay.token",
+        "-r", "Provider vaults cards now.",
+        "--expires-when", "when django is new enough",
+    ])
+    assert result.exit_code == 2
+    assert "expires_when" in result.output

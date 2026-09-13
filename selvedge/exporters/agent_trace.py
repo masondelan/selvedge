@@ -1,11 +1,13 @@
 """Selvedge ↔ Agent Trace v0.1.0 interop.
 
-`Agent Trace <https://github.com/cursor/agent-trace>`_ is the open AI
-code-attribution wire format published by Cursor and Cognition AI. Selvedge is
-a *compatible producer*: it already captures everything Agent Trace records
-(file/line attribution tied to an AI contributor) plus reasoning and
-entity-level provenance, so it can emit Agent Trace records that other tools
-read.
+`Agent Trace <https://agent-trace.dev/>`_ is an open AI code-attribution wire
+format published by Cursor (RFC, Jan 2026). Its original GitHub home
+(``github.com/cursor/agent-trace``) went 404 as of 2026-08-10; the spec text and
+schema survive at agent-trace.dev, frozen at v0.1.0. Selvedge targets that
+frozen format: it captures everything an Agent Trace record needs (file/line
+attribution tied to an AI contributor) plus reasoning and entity-level
+provenance, so it can emit and read Agent Trace records without any runtime
+dependency on the upstream project.
 
 This module is a pure, deterministic, dependency-free converter — no LLM, no
 I/O. The CLI (``selvedge export --format agent-trace`` /

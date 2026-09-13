@@ -343,3 +343,128 @@ async def test_log_change_rename_dual_event_round_trip(server_params):
             )
             assert new["change_type"] == "create"
             assert new["metadata"]["renamed_from"] == "src/auth.py::login"
+
+
+# ---------------------------------------------------------------------------
+# SEL-001-WINDOW — prior_attempts.window_minutes must advertise and accept
+# the documented 7-day default (10080). The pagination `_MAX_LIMIT` (1000)
+# must not be reused as this field's ceiling: omitted binds 10080, but
+# FastMCP rejects an explicit 10080 (and 1001) when `le=1000`.
+# ---------------------------------------------------------------------------
+
+
+_WINDOW_ENTITY = "users.session_token"
+
+
+def _window_minutes_schema(tools) -> dict:
+    prior = next(t for t in tools.tools if t.name == "prior_attempts")
+    return prior.inputSchema["properties"]["window_minutes"]
+
+
+async def _call_prior_attempts(session, *, window_minutes=None, **extra):
+    arguments = {"entity_path": _WINDOW_ENTITY, **extra}
+    if window_minutes is not None:
+        arguments["window_minutes"] = window_minutes
+    return await session.call_tool("prior_attempts", arguments=arguments)
+
+
+@pytest.fixture
+def seven_day_window_params(tmp_path: Path) -> StdioServerParameters:
+    """Seed an implicit add→remove whose gap is >1000 minutes and <7 days."""
+    from selvedge.models import ChangeEvent
+    from selvedge.storage import SelvedgeStorage
+
+    db_path = tmp_path / "window.db"
+    storage = SelvedgeStorage(db_path)
+    storage.log_event(
+        ChangeEvent(
+            entity_path=_WINDOW_ENTITY,
+            change_type="add",
+            timestamp="2026-01-01T00:00:00Z",
+            reasoning="Tried a session-token column for cookie auth.",
+        )
+    )
+    storage.log_event(
+        ChangeEvent(
+            entity_path=_WINDOW_ENTITY,
+            change_type="remove",
+            timestamp="2026-01-02T00:00:00Z",
+            reasoning="Reverted: cookies now hold a signed JWT.",
+        )
+    )
+    return StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "selvedge.server"],
+        env={
+            **os.environ,
+            "SELVEDGE_DB": str(db_path),
+            "SELVEDGE_QUIET": "1",
+            "SELVEDGE_LOG_LEVEL": "ERROR",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_prior_attempts_window_minutes_schema_advertises_seven_day_default(
+    server_params,
+):
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            window = _window_minutes_schema(tools)
+            assert window["default"] == 10080
+            assert window["maximum"] == 10080
+            assert window["minimum"] == 1
+
+            # Pagination `limit` fields stay on the 1000 ceiling.
+            for tool in tools.tools:
+                limit = tool.inputSchema.get("properties", {}).get("limit")
+                if limit is not None:
+                    assert limit["maximum"] == 1000, (
+                        f"{tool.name}.limit maximum drifted to {limit['maximum']}"
+                    )
+
+
+@pytest.mark.asyncio
+async def test_prior_attempts_window_minutes_call_tool_bounds_and_seven_day_default(
+    seven_day_window_params,
+):
+    async with stdio_client(seven_day_window_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            omitted = await _call_prior_attempts(session)
+            explicit = await _call_prior_attempts(session, window_minutes=10080)
+            assert not omitted.isError
+            assert not explicit.isError
+            omitted_rows = _payload(omitted)
+            explicit_rows = _payload(explicit)
+            assert omitted_rows == explicit_rows
+            assert len(omitted_rows) == 1
+            assert omitted_rows[0]["outcome"] == "reverted"
+            assert omitted_rows[0]["confidence"] == "proximity_high"
+
+            # 1000 and 1001 must both clear call_tool validation (the old
+            # le=_MAX_LIMIT rejected 1001; 1000 was the broken ceiling).
+            accepted_1000 = await _call_prior_attempts(session, window_minutes=1000)
+            accepted_1001 = await _call_prior_attempts(session, window_minutes=1001)
+            assert not accepted_1000.isError
+            assert not accepted_1001.isError
+
+            # Gap is 1440 minutes: under a 1000-minute window the implicit
+            # removal is proximity_low, so the default floor hides it.
+            assert _payload(accepted_1000) == []
+            low = await _call_prior_attempts(
+                session, window_minutes=1000, min_confidence="proximity_low"
+            )
+            assert not low.isError
+            low_rows = _payload(low)
+            assert len(low_rows) == 1
+            assert low_rows[0]["confidence"] == "proximity_low"
+            assert low_rows[0]["outcome"] == "reverted"
+
+            rejected_high = await _call_prior_attempts(session, window_minutes=10081)
+            rejected_low = await _call_prior_attempts(session, window_minutes=0)
+            assert rejected_high.isError
+            assert rejected_low.isError

@@ -587,7 +587,7 @@
           "window_minutes": {
             "default": 10080,
             "description": "Proximity window in minutes for the add->remove revert heuristic — the tiebreaker for IMPLICIT removal types only. An attempt removed within this many minutes is 'proximity_high'; beyond it, 'proximity_low'. Attempts closed by an explicit revert/reject are 'exact' regardless of the window. Default 10080 (7 days).",
-            "maximum": 1000,
+            "maximum": 10080,
             "minimum": 1,
             "title": "Window Minutes",
             "type": "integer"

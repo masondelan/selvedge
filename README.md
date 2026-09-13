@@ -116,6 +116,18 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.14
+
+**Explicit seven-day lookups work as documented.**
+
+The MCP `prior_attempts` tool now accepts `window_minutes=10080`, matching its
+seven-day default. Previously, sending that value explicitly failed validation
+because the time window incorrectly shared the 1,000-result pagination cap.
+The allowed window is 1–10,080 minutes; result limits remain capped at 1,000.
+No new dependencies, migrations or MCP tools.
+
+---
+
 ## What's new in v0.3.13
 
 **Keep the review context with a recorded rejection.**
@@ -123,17 +135,6 @@ made.** The diff is git's job. The why is Selvedge's.
 - Session-start summaries show when a decision has expired or needs manual review, including in the rejection section.
 - Superseded decisions leave the revisit list without hiding unrelated decisions on the same path. History stays intact; reopening remains explicit.
 - [Feedback and correction guide](docs/community-feedback.md): how reports become product decisions, and how to reopen a mistaken rejection using `supersede`.
-
----
-
-## What's new in v0.3.12
-
-**Choose your coding agent. See a saved decision in seconds.**
-
-- `selvedge demo` saves a rejected approach and retrieves it through a fresh connection to an isolated temporary database. It never touches your project or configured database. Add `--json` for machine-readable output.
-- `selvedge setup --agent codex` installs project MCP configuration and `AGENTS.md` instructions. Choose `claude-code`, `cursor`, `copilot`, `gemini`, or `windsurf`; repeat `--agent` for several tools. Existing automatic detection still works.
-- Copilot setup now registers its MCP server in `.vscode/mcp.json`. Codex TOML is appended conservatively, with backups and validation; custom entries are left for manual reconciliation. Status recognizes all six clients' registry formats.
-- Agent instructions and the CLI work across clients. Automatic session delivery and the edit gate remain Claude Code features.
 
 ---
 
@@ -765,7 +766,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.13   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.14   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only

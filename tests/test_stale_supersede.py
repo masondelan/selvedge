@@ -1,4 +1,4 @@
-"""SEL-001: superseded decisions must not surface via get_stale_decisions.
+"""Superseded decisions must not surface via get_stale_decisions.
 
 SessionStart section 1 ("Decisions due for a revisit") reads
 ``get_stale_decisions``. A reject/revert later re-opened by ``supersede``

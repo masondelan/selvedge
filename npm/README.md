@@ -64,7 +64,9 @@ cd npm
 npm publish
 ```
 
-Keep `version` in `package.json` in lockstep with the PyPI release it pins (the shim derives its default `selvedge==X.Y.Z` pin from it).
+Keep `pypiVersion` in `package.json` equal to the Python release to run. The npm
+`version` is an independent semver value and must be bumped for each publication,
+including a pin-only update. See the [complete release procedure](https://github.com/masondelan/selvedge/blob/main/docs/releasing.md).
 
 ## Links
 

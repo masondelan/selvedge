@@ -346,7 +346,7 @@ async def test_log_change_rename_dual_event_round_trip(server_params):
 
 
 # ---------------------------------------------------------------------------
-# SEL-001-WINDOW — prior_attempts.window_minutes must advertise and accept
+# prior_attempts.window_minutes must advertise and accept
 # the documented 7-day default (10080). The pagination `_MAX_LIMIT` (1000)
 # must not be reused as this field's ceiling: omitted binds 10080, but
 # FastMCP rejects an explicit 10080 (and 1001) when `le=1000`.

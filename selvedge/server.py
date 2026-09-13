@@ -121,6 +121,12 @@ mcp = FastMCP(
 #: any real page size.
 _MAX_LIMIT = 1000
 
+#: Upper bound on ``prior_attempts.window_minutes``. The documented default
+#: is 10080 (7 days); that value must remain both the Field default and a
+#: legal explicit argument. Do not reuse ``_MAX_LIMIT`` here — that ceiling
+#: is for pagination ``limit`` fields only.
+_MAX_WINDOW_MINUTES = 10080
+
 _storage: SelvedgeStorage | None = None
 
 
@@ -820,7 +826,7 @@ def prior_attempts(
         Field(
             default=10080,
             ge=1,
-            le=_MAX_LIMIT,
+            le=_MAX_WINDOW_MINUTES,
             description=(
                 "Proximity window in minutes for the add->remove revert "
                 "heuristic — the tiebreaker for IMPLICIT removal types only. "

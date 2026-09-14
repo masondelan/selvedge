@@ -35,6 +35,7 @@ import click
 from rich import box
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from . import backup as backup_mod
 from . import diagnostics as diagnostics_mod
@@ -60,6 +61,19 @@ from .validation import (
 
 console = Console()
 err_console = Console(stderr=True)
+
+# Honest stand-in when an event was recorded with empty reasoning.
+# Display-only: JSON keeps ``reasoning: ""``. Does not imply the event is invalid.
+_REASON_NOT_RECORDED = "Reason not recorded"
+
+# Trail labels in prior-attempts are padded to this visible width so hanging
+# wrap lines up under the explanation text, not under the verb.
+_TRAIL_PREFIXES = {
+    "tried": "[dim]tried:[/dim]     ",
+    "rejected": "[dim]rejected:[/dim]  ",
+    "reverted": "[dim]reverted:[/dim]  ",
+    "reopened": "[dim]re-opened:[/dim] ",
+}
 
 
 # The hook-failure log helpers and the doctor check engine live in
@@ -95,6 +109,57 @@ def resolve_since(since: str) -> str:
 def fmt_ts(ts: str) -> str:
     """Trim ISO timestamp to readable form."""
     return ts[:19].replace("T", " ") if ts else "—"
+
+
+def _reason_display(value: str | None) -> tuple[str, bool]:
+    """Return ``(text, recorded)`` for a stored reasoning field.
+
+    Empty or whitespace-only reasoning is a valid recorded absence — show
+    :data:`_REASON_NOT_RECORDED` rather than inventing a reason. The stored
+    JSON value is not modified here.
+    """
+    text = value or ""
+    if text.strip():
+        return text, True
+    return _REASON_NOT_RECORDED, False
+
+
+def _print_explanation(
+    body: str,
+    *,
+    left: int = 4,
+    prefix: str = "",
+    dim: bool = False,
+    out: Console | None = None,
+) -> None:
+    """Print reasoning or related explanation text with hanging wrap.
+
+    ``prefix`` is trusted Rich markup (the trail label). ``body`` is stored
+    evidence or the empty-reason label and is never parsed as markup, so
+    bracket-like input stays literal. Continuation lines align under the
+    first column of ``body``. IDs, paths and stored evidence are not
+    truncated — wrapping may fold an unbreakable token to the console width
+    but every character remains in the output.
+    """
+    target = out if out is not None else console
+    prefix_text = Text.from_markup(prefix) if prefix else Text()
+    hang = left + prefix_text.cell_len
+    available = max(1, target.width - hang)
+
+    body_text = Text(body)
+    if dim:
+        body_text.stylize("dim")
+    wrapped = body_text.wrap(target, available)
+
+    first = Text(" " * left)
+    first.append_text(prefix_text)
+    if wrapped:
+        first.append_text(wrapped[0])
+    target.print(first, overflow="ignore", crop=False, soft_wrap=True, highlight=False)
+    for line in wrapped[1:]:
+        cont = Text(" " * hang)
+        cont.append_text(line)
+        target.print(cont, overflow="ignore", crop=False, soft_wrap=True, highlight=False)
 
 
 def render_summary(rows: list[dict], since: str = "") -> None:
@@ -817,9 +882,9 @@ def blame(entity_path, as_json):
         console.print(f"  [dim]Stale when[/dim] {row['stale_when']}")
     if row.get("supersedes"):
         console.print(f"  [dim]Supersedes[/dim] {row['supersedes'][:8]}")
-    if row.get("reasoning"):
-        console.print("\n  [dim]Reasoning:[/dim]")
-        console.print(f"    {row['reasoning']}")
+    reason, recorded = _reason_display(row.get("reasoning"))
+    console.print("\n  [dim]Reasoning:[/dim]")
+    _print_explanation(reason, left=4, dim=not recorded)
 
     # Derived decision state (v0.3.9.1) — the clear current-status line.
     decision = storage.get_decision_status(entity_path)
@@ -1139,23 +1204,38 @@ def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_j
         # The trail, one line per step: tried → reverted → re-opened. A
         # standalone rejection was never tried — its whole point is "decided
         # against WITHOUT writing the change" — so its reasoning gets the
-        # "rejected:" label, not "tried:".
+        # "rejected:" label, not "tried:". Empty recorded reasoning is valid;
+        # show the stand-in rather than omitting the step.
         is_rejection = r.get("change_type") == "reject"
-        if r.get("reasoning"):
-            if is_rejection:
-                console.print(f"    [dim]rejected:[/dim]  {r['reasoning']}")
-            else:
-                console.print(f"    [dim]tried:[/dim]     {r['reasoning']}")
-        if (
-            outcome in ("reverted", "reopened")
-            and r.get("outcome_reasoning")
+        reason, recorded = _reason_display(r.get("reasoning"))
+        verb = "rejected" if is_rejection else "tried"
+        _print_explanation(
+            reason, left=4, prefix=_TRAIL_PREFIXES[verb], dim=not recorded
+        )
+        if outcome in ("reverted", "reopened") and not (
             # A standalone rejection's outcome_reasoning IS its own
             # reasoning — already printed above, don't repeat it.
-            and r.get("outcome_reasoning") != r.get("reasoning")
+            is_rejection and r.get("outcome_reasoning") == r.get("reasoning")
         ):
-            console.print(f"    [dim]reverted:[/dim]  {r['outcome_reasoning']}")
-        if outcome == "reopened" and r.get("supersede_reasoning"):
-            console.print(f"    [dim]re-opened:[/dim] {r['supersede_reasoning']}")
+            reverted_text, reverted_recorded = _reason_display(
+                r.get("outcome_reasoning")
+            )
+            _print_explanation(
+                reverted_text,
+                left=4,
+                prefix=_TRAIL_PREFIXES["reverted"],
+                dim=not reverted_recorded,
+            )
+        if outcome == "reopened":
+            reopened_text, reopened_recorded = _reason_display(
+                r.get("supersede_reasoning")
+            )
+            _print_explanation(
+                reopened_text,
+                left=4,
+                prefix=_TRAIL_PREFIXES["reopened"],
+                dim=not reopened_recorded,
+            )
         console.print()
 
     # One clear current-status line per distinct entity in the result set.

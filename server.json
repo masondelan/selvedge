@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.masondelan/selvedge",
   "title": "Selvedge",
-  "description": "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected.",
-  "version": "0.3.14",
+  "description": "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history.",
+  "version": "0.3.15",
   "websiteUrl": "https://selvedge.sh",
   "repository": {
     "url": "https://github.com/masondelan/selvedge",
@@ -15,7 +15,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "selvedge",
-      "version": "0.3.14",
+      "version": "0.3.15",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

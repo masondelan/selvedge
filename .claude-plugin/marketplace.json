@@ -1,7 +1,7 @@
 {
   "name": "selvedge",
   "metadata": {
-    "description": "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected."
+    "description": "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history."
   },
   "owner": {
     "name": "Mason Delan"
@@ -10,7 +10,7 @@
     {
       "name": "selvedge",
       "source": "./",
-      "description": "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected."
+      "description": "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history."
     }
   ]
 }

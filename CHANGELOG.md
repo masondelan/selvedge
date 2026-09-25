@@ -6,6 +6,22 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.15] - 2026-09-25
+
+### Added
+
+- Native lifecycle adapters and preserving setup merges for Codex, Cursor, VS Code Copilot Local, Gemini CLI and Windsurf/Cascade. Codex, Cursor, Copilot Local and Gemini receive bounded startup context and advisory compaction notifications. Windsurf/Cascade receives edit and command checks; its protocol does not provide the other two events.
+- `selvedge-hook --agent` dispatch, native response formats, multi-file patch and replacement handling, and subprocess/configuration regression coverage. Review and trust hooks in each client after setup; installation alone does not prove execution. See [agent hooks](docs/agent-hooks.md) for scope and validation limits.
+- Reproducible synthetic decision-memory pilot with four conditions, changed/irrelevant-memory controls, all 48 measured results and sanitized traces. No claim of superiority over files, native memory or competing products.
+
+### Changed
+
+- `--skip-enforcement-hook` skips lifecycle hooks for every setup target while preserving MCP/instruction setup. Customized or malformed hook files are not overwritten, including with `--force`.
+- Consistent decision-memory product descriptions and practical onboarding/evaluation links.
+- No new dependencies, migrations, MCP tools or default telemetry. Additional tests cover five distinct client protocols and configuration preservation.
+
+---
+
 ## [0.3.14] - 2026-09-12
 
 ### Fixed

@@ -4,15 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selvedge"
-version = "0.3.14"
-description = "Decision provenance for AI-coded codebases: the why, and what was already tried and rejected."
+version = "0.3.15"
+description = "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
     { name = "Mason Delan", email = "masondelan@gmail.com" },
 ]
-keywords = ["mcp", "ai", "changelog", "codebase", "tracking", "devtools"]
+keywords = ["mcp", "ai-coding", "agent-memory", "decision-memory", "decision-provenance", "developer-tools"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -97,6 +97,7 @@ include = [
     # silently ride along into the package.
     "/docs/getting-started.md",
     "/docs/coding-agents.md",
+    "/docs/agent-hooks.md",
     "/docs/telemetry.md",
 ]
 exclude = [

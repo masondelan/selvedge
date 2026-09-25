@@ -2528,8 +2528,7 @@ def _diagnose_empty_state(storage: SelvedgeStorage) -> list[str]:
 @click.option(
     "--skip-enforcement-hook",
     is_flag=True,
-    help="Don't install the Claude Code PreToolUse enforcement hook "
-    "(.claude/settings.json).",
+    help="Don't install agent lifecycle hooks (MCP and instructions still install).",
 )
 def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook, skip_enforcement_hook, selected_agents):
     """Interactive first-run wizard — wires Selvedge into your AI tools.
@@ -2540,9 +2539,8 @@ def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook, skip_e
       • install Selvedge's MCP entry into each tool's config
       • drop the canonical agent-instructions block into CLAUDE.md /
         .cursorrules / copilot-instructions.md
-      • install the PreToolUse enforcement hook into the project's
-        .claude/settings.json (Claude Code only) — blocks schema/migration
-        edits until prior_attempts has been checked this session
+      • install native lifecycle hooks for selected clients — checks watched
+        schema/migration edits against recorded prior decisions
       • run `selvedge init` if .selvedge/ doesn't exist
       • install the post-commit hook for git_commit backfill
 

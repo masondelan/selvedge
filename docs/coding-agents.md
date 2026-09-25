@@ -55,3 +55,11 @@ index_add, index_remove, migrate`; for a rename add `--rename-from OLD`. Add
 fail the build if a new tool or a longer description pushes the MCP footprint
 past a budget you set. Any context-cost figure Selvedge cites then stays a
 verified fact, not a stale claim.
+
+## Native lifecycle hooks
+
+`selvedge setup --agent AGENT` also offers the supported project hooks for that
+client. See [agent lifecycle integrations](agent-hooks.md) for the capability
+matrix, configuration paths, trust/activation and a disposable verification
+workflow. MCP connectivity and an installed hook file are separate from proof
+that the client has run a hook.

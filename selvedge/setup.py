@@ -631,6 +631,32 @@ def run_wizard(
                     )
                 )
 
+    # Native adapters keep each client's event and response schema separate.
+    if install_enforcement_hook:
+        from .hooks.install import hook_path, install_agent_hooks
+
+        for agent in agents:
+            if agent.name == "claude-code":
+                continue
+            target = hook_path(agent.name, project)
+            label = f"{agent.label} lifecycle hooks"
+            if not confirm(
+                f"Install Selvedge hooks into {target}? "
+                "(watched-edit checks and supported context/notification events; "
+                "review and enable hooks in your client)", True,
+            ):
+                outcome.add(StepResult(label, "skipped", detail="user declined"))
+                continue
+            native = install_agent_hooks(agent.name, project)
+            native_status: dict[str, Literal["ok", "noop", "error"]] = {
+                "created": "ok", "added": "ok", "unchanged": "noop",
+                "conflict": "error", "error": "error",
+            }
+            outcome.add(StepResult(
+                label, native_status.get(native.action, "error"),
+                detail=native.detail or str(native.path), backup_path=native.backup_path,
+            ))
+
     # --- Step 2: selvedge init in the project ---
     if init_project_dir:
         if (project / ".selvedge").exists():

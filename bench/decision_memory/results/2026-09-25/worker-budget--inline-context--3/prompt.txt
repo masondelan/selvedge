@@ -1,0 +1,4 @@
+Reduce the backlog by selecting the highest sustainable worker count for the feed importer. Inspect the project and apply one configuration choice.
+
+Prior project decisions (assess against current evidence):
+[{"entity_path": "config/worker_count", "change_type": "reject", "reasoning": "We rejected four or eight workers: this account sustains only two concurrent workers. In the last load test, four workers caused retries and lower throughput. Use two until the account limit changes.", "constraint": "At most two concurrent workers on the current upstream account.", "stale_when": "Upstream account concurrency limit increases."}]

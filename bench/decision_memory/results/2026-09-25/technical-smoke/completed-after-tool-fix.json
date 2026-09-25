@@ -1,0 +1,314 @@
+[
+  {
+    "case": "worker-budget",
+    "kind": "retained-constraint",
+    "arm": "decision-file",
+    "trial": 1,
+    "started_at": "2026-09-25T03:49:24.423367+00:00",
+    "seconds": 18.872,
+    "exit_code": 0,
+    "completed": true,
+    "correct_application": true,
+    "selected": "2",
+    "expected": "2",
+    "retrieved_before_first_edit": true,
+    "inline_context_supplied": false,
+    "tool_configuration_valid": true,
+    "available_tools": [
+      "mcp__fixture__apply_choice",
+      "mcp__fixture__read_decisions",
+      "mcp__fixture__read_project"
+    ],
+    "model_resolved": "claude-sonnet-4-6",
+    "usage": {
+      "input_tokens": 985,
+      "cache_creation_input_tokens": 2039,
+      "cache_read_input_tokens": 1415,
+      "output_tokens": 784,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 2039,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 1,
+          "output_tokens": 189,
+          "cache_read_input_tokens": 1415,
+          "cache_creation_input_tokens": 624,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 624
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "model_usage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 464,
+        "outputTokens": 15,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000539,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-sonnet-4-6": {
+        "inputTokens": 985,
+        "outputTokens": 784,
+        "cacheReadInputTokens": 1415,
+        "cacheCreationInputTokens": 2039,
+        "webSearchRequests": 0,
+        "costUSD": 0.02278575,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      }
+    },
+    "error": "",
+    "stream_parse_errors": 0
+  },
+  {
+    "case": "worker-budget",
+    "kind": "retained-constraint",
+    "arm": "inline-context",
+    "trial": 1,
+    "started_at": "2026-09-25T03:50:33.997169+00:00",
+    "seconds": 22.749,
+    "exit_code": 0,
+    "completed": true,
+    "correct_application": true,
+    "selected": "2",
+    "expected": "2",
+    "retrieved_before_first_edit": false,
+    "inline_context_supplied": true,
+    "tool_configuration_valid": true,
+    "available_tools": [
+      "mcp__fixture__apply_choice",
+      "mcp__fixture__read_decisions",
+      "mcp__fixture__read_project"
+    ],
+    "model_resolved": "claude-sonnet-4-6",
+    "usage": {
+      "input_tokens": 5,
+      "cache_creation_input_tokens": 2328,
+      "cache_read_input_tokens": 2494,
+      "output_tokens": 1055,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 2328,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 1,
+          "output_tokens": 174,
+          "cache_read_input_tokens": 1406,
+          "cache_creation_input_tokens": 922,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 922
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "model_usage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 572,
+        "outputTokens": 14,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000642,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-sonnet-4-6": {
+        "inputTokens": 5,
+        "outputTokens": 1055,
+        "cacheReadInputTokens": 2494,
+        "cacheCreationInputTokens": 2328,
+        "webSearchRequests": 0,
+        "costUSD": 0.0253182,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      }
+    },
+    "error": "",
+    "stream_parse_errors": 0
+  },
+  {
+    "case": "worker-budget",
+    "kind": "retained-constraint",
+    "arm": "no-memory",
+    "trial": 1,
+    "started_at": "2026-09-25T03:50:06.450406+00:00",
+    "seconds": 27.545,
+    "exit_code": 0,
+    "completed": true,
+    "correct_application": false,
+    "selected": "4",
+    "expected": "2",
+    "retrieved_before_first_edit": false,
+    "inline_context_supplied": false,
+    "tool_configuration_valid": true,
+    "available_tools": [
+      "mcp__fixture__apply_choice",
+      "mcp__fixture__read_decisions",
+      "mcp__fixture__read_project"
+    ],
+    "model_resolved": "claude-sonnet-4-6",
+    "usage": {
+      "input_tokens": 985,
+      "cache_creation_input_tokens": 2459,
+      "cache_read_input_tokens": 1297,
+      "output_tokens": 1291,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 2459,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 1,
+          "output_tokens": 142,
+          "cache_read_input_tokens": 1297,
+          "cache_creation_input_tokens": 1162,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1162
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "model_usage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 464,
+        "outputTokens": 16,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000544,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-sonnet-4-6": {
+        "inputTokens": 985,
+        "outputTokens": 1291,
+        "cacheReadInputTokens": 1297,
+        "cacheCreationInputTokens": 2459,
+        "webSearchRequests": 0,
+        "costUSD": 0.03193035,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      }
+    },
+    "error": "",
+    "stream_parse_errors": 0
+  },
+  {
+    "case": "worker-budget",
+    "kind": "retained-constraint",
+    "arm": "selvedge-pull",
+    "trial": 1,
+    "started_at": "2026-09-25T03:49:43.304961+00:00",
+    "seconds": 23.143,
+    "exit_code": 0,
+    "completed": true,
+    "correct_application": true,
+    "selected": "2",
+    "expected": "2",
+    "retrieved_before_first_edit": true,
+    "inline_context_supplied": false,
+    "tool_configuration_valid": true,
+    "available_tools": [
+      "mcp__fixture__apply_choice",
+      "mcp__fixture__read_decisions",
+      "mcp__fixture__read_project",
+      "mcp__selvedge__blame",
+      "mcp__selvedge__changeset",
+      "mcp__selvedge__diff",
+      "mcp__selvedge__history",
+      "mcp__selvedge__log_change",
+      "mcp__selvedge__prior_attempts",
+      "mcp__selvedge__search",
+      "mcp__selvedge__stale_decisions"
+    ],
+    "model_resolved": "claude-sonnet-4-6",
+    "usage": {
+      "input_tokens": 6,
+      "cache_creation_input_tokens": 8481,
+      "cache_read_input_tokens": 21526,
+      "output_tokens": 1132,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 8481,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 1,
+          "output_tokens": 284,
+          "cache_read_input_tokens": 7776,
+          "cache_creation_input_tokens": 705,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 705
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "model_usage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 464,
+        "outputTokens": 15,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000539,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-sonnet-4-6": {
+        "inputTokens": 6,
+        "outputTokens": 1132,
+        "cacheReadInputTokens": 21526,
+        "cacheCreationInputTokens": 8481,
+        "webSearchRequests": 0,
+        "costUSD": 0.05525955,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      }
+    },
+    "error": "",
+    "stream_parse_errors": 0
+  }
+]

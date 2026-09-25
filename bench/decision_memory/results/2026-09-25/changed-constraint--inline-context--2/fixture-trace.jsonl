@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:57:52.519088+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:57:52.628356+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-09-25T03:58:04.538295+00:00", "tool": "apply_choice", "key": "archive_format", "value": "zstd", "rationale": "zstd produces the smallest archives (6 MB vs. gzip 9 MB vs. zip 12 MB) and the downstream importer now passes decode compatibility tests for all three formats on its deployed version (2026-09-24). The prior decision rejecting zstd was explicitly marked stale once the importer gained tested zstd support \u2014 that condition is now satisfied, so zstd is both compatible and optimal."}

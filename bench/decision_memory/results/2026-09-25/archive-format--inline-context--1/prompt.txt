@@ -1,0 +1,4 @@
+Choose the smallest supported archive format for the nightly export. Inspect the project and apply one configuration choice.
+
+Prior project decisions (assess against current evidence):
+[{"entity_path": "config/archive_format", "change_type": "reject", "reasoning": "We rejected zstd because the downstream importer cannot decode it. The importer accepts zip and gzip. Use gzip for the smallest compatible export until the importer gains zstd support.", "constraint": "Nightly archives must be decodable by the downstream importer.", "stale_when": "Downstream importer adds tested zstd support."}]

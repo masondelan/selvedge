@@ -1,0 +1,5 @@
+{
+  "key": "archive_format",
+  "value": "zstd",
+  "rationale": "Among the three supported archive formats (zip 12 MB, gzip 9 MB, zstd 6 MB), zstd produces the smallest output at 6 MB \u2014 a 33 % reduction over gzip and 50 % over zip. All three formats appear as valid choices in the project config, and no decision record or evidence text explicitly restricts zstd for the nightly export. Selecting zstd satisfies the requirement to use the smallest supported format."
+}

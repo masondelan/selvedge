@@ -18,21 +18,25 @@
 
 <!-- mcp-name: io.github.masondelan/selvedge -->
 
-**Long-term memory for AI-coded codebases — including what was already
-tried and rejected.**
+**Persistent decision memory for AI coding agents.**
 
-Line attribution tells you who wrote something. Selvedge tells your agent
-what *not* to write next: the approaches this codebase already tried,
-reverted, and why. It's a `git blame` for AI agents, for the *why* rather
-than which model touched which line — captured live, by the agent, as the
-change happens, so nothing downstream has to guess at it.
+Selvedge records why code changed, which approaches were rejected, and when
+decisions deserve another look, so future sessions can retrieve that context
+before editing. Query a function, database column, API route or dependency
+instead of reconstructing its history from an old conversation.
 
-Selvedge is a local MCP server. AI coding agents (Claude Code, Codex, Copilot, Cursor,
-Gemini CLI and Windsurf) call it as they work to log structured change events with
-reasoning. Your data stays in a SQLite file under `.selvedge/` next to
-your code.
+Claude Code, Codex, Cursor, Copilot, Gemini CLI and Windsurf can connect through
+MCP. The CLI works independently. Decisions live in a local SQLite store, with
+no required hosted account and no LLM in the core storage or retrieval path.
+See the [compatibility and capability reference](https://selvedge.sh/reference/compatibility/)
+for setup targets, released capabilities, dependencies and privacy boundaries.
+The [agent hook guide](docs/agent-hooks.md) documents native lifecycle adapters
+and distinguishes protocol-tested behavior from client activation.
 
-**Local-first by default, team-server by choice, zero-LLM always.**
+A saved explanation is testimony supplied by a person or agent. Selvedge does
+not extract hidden model reasoning, verify that an explanation is true, or
+guarantee that an agent will consult it. The useful test is whether the next
+session retrieves the right decision and applies it appropriately.
 
 ---
 
@@ -55,9 +59,9 @@ $ selvedge blame user_tier_v2
               so we can backfill discounts without touching billing history.
 ```
 
-That reasoning was **captured by the agent in the moment** — written into
-Selvedge from the same context that produced the change. Not inferred from
-the diff afterward by a second LLM. Not a hand-typed commit message.
+This illustrative record shows **rationale logged while the context was available**.
+Real records are only as informative as the explanations supplied. Imported
+history may contain inferred or missing rationale; retain that distinction.
 
 ---
 
@@ -103,16 +107,35 @@ this *for* again?", Selvedge is the missing piece.
 
 ## The problem
 
-Human-written code leaks intent everywhere — commit messages, PR descriptions,
-inline comments, the Slack thread that preceded it. AI-written code doesn't.
-The agent has perfect clarity about why it made each decision, but that
-context lives in the prompt and evaporates when the conversation ends.
+Both human and AI coding workflows can leave intent scattered across commits,
+PRs and conversations. When a session ends, a later agent may see the code
+without the constraint or rejected approach that explains it.
 
 Six months later, your team is debugging a schema decision with no trail.
 `git blame` tells you *what* changed and *when*. It can't tell you *why*.
 
 **Selvedge captures the why — live, by the agent itself, as the change is
 made.** The diff is git's job. The why is Selvedge's.
+
+---
+
+## What's new in v0.3.15
+
+**Native lifecycle adapters for all six setup targets.**
+
+Setup now offers hooks for Codex, Cursor, VS Code Copilot Local, Gemini CLI and
+Windsurf/Cascade alongside Claude Code. Startup context and watched-edit checks
+are available where the client supports them; compaction notifications are
+advisory. Windsurf provides edit and command checks only. Existing configuration
+is preserved, with backups and visible conflicts for customized hooks.
+
+See [capabilities, activation and verification](docs/agent-hooks.md). The new
+adapters have protocol and subprocess coverage; client versions and harnesses
+still matter. No new dependencies, MCP tools, migrations or default telemetry.
+
+The [configuration pilot](bench/decision_memory/results/2026-09-25/) publishes
+all 48 measured trials and controls, including failures. It does not establish
+an advantage over a maintained file or the same information in a prompt.
 
 ---
 
@@ -128,28 +151,17 @@ No new dependencies, migrations or MCP tools.
 
 ---
 
-## What's new in v0.3.13
-
-**Keep the review context with a recorded rejection.**
-
-- Session-start summaries show when a decision has expired or needs manual review, including in the rejection section.
-- Superseded decisions leave the revisit list without hiding unrelated decisions on the same path. History stays intact; reopening remains explicit.
-- [Feedback and correction guide](docs/community-feedback.md): how reports become product decisions, and how to reopen a mistaken rejection using `supersede`.
-
----
-
 ## Where Selvedge fits
 
 <p align="center">
   <img src="docs/ecosystem.svg" alt="Where Selvedge fits in the broader AI-coded-codebase tooling stack" width="720">
 </p>
 
-AI agents call Selvedge as they work. Selvedge captures the *why*
-into a durable, queryable store and emits it back out — as
-[Agent Trace](https://agent-trace.dev/) records for
-cross-tool readers, as observability metadata that links into
-Sentry/Datadog stack traces, and as compliance artifacts for SOC 2
-and EU AI Act audits.
+AI agents call Selvedge as they work. Selvedge stores explicitly supplied
+rationale and makes it queryable later. Export formats support downstream
+workflows, including [Agent Trace interchange](docs/agent-trace-interop.md).
+A provenance record is evidence of what was recorded, not a certification
+of correctness or compliance.
 
 Selvedge does **not** replace `git` (line-level what/when), PR review
 tools (review-time quality), agent observability (LLM call traces),
@@ -161,65 +173,32 @@ references.
 
 ## How Selvedge compares
 
-There's a fast-growing "git blame for AI agents" category. Here's where
-Selvedge fits — and where it deliberately doesn't.
+Choose the simplest memory mechanism that fits your workflow:
 
-|  | Rejected paths | Reasoning source | Granularity | Mechanism | Grouping | Storage |
-|---|---|---|---|---|---|---|
-| **Selvedge** | **Queryable** — `prior_attempts` returns tried → reverted → re-opened | **Captured live**, by the agent in the same context that produced the change | **Entity** — DB column, table, env var, dep, API route, function | **MCP server** — agent calls it as work happens | **Changesets** — named feature/task slugs across many entities | SQLite, zero deps |
-| [OpenLore](https://github.com/clay-good/OpenLore) | Purged — `rejected` is an inactive status, dropped from the queryable store after each decision sync (the annotation survives in the synced spec markdown) | **Derived** — tree-sitter static analysis of code state, plus commit-gated decision notes | AST node (18 languages + 12 IaC) | MCP server — one-time index + commit-time certificates | Call-graph edges | SQLite graph in `.openlore/` |
-| [AgentDiff (sunilmallya)](https://github.com/sunilmallya/agentdiff) | None | **Inferred post-hoc** by Claude Haiku from the diff at session end | Line | Claude Code lifecycle hooks → local daemon | Session/task | JSONL on disk |
-| [AgentDiff (codeprakhar25)](https://github.com/codeprakhar25/agentdiff) | None | ed25519-signed cross-agent provenance | Line | Per-agent editor hooks + git hooks (sign at commit) | None | Signed traces in git refs |
-| [Origin](https://github.com/opsworks-co/origin-cli) | None — `rework` flags reverted AI code post-hoc, without rationale | Prompt receipts, captured live per turn | Line | Agent lifecycle hooks + git post-commit hook | None | Git notes + sessions branch |
-| [Git AI](https://github.com/git-ai-project/git-ai) | None | Attribution metadata | Line | **Agent-invoked checkpoint** → Git notes at commit | None | Git notes |
-| [BlamePrompt](https://github.com/Ekaanth/blameprompt) | None | Prompt receipts — prompt, cost, tools; no stated rationale | Line | Agent-lifecycle hooks + post-commit hook | None | Git notes |
+| Need | Useful starting point | What Selvedge adds |
+| --- | --- | --- |
+| Standing project rules | Maintained agent instruction files | Queryable decisions attached to particular entities |
+| Reviewed architecture choices | Architecture decision records (ADRs) | Structured outcomes, rejected approaches and revisit signals |
+| Who changed a line and when | Git history and attribution tools | The stated reason and earlier approaches for an entity |
+| Carry recorded decisions into another session or client | Shared project documentation | MCP and CLI retrieval from the same local database |
 
-**Why "rejected paths" matter — the one that isn't copyable.** The expensive
-failure isn't forgetting why a column exists. It's an agent confidently
-re-implementing something the team already killed for a good reason, six
-months after everyone who knew that left the context window. None of the
-line-attribution tools above surface rejected paths at all, and it isn't a
-feature gap they can close in a release — a line-oriented store has no notion
-of an entity that persisted across a try → revert → retry cycle. See
-[`docs/demos/prior-attempts.md`](docs/demos/prior-attempts.md).
+These approaches can be used together. Read the [source-linked comparison](https://selvedge.sh/compare/)
+and [instructions versus ADRs versus decision memory](https://selvedge.sh/compare/instructions-and-adrs/)
+for specific selection criteria and limitations.
 
-**Why determinism matters.** Selvedge's reasoning is the agent's own intent,
-written from the same context window that produced the change. There is no
-model anywhere in the storage or retrieval path, so the same query returns the
-same answer today and in two years, across model versions. Tools that infer
-reasoning post-hoc are running a second LLM that never saw the original
-prompt: what it produces is paraphrase, and re-running it can produce
-different categories for the same change. As a Hacker News commenter put it
-about a competing approach, *"grep won't find your commit because you rejected
-'oauth-library'… unless there is deterministic enforcement"*
-([0x457](https://news.ycombinator.com/item?id=47354263)).
+**Why entity history matters.** `users.email`, `env/STRIPE_SECRET_KEY`,
+`api/v1/checkout` and `deps/stripe` remain useful query targets when their code
+moves. Explicit rejection and superseding records let a later session inspect
+what was tried and whether the original constraint still applies.
 
-Determinism alone is no longer a separator — OpenLore is deterministic-native
-too, and says so. The compound that separates is **append-only testimony**:
-reasoning the agent wrote itself, kept in a store where a rejection is a
-first-class record rather than an inactive status to be swept up.
+**Why capture time matters.** Recording a reason while the context is available
+can preserve information a diff does not contain. It does not make the reason
+infallible. Retrieval uses stored records; the coding agent remains responsible
+for checking applicability and testing its change.
 
-**Why "entity-level" matters.** Most tools attribute *lines*. Selvedge
-attributes *things you actually search for*: `users.email`,
-`env/STRIPE_SECRET_KEY`, `api/v1/checkout`, `deps/stripe`. The first
-question after `git blame` is usually *"what's the history of this column"*,
-not *"what's the history of lines 40–48 of users.py"*.
-
-**Why "captured live" matters.** Not a differentiator on its own — every tool
-here claims some flavour of it — but it's the *mechanism* that makes the
-reasoning trustworthy. Writing at the moment of the change, from the context
-that produced it, is the reason there's no second model in the path to
-hallucinate an explanation. An empty `reasoning` field is itself an honest
-signal: the agent didn't have one.
-
-<sub>Comparison current as of 2026-08-05; OpenLore at v2.1.8 / 265★,
-verified against its source. Corrections welcome as an issue.</sub>
-
-**Why "changesets" matter.** A Stripe billing rollout touches the `users`
-table, two new env vars, three new API routes, one dependency, and four
-functions across the codebase. Tag every event with `changeset:add-stripe-billing`
-and you can pull the entire scope back later — even if the original PR was
-broken into eight smaller ones over a month.
+**Why changesets matter.** Tag events with a shared changeset such as
+`add-stripe-billing` to retrieve a task's decisions across tables, environment
+variables, routes and functions.
 
 **Selvedge ↔ Agent Trace.** [Agent Trace](https://agent-trace.dev/) is an
 open AI code-attribution wire format published by Cursor (RFC, Jan 2026). Its
@@ -297,13 +276,17 @@ reconciliation, even with `--force`.
 Restart your agent in the project and approve Selvedge's tools if prompted.
 Codex must trust the project to load project-scoped configuration. Ask the agent:
 
-> Use Selvedge to record one approach we considered and rejected in this project.
-> Include why, and what would change our mind. Then look it up with prior_attempts.
+> Use Selvedge to record one real approach we considered and rejected in this project.
+> Include the entity, why, and what would change our mind. Do not invent a decision.
+> Show the saved entity path and record ID.
 
 Start a new session and look up the same entity to verify that the decision carries
-forward. MCP access does not automatically capture every decision: the installed
-instructions guide the agent to use it. Session delivery and enforcement hooks
-are currently Claude Code integrations.
+forward. Follow the [first-decision verification guide](https://selvedge.sh/guides/verify-first-decision/)
+and [cross-agent handoff guide](https://selvedge.sh/guides/share-memory-between-agents/)
+for observable checks. MCP access does not automatically capture every decision: the installed
+instructions guide the agent to use it. Native lifecycle adapters cover supported client events; startup delivery,
+watched-edit checks and compaction notifications vary by harness. See the
+[agent hook guide](docs/agent-hooks.md) before enabling them.
 
 For CI bootstrap or `devcontainer.json` `postCreateCommand`:
 ```bash
@@ -333,7 +316,7 @@ selvedge history --since 30d           # last 30 days of changes
 selvedge history --since 15m           # last 15 minutes ('m' = minutes)
 selvedge changeset add-stripe-billing  # all events for a feature/task
 selvedge search "stripe"               # full-text search
-selvedge stats                         # log_change coverage report (per-agent)
+selvedge stats                         # observed tool calls and explanation quality
 selvedge import migrations/            # backfill from migration files
 selvedge export --format csv           # dump history to CSV
 ```
@@ -766,7 +749,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.14   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.15   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only

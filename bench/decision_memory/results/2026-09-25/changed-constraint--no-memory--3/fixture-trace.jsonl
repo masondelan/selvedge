@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:53:49.790086+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:53:49.887110+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-09-25T03:53:56.905604+00:00", "tool": "apply_choice", "key": "archive_format", "value": "zstd", "rationale": "zstd produces the smallest output at 6 MB, versus 9 MB for gzip and 12 MB for zip. The current evidence confirms that the deployed downstream importer passes decode compatibility tests for all three formats, including zstd, so there is no compatibility risk. No prior decision records exist that would restrict this choice."}

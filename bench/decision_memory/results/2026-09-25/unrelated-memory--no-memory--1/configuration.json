@@ -1,0 +1,5 @@
+{
+  "key": "thumbnail_format",
+  "value": "webp",
+  "rationale": "webp produces the smallest thumbnails at 20 KB, compared to jpeg (30 KB) and png (80 KB). Current evidence confirms all target browsers and the deployed image pipeline pass webp compatibility tests, so it is fully supported with no trade-offs."
+}

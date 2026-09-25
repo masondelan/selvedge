@@ -1,0 +1,5 @@
+{
+  "key": "worker_count",
+  "value": "2",
+  "rationale": "The upstream account shared by all workers supports a maximum of 2 concurrent workers. A prior load test (recorded as an exact rejection, event 72fbffe7) showed that 4 or 8 workers caused retries and reduced throughput on this account. No new load test or account limit upgrade has been recorded, so the constraint still holds. Setting worker_count=2 is therefore the highest value that is safe and sustainable \u2014 it doubles throughput over the current setting of 1 (helping drain the 8-feed backlog) without breaching the upstream concurrency limit."
+}

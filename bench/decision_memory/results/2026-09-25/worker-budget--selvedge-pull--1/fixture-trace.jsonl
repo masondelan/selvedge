@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:53:48.124174+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:53:48.215091+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-09-25T03:54:00.606724+00:00", "tool": "apply_choice", "key": "worker_count", "value": "2", "rationale": "A prior load test (recorded as an explicit rejection, id 05be09c6) showed that 4 or 8 workers caused retries and reduced throughput because all workers share one upstream account with a concurrency ceiling of 2. No new load test or account-limit change has since been recorded, so that constraint still holds. Raising from 1 \u2192 2 doubles throughput and directly reduces the 8-feed backlog without breaching the account limit."}

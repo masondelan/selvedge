@@ -1,0 +1,5 @@
+{
+  "key": "archive_format",
+  "value": "gzip",
+  "rationale": "The downstream importer supports only zip and gzip (zstd remains rejected \u2014 the importer has not been upgraded per current evidence, so the staleness condition is unmet). Between the two compatible formats, gzip (9 MB) is smaller than zip (12 MB), making it the smallest supported archive format for the nightly export."
+}

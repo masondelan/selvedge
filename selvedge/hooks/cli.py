@@ -3,12 +3,13 @@
 
 Subcommand dispatcher kept deliberately tiny and dependency-free (no Click):
 this binary runs on EVERY gated tool call inside an agent loop, so import
-cost is latency the user feels. Today's only subcommand:
+cost is latency the user feels. For example:
 
     selvedge-hook pretooluse [--dry-run]
 
-Reads the Claude Code PreToolUse payload on stdin; exits 0 to allow, 2 to
-block (reason on stderr). See :mod:`selvedge.hooks.pretooluse`.
+Reads a native hook payload on stdin. Claude Code (the default) and Windsurf
+deny with exit 2 and a stderr reason. Other clients selected through --agent
+communicate decisions through JSON on stdout with exit 0.
 """
 
 from __future__ import annotations
@@ -22,19 +23,23 @@ import sys
 _DISABLE_ENV = "SELVEDGE_HOOK_DISABLE"
 
 _USAGE = """\
-usage: selvedge-hook <pretooluse|sessionstart|precompact> [--dry-run]
+usage: selvedge-hook <pretooluse|sessionstart|precompact> [--agent CLIENT] [--dry-run]
 
   pretooluse    Gate. Blocks Edit/Write/Bash calls touching schema or
                 migration paths until prior_attempts has been queried for
-                the affected entities this session.
+                the affected entities within the configured recent window.
   sessionstart  Delivery. Injects a compact digest at session start —
                 decisions due for revisit, reverted entities, recent
                 changesets. Silent when there is nothing to say.
-  precompact    Delivery. Before context compaction destroys this session's
-                reasoning, reminds the agent to log_change what it hasn't.
-                Advisory only; never blocks compaction.
+  precompact    Advisory reminder about unsaved decisions before compaction.
+                Client support varies; a user notification does not inject
+                context into the model or automatically save decisions.
 
 Each reads its hook payload on stdin.
+
+  --agent     codex, cursor, copilot (VS Code Local), gemini, or windsurf.
+              Omit for the existing Claude Code protocol. Client capabilities
+              differ; compaction notifications for these clients are advisory.
 
   --dry-run   evaluate and print what would be emitted; always exit 0
 
@@ -53,14 +58,22 @@ def main() -> None:
         print(_USAGE)
         sys.exit(0)
     if argv[0] in _HOOKS:
-        # The bypass has to short-circuit HERE, not inside `evaluate()`. The
-        # documented escape hatch used to be checked after every import had
-        # already run, so setting it saved nothing measurable — the whole cost
-        # is import, not logic. `--dry-run` deliberately falls through so it
-        # still reports what the hook would have done.
+        # Keep the documented bypass cheap for every client. Cursor expects an
+        # explicit permission response even when no evaluation is performed.
         if os.environ.get(_DISABLE_ENV) == "1" and "--dry-run" not in argv:
+            if "--agent" in argv:
+                index = argv.index("--agent")
+                if argv[index + 1 : index + 2] == ["cursor"] and argv[0] == "pretooluse":
+                    print('{"permission": "allow"}')
             sys.exit(0)
+        if "--agent" in argv:
+            from .adapters import AGENTS, run
 
+            index = argv.index("--agent")
+            if index + 1 >= len(argv) or argv[index + 1] not in AGENTS:
+                print("error: --agent requires a supported hook client", file=sys.stderr)
+                sys.exit(1)
+            sys.exit(run(argv[index + 1], argv[0], argv[1:]))
         # Imported by name, one hook per process, so each pays only for its
         # own module.
         from importlib import import_module

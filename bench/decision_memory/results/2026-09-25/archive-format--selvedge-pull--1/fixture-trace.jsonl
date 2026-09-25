@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:58:52.862852+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:58:52.951763+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-09-25T03:59:02.232017+00:00", "tool": "apply_choice", "key": "archive_format", "value": "gzip", "rationale": "Three formats are available \u2014 zip (12 MB), gzip (9 MB), and zstd (6 MB). Zstd was previously rejected (exact confidence) because the downstream importer cannot decode it, and current evidence confirms the importer has not been upgraded since that decision was recorded. Zstd therefore remains incompatible. Of the two importer-compatible formats, gzip (9 MB) is smaller than zip (12 MB), making it the smallest supported archive format for the nightly export."}

@@ -1,0 +1,5 @@
+{
+  "key": "worker_count",
+  "value": "2",
+  "rationale": "The prior decision record constrains concurrent workers to at most 2 on the current upstream account, with 4 and 8 explicitly rejected after load testing showed retries and lower throughput. Current evidence confirms no account limit change or new load test has occurred, so that constraint remains valid and binding. Setting worker_count to 2 (up from 1) is the highest sustainable value available \u2014 it doubles feed-processing throughput to help clear the 8-feed backlog without risking the retry degradation observed at higher concurrency."
+}

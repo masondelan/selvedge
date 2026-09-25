@@ -1,0 +1,1 @@
+Choose the smallest supported archive format for the nightly export. Inspect the project and apply one configuration choice.

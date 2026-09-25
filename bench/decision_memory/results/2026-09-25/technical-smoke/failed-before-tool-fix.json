@@ -1,0 +1,70 @@
+[
+  {
+    "case": "worker-budget",
+    "kind": "retained-constraint",
+    "arm": "decision-file",
+    "trial": 1,
+    "started_at": "2026-09-25T03:46:42.209836+00:00",
+    "seconds": 17.073,
+    "exit_code": 0,
+    "completed": false,
+    "correct_application": false,
+    "selected": "",
+    "expected": "2",
+    "retrieved_before_first_edit": false,
+    "inline_context_supplied": false,
+    "usage": {
+      "input_tokens": 198,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 927,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 198,
+          "output_tokens": 927,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "model_usage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 464,
+        "outputTokens": 14,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000534,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-sonnet-4-6": {
+        "inputTokens": 198,
+        "outputTokens": 927,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.014498999999999998,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      }
+    },
+    "error": "process failed or no completed edit"
+  }
+]

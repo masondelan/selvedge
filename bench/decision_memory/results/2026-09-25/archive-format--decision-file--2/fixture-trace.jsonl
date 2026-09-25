@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:57:22.819096+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:57:22.938779+00:00", "tool": "read_decisions", "count": 1}
+{"timestamp": "2026-09-25T03:57:32.923275+00:00", "tool": "apply_choice", "key": "archive_format", "value": "gzip", "rationale": "The decision record rejects zstd because the downstream importer cannot decode it, and current evidence confirms the importer has not been upgraded, so that rejection remains active. Among the two compatible formats (zip at 12 MB and gzip at 9 MB), gzip produces the smallest output. The decision record also explicitly directs: \"Use gzip for the smallest compatible export until the importer gains zstd support.\""}

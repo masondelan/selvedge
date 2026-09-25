@@ -1,0 +1,373 @@
+{
+  "protocol": "decision-memory-pilot/1",
+  "created_at": "2026-09-25T03:52:45.381447+00:00",
+  "selvedge_version": "0.3.14",
+  "model_requested": "claude-sonnet-4-6",
+  "trials": 3,
+  "timeout_seconds": 180,
+  "workers": 3,
+  "arms": [
+    "no-memory",
+    "decision-file",
+    "inline-context",
+    "selvedge-pull"
+  ],
+  "system_prompt": "You are working on a small configuration task. Use only the provided tools and evidence. Consult available project records when relevant. Apply a justified choice with apply_choice and briefly explain it. Do not invent tests or missing requirements.",
+  "cases": [
+    {
+      "id": "worker-budget",
+      "entity": "config/worker_count",
+      "task": "Reduce the backlog by selecting the highest sustainable worker count for the feed importer. Inspect the project and apply one configuration choice.",
+      "project": {
+        "description": "Eight feeds are waiting. All workers share one upstream account.",
+        "key": "worker_count",
+        "initial": "1",
+        "choices": [
+          "1",
+          "2",
+          "4",
+          "8"
+        ],
+        "current_evidence": "No new load test or account limit change has been recorded."
+      },
+      "decisions": [
+        {
+          "change_type": "reject",
+          "reasoning": "We rejected four or eight workers: this account sustains only two concurrent workers. In the last load test, four workers caused retries and lower throughput. Use two until the account limit changes.",
+          "constraint": "At most two concurrent workers on the current upstream account.",
+          "stale_when": "Upstream account concurrency limit increases."
+        }
+      ],
+      "expected": "2",
+      "kind": "retained-constraint"
+    },
+    {
+      "id": "archive-format",
+      "entity": "config/archive_format",
+      "task": "Choose the smallest supported archive format for the nightly export. Inspect the project and apply one configuration choice.",
+      "project": {
+        "description": "The exporters support zip, gzip and zstd. Representative sizes are zip 12 MB, gzip 9 MB and zstd 6 MB.",
+        "key": "archive_format",
+        "initial": "zip",
+        "choices": [
+          "zip",
+          "gzip",
+          "zstd"
+        ],
+        "current_evidence": "The downstream importer has not been upgraded since the prior deployment."
+      },
+      "decisions": [
+        {
+          "change_type": "reject",
+          "reasoning": "We rejected zstd because the downstream importer cannot decode it. The importer accepts zip and gzip. Use gzip for the smallest compatible export until the importer gains zstd support.",
+          "constraint": "Nightly archives must be decodable by the downstream importer.",
+          "stale_when": "Downstream importer adds tested zstd support."
+        }
+      ],
+      "expected": "gzip",
+      "kind": "retained-constraint"
+    },
+    {
+      "id": "changed-constraint",
+      "entity": "config/archive_format",
+      "task": "Choose the smallest supported archive format for the nightly export. Inspect the project and apply one configuration choice.",
+      "project": {
+        "description": "The exporters support zip, gzip and zstd. Representative sizes are zip 12 MB, gzip 9 MB and zstd 6 MB.",
+        "key": "archive_format",
+        "initial": "gzip",
+        "choices": [
+          "zip",
+          "gzip",
+          "zstd"
+        ],
+        "current_evidence": "The downstream importer was upgraded today. Its zip, gzip and zstd decode compatibility tests all pass on the deployed version."
+      },
+      "decisions": [
+        {
+          "change_type": "reject",
+          "reasoning": "We rejected zstd because the downstream importer cannot decode it. The importer accepts zip and gzip. Use gzip for the smallest compatible export until the importer gains zstd support.",
+          "constraint": "Nightly archives must be decodable by the downstream importer.",
+          "stale_when": "Downstream importer adds tested zstd support."
+        }
+      ],
+      "expected": "zstd",
+      "kind": "changed-constraint"
+    },
+    {
+      "id": "unrelated-memory",
+      "entity": "config/thumbnail_format",
+      "task": "Choose the smallest supported format for web thumbnails. Inspect the project and apply one configuration choice.",
+      "project": {
+        "description": "Thumbnail choices are png (80 KB), jpeg (30 KB), webp (20 KB).",
+        "key": "thumbnail_format",
+        "initial": "png",
+        "choices": [
+          "png",
+          "jpeg",
+          "webp"
+        ],
+        "current_evidence": "All target browsers and the deployed image pipeline pass png, jpeg and webp compatibility tests."
+      },
+      "decisions": [
+        {
+          "entity_path": "config/archive_format",
+          "change_type": "reject",
+          "reasoning": "We rejected zstd archives because the downstream nightly archive importer cannot decode them. This constraint applies to nightly archives, not web images.",
+          "constraint": "Nightly archives must be decodable by the downstream importer.",
+          "stale_when": "Downstream archive importer adds tested zstd support."
+        }
+      ],
+      "expected": "webp",
+      "kind": "irrelevant-memory-control"
+    }
+  ],
+  "schedule": [
+    [
+      "worker-budget",
+      "decision-file",
+      2
+    ],
+    [
+      "worker-budget",
+      "no-memory",
+      2
+    ],
+    [
+      "unrelated-memory",
+      "decision-file",
+      3
+    ],
+    [
+      "archive-format",
+      "no-memory",
+      1
+    ],
+    [
+      "worker-budget",
+      "no-memory",
+      3
+    ],
+    [
+      "unrelated-memory",
+      "decision-file",
+      2
+    ],
+    [
+      "archive-format",
+      "decision-file",
+      3
+    ],
+    [
+      "changed-constraint",
+      "no-memory",
+      3
+    ],
+    [
+      "worker-budget",
+      "selvedge-pull",
+      1
+    ],
+    [
+      "changed-constraint",
+      "no-memory",
+      1
+    ],
+    [
+      "unrelated-memory",
+      "inline-context",
+      2
+    ],
+    [
+      "worker-budget",
+      "selvedge-pull",
+      3
+    ],
+    [
+      "unrelated-memory",
+      "no-memory",
+      2
+    ],
+    [
+      "archive-format",
+      "selvedge-pull",
+      3
+    ],
+    [
+      "archive-format",
+      "inline-context",
+      3
+    ],
+    [
+      "changed-constraint",
+      "inline-context",
+      1
+    ],
+    [
+      "archive-format",
+      "no-memory",
+      2
+    ],
+    [
+      "unrelated-memory",
+      "selvedge-pull",
+      2
+    ],
+    [
+      "changed-constraint",
+      "selvedge-pull",
+      2
+    ],
+    [
+      "worker-budget",
+      "inline-context",
+      1
+    ],
+    [
+      "worker-budget",
+      "decision-file",
+      1
+    ],
+    [
+      "unrelated-memory",
+      "no-memory",
+      3
+    ],
+    [
+      "unrelated-memory",
+      "selvedge-pull",
+      1
+    ],
+    [
+      "archive-format",
+      "no-memory",
+      3
+    ],
+    [
+      "changed-constraint",
+      "decision-file",
+      3
+    ],
+    [
+      "archive-format",
+      "selvedge-pull",
+      2
+    ],
+    [
+      "unrelated-memory",
+      "selvedge-pull",
+      3
+    ],
+    [
+      "changed-constraint",
+      "decision-file",
+      2
+    ],
+    [
+      "archive-format",
+      "inline-context",
+      2
+    ],
+    [
+      "unrelated-memory",
+      "inline-context",
+      3
+    ],
+    [
+      "worker-budget",
+      "selvedge-pull",
+      2
+    ],
+    [
+      "changed-constraint",
+      "selvedge-pull",
+      3
+    ],
+    [
+      "archive-format",
+      "inline-context",
+      1
+    ],
+    [
+      "worker-budget",
+      "no-memory",
+      1
+    ],
+    [
+      "archive-format",
+      "decision-file",
+      2
+    ],
+    [
+      "changed-constraint",
+      "selvedge-pull",
+      1
+    ],
+    [
+      "worker-budget",
+      "decision-file",
+      3
+    ],
+    [
+      "changed-constraint",
+      "no-memory",
+      2
+    ],
+    [
+      "changed-constraint",
+      "inline-context",
+      2
+    ],
+    [
+      "unrelated-memory",
+      "inline-context",
+      1
+    ],
+    [
+      "archive-format",
+      "decision-file",
+      1
+    ],
+    [
+      "unrelated-memory",
+      "decision-file",
+      1
+    ],
+    [
+      "unrelated-memory",
+      "no-memory",
+      1
+    ],
+    [
+      "changed-constraint",
+      "decision-file",
+      1
+    ],
+    [
+      "worker-budget",
+      "inline-context",
+      2
+    ],
+    [
+      "changed-constraint",
+      "inline-context",
+      3
+    ],
+    [
+      "worker-budget",
+      "inline-context",
+      3
+    ],
+    [
+      "archive-format",
+      "selvedge-pull",
+      1
+    ]
+  ],
+  "source_sha256": {
+    "cases.json": "6d959b25b250772da1d919d8d04950a76b39a81181539e7fe8f3fff2e4450a66",
+    "fixture_server.py": "ed4068d4aa19318ed43c2fa48c496b21987fba654f67dae78a777b1ba71a5c62",
+    "run.py": "cd4a265acdbb27f6e468305eaef035c6710fb01c200efbb5b1ed6a4ba8af49b6"
+  },
+  "executed": true,
+  "claude_version": "2.1.170 (Claude Code)"
+}

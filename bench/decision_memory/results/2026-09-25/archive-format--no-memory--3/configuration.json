@@ -1,0 +1,5 @@
+{
+  "key": "archive_format",
+  "value": "gzip",
+  "rationale": "Of the three supported formats (zip 12 MB, gzip 9 MB, zstd 6 MB), gzip produces the smallest output that is reliably compatible with the downstream importer. The current evidence notes the importer has not been upgraded since the prior deployment, making zstd \u2014 a newer codec not universally supported by older importers \u2014 a compatibility risk. gzip is universally supported by legacy and current tooling, and reduces the export size from 12 MB (zip) to 9 MB without introducing compatibility concerns."
+}

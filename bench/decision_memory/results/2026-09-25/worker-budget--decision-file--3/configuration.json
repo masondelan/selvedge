@@ -1,0 +1,5 @@
+{
+  "key": "worker_count",
+  "value": "2",
+  "rationale": "The decision record explicitly rejects 4 and 8 workers because a prior load test showed they exceed the upstream account's concurrency limit, causing retries and lower throughput. No new load test or account limit change has been recorded, so that constraint remains valid. Setting worker_count to 2 is the highest value within the proven safe ceiling, maximising backlog throughput without degrading reliability."
+}

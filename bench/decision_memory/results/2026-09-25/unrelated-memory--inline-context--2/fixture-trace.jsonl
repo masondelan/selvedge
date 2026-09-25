@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:54:09.714904+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:54:09.805057+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-09-25T03:54:19.173259+00:00", "tool": "apply_choice", "key": "thumbnail_format", "value": "webp", "rationale": "webp produces the smallest thumbnails at 20 KB, compared to jpeg (30 KB) and png (80 KB). Current test evidence confirms webp passes compatibility checks in all target browsers and the deployed image pipeline, making it both the smallest and a fully supported choice. The prior zstd rejection applies only to nightly archive decoding and has no bearing on web image formats."}

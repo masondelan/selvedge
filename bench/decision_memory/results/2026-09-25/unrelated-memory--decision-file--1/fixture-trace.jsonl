@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:58:12.216360+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:58:12.302226+00:00", "tool": "read_decisions", "count": 1}
+{"timestamp": "2026-09-25T03:58:18.598884+00:00", "tool": "apply_choice", "key": "thumbnail_format", "value": "webp", "rationale": "webp is the smallest supported format at 20 KB, compared to jpeg (30 KB) and png (80 KB). Current test evidence confirms that all target browsers and the deployed image pipeline pass webp compatibility tests, so there is no technical barrier to choosing it. No decision records constrain this choice."}

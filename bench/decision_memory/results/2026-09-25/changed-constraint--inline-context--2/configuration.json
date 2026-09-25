@@ -1,0 +1,5 @@
+{
+  "key": "archive_format",
+  "value": "zstd",
+  "rationale": "zstd produces the smallest archives (6 MB vs. gzip 9 MB vs. zip 12 MB) and the downstream importer now passes decode compatibility tests for all three formats on its deployed version (2026-09-24). The prior decision rejecting zstd was explicitly marked stale once the importer gained tested zstd support \u2014 that condition is now satisfied, so zstd is both compatible and optimal."
+}

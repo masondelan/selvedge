@@ -1,0 +1,5 @@
+{
+  "key": "archive_format",
+  "value": "gzip",
+  "rationale": "Among the three supported formats (zip 12 MB, gzip 9 MB, zstd 6 MB), zstd is the absolute smallest but is explicitly rejected by the maintained decision record because the downstream importer cannot decode it \u2014 and current evidence confirms the importer has not been upgraded. gzip at 9 MB is therefore the smallest format that remains compatible with the downstream importer, as the decision record directs."
+}

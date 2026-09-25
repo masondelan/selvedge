@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:52:49.459937+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:52:49.544144+00:00", "tool": "read_decisions", "count": 1}
+{"timestamp": "2026-09-25T03:52:59.252072+00:00", "tool": "apply_choice", "key": "worker_count", "value": "2", "rationale": "The recorded decision establishes a hard ceiling of 2 concurrent workers for the current upstream account. A previous load test confirmed that 4 workers caused retries and degraded throughput, so 4 and 8 are ruled out. No new load test or account-limit change has been recorded, so that constraint is still active. Setting worker_count to 2 doubles throughput over the current value of 1 \u2014 directly addressing the 8-feed backlog \u2014 while staying within the proven safe limit."}

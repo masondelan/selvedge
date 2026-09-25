@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:56:50.337222+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:56:50.411872+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-09-25T03:57:03.141086+00:00", "tool": "apply_choice", "key": "worker_count", "value": "2", "rationale": "A recorded rejection (exact confidence) blocks 4 and 8 workers: a prior load test showed the shared upstream account supports at most 2 concurrent workers \u2014 beyond that, retries increase and throughput drops. No new load test or account-limit change has been recorded, so that constraint remains active. Setting worker_count to 2 is the highest value within the proven safe ceiling, and doubles processing capacity from the current 1 to help clear the 8-feed backlog."}

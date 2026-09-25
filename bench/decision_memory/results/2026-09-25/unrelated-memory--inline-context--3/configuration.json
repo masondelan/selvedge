@@ -1,0 +1,5 @@
+{
+  "key": "thumbnail_format",
+  "value": "webp",
+  "rationale": "webp is the smallest of the three supported thumbnail formats at 20 KB, compared to jpeg (30 KB) and png (80 KB). Current test evidence confirms all target browsers and the deployed image pipeline pass webp compatibility tests, so there are no compatibility blockers. The only prior decision on record concerns nightly archive formats (zstd rejection), which is explicitly scoped to archive imports and does not constrain this choice."
+}

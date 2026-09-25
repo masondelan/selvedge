@@ -1,0 +1,209 @@
+[
+  {
+    "type": "assistant",
+    "content": []
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "I'll start by reading the project configuration and any existing decision records in parallel."
+      }
+    ]
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01JZbAz3qrH7kUF1FRbcyAWz",
+        "name": "mcp__fixture__read_project",
+        "input": {},
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_017LicuU5r4o6xxLbK37F4ha",
+        "name": "mcp__fixture__read_decisions",
+        "input": {},
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  },
+  {
+    "type": "user",
+    "content": [
+      {
+        "tool_use_id": "toolu_01JZbAz3qrH7kUF1FRbcyAWz",
+        "type": "tool_result",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"entity_path\": \"config/archive_format\",\n  \"description\": \"The exporters support zip, gzip and zstd. Representative sizes are zip 12 MB, gzip 9 MB and zstd 6 MB.\",\n  \"key\": \"archive_format\",\n  \"initial\": \"gzip\",\n  \"choices\": [\n    \"zip\",\n    \"gzip\",\n    \"zstd\"\n  ],\n  \"current_evidence\": \"The downstream importer was upgraded today. Its zip, gzip and zstd decode compatibility tests all pass on the deployed version.\"\n}"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "user",
+    "content": [
+      {
+        "tool_use_id": "toolu_017LicuU5r4o6xxLbK37F4ha",
+        "type": "tool_result",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"decisions\": [],\n  \"note\": \"This file is independent of any connected memory server.\"\n}"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "assistant",
+    "content": []
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "Now let me check for any prior attempts on this configuration entity before committing to a choice."
+      }
+    ]
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01UQSirGGB45637JJYYoVgUZ",
+        "name": "mcp__selvedge__prior_attempts",
+        "input": {
+          "entity_path": "config/archive_format"
+        },
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  },
+  {
+    "type": "user",
+    "content": [
+      {
+        "tool_use_id": "toolu_01UQSirGGB45637JJYYoVgUZ",
+        "type": "tool_result",
+        "content": "{\"result\":[{\"id\":\"25474030-36ce-4eb3-a5c7-4b3b6789ee41\",\"timestamp\":\"2026-09-25T03:55:06.372117Z\",\"entity_type\":\"other\",\"entity_path\":\"config/archive_format\",\"change_type\":\"reject\",\"diff\":\"\",\"reasoning\":\"We rejected zstd because the downstream importer cannot decode it. The importer accepts zip and gzip. Use gzip for the smallest compatible export until the importer gains zstd support.\",\"agent\":\"fixture-author\",\"session_id\":\"\",\"git_commit\":\"\",\"project\":\"\",\"changeset_id\":\"\",\"metadata\":{},\"revisit_after\":\"\",\"expires_when\":\"\",\"supersedes\":\"\",\"constraint\":\"Nightly archives must be decodable by the downstream importer.\",\"stale_when\":\"Downstream importer adds tested zstd support.\",\"outcome\":\"rejected\",\"confidence\":\"exact\",\"outcome_reasoning\":\"We rejected zstd because the downstream importer cannot decode it. The importer accepts zip and gzip. Use gzip for the smallest compatible export until the importer gains zstd support.\",\"superseded_by\":\"\",\"supersede_reasoning\":\"\",\"current_status\":\"reverted\",\"match_type\":\"exact\",\"similarity\":0,\"note\":\"\"}]}"
+      }
+    ]
+  },
+  {
+    "type": "assistant",
+    "content": []
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "The prior rejection of `zstd` is now stale \u2014 the exact `stale_when` condition has fired: *\"Downstream importer adds tested zstd support.\"* Current evidence confirms the importer's zstd decode tests pass today. I'll supersede that rejection, then apply the choice."
+      }
+    ]
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01Wy8zkENjGNdeSMmQDB6ATk",
+        "name": "mcp__selvedge__log_change",
+        "input": {
+          "entity_path": "config/archive_format",
+          "change_type": "supersede",
+          "supersedes": "25474030-36ce-4eb3-a5c7-4b3b6789ee41",
+          "entity_type": "config",
+          "reasoning": "The prior rejection of zstd was conditioned on the downstream importer lacking zstd support. As of 2026-09-24 the importer was upgraded and its zip, gzip, and zstd decode compatibility tests all pass on the deployed version. The stale_when condition (\"Downstream importer adds tested zstd support\") has now fired, so the rejection no longer stands. Switching to zstd \u2014 the smallest supported format at 6 MB vs gzip at 9 MB and zip at 12 MB \u2014 for the nightly export.",
+          "constraint": "Nightly archives must be decodable by the downstream importer.",
+          "stale_when": "Downstream importer loses zstd support or rolls back the upgrade.",
+          "agent": "claude",
+          "changeset_id": "nightly-export-archive-format"
+        },
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  },
+  {
+    "type": "user",
+    "content": [
+      {
+        "tool_use_id": "toolu_01Wy8zkENjGNdeSMmQDB6ATk",
+        "type": "tool_result",
+        "content": "{\"id\":\"70c99798-d719-484c-8c69-5239650088e3\",\"timestamp\":\"2026-09-25T03:55:23.549552Z\",\"status\":\"logged\",\"error\":\"\",\"warnings\":[],\"supersedes\":\"25474030-36ce-4eb3-a5c7-4b3b6789ee41\"}"
+      }
+    ]
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "Rejection superseded cleanly. Now applying the choice:"
+      }
+    ]
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_012RKWhtN64BY8MbMqHb7PwC",
+        "name": "mcp__fixture__apply_choice",
+        "input": {
+          "value": "zstd",
+          "rationale": "zstd is the smallest of the three supported formats at 6 MB, beating gzip (9 MB) and zip (12 MB). A prior rejection of zstd existed because the downstream importer couldn't decode it, but that constraint has been lifted: the importer was upgraded today and its zstd compatibility tests now pass. With the blocking constraint gone, zstd is the clear choice for minimising nightly export size."
+        },
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  },
+  {
+    "type": "user",
+    "content": [
+      {
+        "tool_use_id": "toolu_012RKWhtN64BY8MbMqHb7PwC",
+        "type": "tool_result",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"status\": \"applied\",\n  \"key\": \"archive_format\",\n  \"value\": \"zstd\",\n  \"rationale\": \"zstd is the smallest of the three supported formats at 6 MB, beating gzip (9 MB) and zip (12 MB). A prior rejection of zstd existed because the downstream importer couldn't decode it, but that constraint has been lifted: the importer was upgraded today and its zstd compatibility tests now pass. With the blocking constraint gone, zstd is the clear choice for minimising nightly export size.\"\n}"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "**`archive_format` \u2192 `zstd`** \u2705\n\nHere's the full reasoning trail:\n\n| Format | Size | Status |\n|--------|------|--------|\n| zip | 12 MB | \u274c largest |\n| gzip | 9 MB | \u274c mid |\n| **zstd** | **6 MB** | \u2705 **chosen** |\n\n**Why not earlier?** A recorded rejection blocked `zstd` because the downstream importer couldn't decode it. That rejection carried an explicit `stale_when` condition \u2014 *\"Downstream importer adds tested zstd support\"* \u2014 which fired today: the importer was upgraded and all three decode tests now pass. The rejection was formally superseded before applying the new value, so the decision trail reads cleanly: **tried \u2192 rejected \u2192 constraint lifted \u2192 re-opened \u2192 active**."
+      }
+    ]
+  }
+]

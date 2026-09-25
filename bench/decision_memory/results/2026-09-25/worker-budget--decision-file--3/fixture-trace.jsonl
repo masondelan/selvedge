@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:57:52.441574+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:57:52.544806+00:00", "tool": "read_decisions", "count": 1}
+{"timestamp": "2026-09-25T03:58:03.354173+00:00", "tool": "apply_choice", "key": "worker_count", "value": "2", "rationale": "The decision record explicitly rejects 4 and 8 workers because a prior load test showed they exceed the upstream account's concurrency limit, causing retries and lower throughput. No new load test or account limit change has been recorded, so that constraint remains valid. Setting worker_count to 2 is the highest value within the proven safe ceiling, maximising backlog throughput without degrading reliability."}

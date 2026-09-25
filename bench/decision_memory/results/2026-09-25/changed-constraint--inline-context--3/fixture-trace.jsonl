@@ -1,0 +1,3 @@
+{"timestamp": "2026-09-25T03:58:52.586134+00:00", "tool": "read_project"}
+{"timestamp": "2026-09-25T03:58:52.676843+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-09-25T03:59:02.275366+00:00", "tool": "apply_choice", "key": "archive_format", "value": "zstd", "rationale": "zstd produces the smallest nightly archive at 6 MB, vs. 9 MB for gzip and 12 MB for zip. The prior rejection of zstd was conditioned on the downstream importer lacking decode support; today's upgrade (2026-09-24) resolved that \u2014 current evidence confirms all three formats' decode tests pass on the deployed importer version. With the blocking constraint lifted, zstd is the correct choice as the smallest compatible format."}

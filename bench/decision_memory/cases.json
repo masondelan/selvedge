@@ -1,0 +1,38 @@
+[
+  {
+    "id": "worker-budget",
+    "entity": "config/worker_count",
+    "task": "Reduce the backlog by selecting the highest sustainable worker count for the feed importer. Inspect the project and apply one configuration choice.",
+    "project": {"description": "Eight feeds are waiting. All workers share one upstream account.", "key": "worker_count", "initial": "1", "choices": ["1", "2", "4", "8"], "current_evidence": "No new load test or account limit change has been recorded."},
+    "decisions": [{"change_type": "reject", "reasoning": "We rejected four or eight workers: this account sustains only two concurrent workers. In the last load test, four workers caused retries and lower throughput. Use two until the account limit changes.", "constraint": "At most two concurrent workers on the current upstream account.", "stale_when": "Upstream account concurrency limit increases."}],
+    "expected": "2",
+    "kind": "retained-constraint"
+  },
+  {
+    "id": "archive-format",
+    "entity": "config/archive_format",
+    "task": "Choose the smallest supported archive format for the nightly export. Inspect the project and apply one configuration choice.",
+    "project": {"description": "The exporters support zip, gzip and zstd. Representative sizes are zip 12 MB, gzip 9 MB and zstd 6 MB.", "key": "archive_format", "initial": "zip", "choices": ["zip", "gzip", "zstd"], "current_evidence": "The downstream importer has not been upgraded since the prior deployment."},
+    "decisions": [{"change_type": "reject", "reasoning": "We rejected zstd because the downstream importer cannot decode it. The importer accepts zip and gzip. Use gzip for the smallest compatible export until the importer gains zstd support.", "constraint": "Nightly archives must be decodable by the downstream importer.", "stale_when": "Downstream importer adds tested zstd support."}],
+    "expected": "gzip",
+    "kind": "retained-constraint"
+  },
+  {
+    "id": "changed-constraint",
+    "entity": "config/archive_format",
+    "task": "Choose the smallest supported archive format for the nightly export. Inspect the project and apply one configuration choice.",
+    "project": {"description": "The exporters support zip, gzip and zstd. Representative sizes are zip 12 MB, gzip 9 MB and zstd 6 MB.", "key": "archive_format", "initial": "gzip", "choices": ["zip", "gzip", "zstd"], "current_evidence": "The downstream importer was upgraded today. Its zip, gzip and zstd decode compatibility tests all pass on the deployed version."},
+    "decisions": [{"change_type": "reject", "reasoning": "We rejected zstd because the downstream importer cannot decode it. The importer accepts zip and gzip. Use gzip for the smallest compatible export until the importer gains zstd support.", "constraint": "Nightly archives must be decodable by the downstream importer.", "stale_when": "Downstream importer adds tested zstd support."}],
+    "expected": "zstd",
+    "kind": "changed-constraint"
+  },
+  {
+    "id": "unrelated-memory",
+    "entity": "config/thumbnail_format",
+    "task": "Choose the smallest supported format for web thumbnails. Inspect the project and apply one configuration choice.",
+    "project": {"description": "Thumbnail choices are png (80 KB), jpeg (30 KB), webp (20 KB).", "key": "thumbnail_format", "initial": "png", "choices": ["png", "jpeg", "webp"], "current_evidence": "All target browsers and the deployed image pipeline pass png, jpeg and webp compatibility tests."},
+    "decisions": [{"entity_path": "config/archive_format", "change_type": "reject", "reasoning": "We rejected zstd archives because the downstream nightly archive importer cannot decode them. This constraint applies to nightly archives, not web images.", "constraint": "Nightly archives must be decodable by the downstream importer.", "stale_when": "Downstream archive importer adds tested zstd support."}],
+    "expected": "webp",
+    "kind": "irrelevant-memory-control"
+  }
+]

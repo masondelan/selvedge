@@ -13,9 +13,12 @@
 FROM python:3.12-slim
 
 # Selvedge has a small, declared dependency set and no build-time native deps.
-# Install from the checked-out source so the image content == the pinned commit.
+# Install only the package and its metadata from the pinned source. Keep this
+# allowlist in the Dockerfile as well as .dockerignore: remote Git build contexts
+# must not put the repository's example database or development files in /app.
 WORKDIR /app
-COPY . /app
+COPY pyproject.toml README.md LICENSE /app/
+COPY selvedge/ /app/selvedge/
 RUN pip install --no-cache-dir .
 
 # selvedge-server speaks MCP over stdio. Pin the store explicitly rather than

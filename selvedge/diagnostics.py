@@ -19,7 +19,9 @@ The check rows are deliberately plain dicts (``label`` / ``status`` /
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -93,7 +95,7 @@ def check_row(label: str, status: str, detail: str = "") -> dict:
     return {"label": label, "status": status, "detail": detail}
 
 
-def run_checks() -> list[dict]:
+def run_checks(agent: str | None = None) -> list[dict]:
     """
     Run all doctor checks and return them in display order.
 
@@ -431,8 +433,109 @@ def run_checks() -> list[dict]:
     checks.extend(_db_size_checks(resolved.path))
     checks.extend(_config_precedence_checks())
     checks.extend(_redaction_scan_checks(resolved.path))
+    if agent is not None:
+        checks.extend(agent_hook_checks(agent, Path.cwd()))
 
     return checks
+
+
+def agent_hook_checks(agent: str, project: Path) -> list[dict]:
+    """Inspect setup's project hook file without executing or modifying hooks.
+
+    Configuration presence is separate from client activation. Other settings
+    scopes, plugins, trust decisions and client logs are deliberately not read.
+    ``project`` is explicit, like setup: it is not inferred from the DB path.
+    """
+    from .hooks.install import hook_config, hook_path
+    from .setup import SELVEDGE_HOOKS
+
+    if agent == "claude-code":
+        path = project / ".claude/settings.json"
+        expected = {}
+        for event, (command, matcher) in SELVEDGE_HOOKS.items():
+            entry: dict = {"hooks": [{"type": "command", "command": command}]}
+            if matcher:
+                entry["matcher"] = matcher
+            expected[event] = [entry]
+        desired = {"hooks": expected}
+    else:
+        path = hook_path(agent, project)
+        desired = hook_config(agent)
+
+    rows = [check_row(
+        "Agent hook scope", "INFO",
+        f"{agent}: {path} — current project file only; user, local, plugin and "
+        "managed settings are not inspected. Run from the project root.",
+    )]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("hooks", {}), dict):
+            raise ValueError("expected a JSON object with a hooks object")
+        if "version" in desired and (
+            type(data.get("version")) is not int or data["version"] != desired["version"]
+        ):
+            raise ValueError("expected hooks schema version 1")
+        for event in desired["hooks"]:
+            entries = data.get("hooks", {}).get(event, [])
+            if not isinstance(entries, list) or any(not isinstance(e, dict) for e in entries):
+                raise ValueError(f"{event} must be an array of hook objects")
+            for entry in entries:
+                handlers = entry.get("hooks", [entry])
+                if not isinstance(handlers, list) or any(not isinstance(h, dict) for h in handlers):
+                    raise ValueError(f"{event} has malformed nested hooks")
+    except FileNotFoundError:
+        rows.append(check_row(
+            "Agent hook configuration", "WARN",
+            f"Project file absent. Run `selvedge setup --agent {agent}` if you "
+            "want project hooks; first check whether another scope already supplies them.",
+        ))
+    except (ValueError, OSError) as error:
+        rows.append(check_row("Agent hook configuration", "FAIL", f"Cannot inspect {path}: {error}"))
+    else:
+        if agent == "claude-code" and data.get("disableAllHooks") is True:
+            rows.append(check_row(
+                "Agent hook settings", "WARN",
+                "disableAllHooks=true in this project file; review the client's effective settings.",
+            ))
+        for event, expected_entries in desired["hooks"].items():
+            entries = data.get("hooks", {}).get(event, [])
+            if expected_entries[0] in entries:
+                status, detail = "PASS", "Standard Selvedge entry present; execution not verified."
+            elif any(
+                "selvedge-hook" in str(handler.get("command", ""))
+                for entry in entries for handler in entry.get("hooks", [entry])
+            ):
+                status, detail = "INFO", (
+                    "Customized Selvedge entry detected; review command, matcher and options "
+                    "in the client. Compatibility and execution not verified."
+                )
+            else:
+                status, detail = "WARN", (
+                    f"No recognized Selvedge entry in this file; review other scopes or run "
+                    f"`selvedge setup --agent {agent}`."
+                )
+            rows.append(check_row(f"Agent hook {event}", status, detail))
+
+    executable = shutil.which("selvedge-hook")
+    rows.append(check_row(
+        "Agent hook executable", "PASS" if executable else "WARN",
+        f"{executable} on this shell's PATH; the client may have a different PATH."
+        if executable else "selvedge-hook absent from this shell's PATH; check the client PATH "
+        "or configure the installed absolute executable path. Customized commands are not executed.",
+    ))
+    bypassed = os.environ.get("SELVEDGE_HOOK_DISABLE") == "1"
+    rows.append(check_row(
+        "Agent hook bypass", "WARN" if bypassed else "INFO",
+        "SELVEDGE_HOOK_DISABLE=1 in this process; inherited hooks bypass enforcement."
+        if bypassed else "SELVEDGE_HOOK_DISABLE is not 1 in this process; client environment not inspected.",
+    ))
+    rows.append(check_row(
+        "Agent hook activation", "INFO",
+        "Unknown — no client execution receipt inspected. Review trust, enablement and hook logs "
+        "in your client, then test a reject → lookup → retry in a disposable project. "
+        "MCP activity and configured entries do not prove hook execution.",
+    ))
+    return rows
 
 
 def _db_size_checks(db_path: Path) -> list[dict]:
@@ -520,5 +623,3 @@ def _redaction_scan_checks(db_path: Path) -> list[dict]:
         f"{len(hits)} event(s) contain secret-shaped strings — {shown}{more}. "
         "The store is committed alongside your repo; rotate anything real.",
     )]
-
-

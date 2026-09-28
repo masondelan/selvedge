@@ -416,7 +416,13 @@ def status(as_json):
 
 @cli.command()
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def doctor(as_json):
+@click.option(
+    "--agent",
+    type=click.Choice(["claude-code", "codex", "cursor", "copilot", "gemini", "windsurf"]),
+    default=None,
+    help="Also inspect this client's project hook file. Run from the project root; activation is not inferred.",
+)
+def doctor(as_json, agent):
     """Check Selvedge's ambient state and report PASS/WARN/FAIL per check.
 
     \b
@@ -440,7 +446,7 @@ def doctor(as_json):
       0 — all PASS/INFO/WARN
       1 — any FAIL
     """
-    checks = diagnostics_mod.run_checks()
+    checks = diagnostics_mod.run_checks(agent=agent)
 
     if as_json:
         click.echo(json.dumps({"checks": checks}, indent=2))

@@ -88,6 +88,22 @@ configuration. A working MCP server alone does not prove that hooks are active.
 
 ## Verify in a disposable project
 
+First, run `selvedge doctor --agent codex` from the same project root used for
+setup, substituting `claude-code`, `cursor`, `copilot`, `gemini` or `windsurf` as
+needed. Add `--json` for the existing `{"checks": [...]}` output. Doctor inspects
+the project file in the table above, checks the current shell's executable PATH
+and `SELVEDGE_HOOK_DISABLE`, and reports missing, malformed or customized entries.
+It does not change hook files, execute commands or grant trust. Only malformed or
+unreadable hook configuration adds a FAIL; missing entries and executables are
+warnings, following doctor's existing exit-code rules.
+
+A PASS means the standard entry is present, not that the client ran it. User,
+local, plugin and managed settings are outside this check; an absent project file
+does not mean hooks are absent from every scope. Customized commands, including
+absolute executable paths, require manual review. Client activation remains
+**unknown** until checked in the client. Recent MCP activity is not a hook receipt.
+The existing `doctor` command without `--agent` keeps its normal checks.
+
 1. Use a disposable project and initialize its own Selvedge database. Keep the
    fixture out of real project history.
 2. Record a synthetic rejection on `schema.sql`, with a concrete reason.

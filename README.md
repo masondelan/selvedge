@@ -603,7 +603,7 @@ selvedge stale [--entity ENTITY]          Decisions due for a revisit: past
               [--agent NAME]              stale_when matched by a later change
               [--json]                    ("review suggested")
 selvedge stats [--since SINCE]            Tool call coverage report (per-tool, per-agent)
-selvedge doctor [--json]                  Health check: DB path, schema, hook, MCP wiring
+selvedge doctor [--agent CLIENT] [--json] Health check; optional project agent-hook diagnostics
 selvedge install-hook [--path PATH]       Install git post-commit hook
                      [--window MIN]       (default 60 minutes)
 selvedge backfill-commit --hash HASH      Backfill git_commit on recent events

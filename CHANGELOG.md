@@ -6,6 +6,12 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- Optional `selvedge doctor --agent CLIENT` checks for the six supported clients' project hook configuration, shell executable availability and bypass setting. Missing or customized entries include next steps; configuration presence is explicitly separate from unverified client activation. Existing doctor output shape and default checks are preserved.
+
 ## [0.3.15] - 2026-09-25
 
 ### Added

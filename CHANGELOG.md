@@ -6,7 +6,7 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.3.16] - 2026-10-01
 
 ### Added
 
@@ -18,6 +18,18 @@ Selvedge uses [semantic versioning](https://semver.org/).
 - Matched rejected-path injection pilot and explicit repeat-failure scoring:
   24 completed synthetic trials, 4/6 eligible repeats without memory versus 0/6
   with injected records. Stale/unrelated controls passed; no general superiority claim.
+
+### Fixed
+
+- Source-package hygiene coverage now includes the already-shipped agent hook guide.
+
+### Distribution
+
+- Synchronized Python, plugin, npm and registry pins. No new runtime dependencies,
+  migrations, MCP tools or default telemetry. New tests cover read-only ledger
+  snapshots, PR trust boundaries, repeat-failure scoring and client diagnostics.
+
+---
 
 ## [0.3.15] - 2026-09-25
 

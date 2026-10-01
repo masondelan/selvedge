@@ -3,7 +3,7 @@
   "name": "io.github.masondelan/selvedge",
   "title": "Selvedge",
   "description": "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history.",
-  "version": "0.3.15",
+  "version": "0.3.16",
   "websiteUrl": "https://selvedge.sh",
   "repository": {
     "url": "https://github.com/masondelan/selvedge",
@@ -15,7 +15,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "selvedge",
-      "version": "0.3.15",
+      "version": "0.3.16",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

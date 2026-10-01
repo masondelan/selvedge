@@ -20,102 +20,40 @@
 
 **Persistent decision memory for AI coding agents.**
 
-Selvedge records why code changed, which approaches were rejected, and when
-decisions deserve another look, so future sessions can retrieve that context
-before editing. Query a function, database column, API route or dependency
-instead of reconstructing its history from an old conversation.
+Save why you chose an approach, what you rejected, and what would change your
+mind. Retrieve that context in the next coding session, using a function,
+database column, API route or dependency as the lookup key.
 
-Claude Code, Codex, Cursor, Copilot, Gemini CLI and Windsurf can connect through
-MCP. The CLI works independently. Decisions live in a local SQLite store, with
-no required hosted account and no LLM in the core storage or retrieval path.
-See the [compatibility and capability reference](https://selvedge.sh/reference/compatibility/)
-for setup targets, released capabilities, dependencies and privacy boundaries.
-The [agent hook guide](docs/agent-hooks.md) documents native lifecycle adapters
-and distinguishes protocol-tested behavior from client activation.
+Selvedge is a local MCP server and CLI. Claude Code, Codex, Cursor, Copilot,
+Gemini CLI and Windsurf can connect to the same SQLite store in `.selvedge/`.
+No hosted account is required; core storage and retrieval make no LLM calls.
 
-A saved explanation is testimony supplied by a person or agent. Selvedge does
-not extract hidden model reasoning, verify that an explanation is true, or
-guarantee that an agent will consult it. The useful test is whether the next
-session retrieves the right decision and applies it appropriately.
-
----
-
-Six months ago, your AI agent added a column called `user_tier_v2`. You don't
-know why. `git blame` points to a commit from `claude-code` with a generated
-message that says "Update schema." The session that made the change is long
-gone — and so is the prompt that produced it.
-
-With Selvedge, you run this instead:
+[**Get started**](#quickstart) · [Documentation](https://selvedge.sh/start/what-is-selvedge/) · [Agent compatibility](https://selvedge.sh/reference/compatibility/)
 
 ```bash
-$ selvedge blame user_tier_v2
-
-  user_tier_v2
-  Changed     2025-10-14 09:31:02
-  Agent       claude-code
-  Commit      3e7a991
-  Reasoning   User asked to add a grandfathering flag for legacy free-tier
-              users during the pricing migration. Stores the original tier
-              so we can backfill discounts without touching billing history.
+uv tool install --upgrade selvedge
+selvedge demo
 ```
 
-This illustrative record shows **rationale logged while the context was available**.
-Real records are only as informative as the explanations supplied. Imported
-history may contain inferred or missing rationale; retain that distinction.
-
----
-
-<!-- DEMO GIF
-     Record a 30–45 second terminal session showing:
-     1. `selvedge status`  →  shows N total events
-     2. `selvedge blame payments.amount`  →  full output with reasoning
-     3. `selvedge diff users --since 30d`  →  table of recent changes
-     4. `selvedge search "stripe"`  →  filtered results
-     Use `vhs` (https://github.com/charmbracelet/vhs) or Asciinema.
-     Replace this comment block with: ![Selvedge demo](docs/demo.gif)
--->
-
----
+Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) and Python
+3.10+. The demo uses a temporary database. Follow the [quickstart](#quickstart)
+to connect your agent to a real project.
 
 ## Who Selvedge is for
 
-Selvedge has two audiences. Same tool, same `pip install`, same SQLite
-file under `.selvedge/`. Different scale of pain.
-
-**Teams running long-term, AI-coded codebases.**
-When the project is big enough that you (or someone else) will touch it
-again in six months, twelve months, three years — but most of it was written
-by an agent whose context evaporated the day each PR shipped. `git blame`
-tells you what changed. Selvedge tells you *why* — even after the agent
-session, the prompt template, the developer who asked for it, and the model
-version are all long gone. This is the original use case: production
-codebases, schema decisions, migrations, dependency changes that need an
-audit trail that survives turnover.
-
-**Solo developers using Claude Code on everyday projects.**
-Side projects, weekend builds, the small internal tool you keep poking at.
-You don't need enterprise governance — you just need to remember why you (or
-your agent) did the thing you did yesterday, last week, last sprint. Run
-`selvedge init` once. Add four lines to your `CLAUDE.md`. From then on,
-`selvedge blame` is muscle memory — a way to talk to your past self when
-your past self was an LLM.
-
-If you've ever come back to your own AI-built project and thought "what was
-this *for* again?", Selvedge is the missing piece.
-
----
+- **Solo developers** returning to a project after the original conversation is gone.
+- **Teams** that need to pass recorded decisions between sessions and coding tools.
 
 ## The problem
 
-Both human and AI coding workflows can leave intent scattered across commits,
-PRs and conversations. When a session ends, a later agent may see the code
-without the constraint or rejected approach that explains it.
+Code shows the chosen approach. It may leave out the constraint that shaped it
+or the alternative you ruled out. Selvedge gives those explanations a place in
+the project and tools to retrieve them before the next edit.
 
-Six months later, your team is debugging a schema decision with no trail.
-`git blame` tells you *what* changed and *when*. It can't tell you *why*.
-
-**Selvedge captures the why — live, by the agent itself, as the change is
-made.** The diff is git's job. The why is Selvedge's.
+Only explicitly saved decisions can be recalled. A saved explanation is an
+account supplied by a person or agent; Selvedge does not verify that it is true
+or guarantee that an agent will consult it. [Verify one decision across two
+sessions](https://selvedge.sh/guides/verify-first-decision/) to test your setup.
 
 ---
 
@@ -163,20 +101,22 @@ an advantage over a maintained file or the same information in a prompt.
 ## Where Selvedge fits
 
 <p align="center">
-  <img src="docs/ecosystem.svg" alt="Where Selvedge fits in the broader AI-coded-codebase tooling stack" width="720">
+  <a href="https://selvedge.sh/start/how-it-works/">
+    <img src="docs/ecosystem.svg" alt="An agent saves a decision through MCP or CLI. Selvedge stores its reason and rejected alternatives locally. A later session retrieves the record before editing. Git, code review and observability keep their existing roles." width="800">
+  </a>
 </p>
 
-AI agents call Selvedge as they work. Selvedge stores explicitly supplied
-rationale and makes it queryable later. Export formats support downstream
-workflows, including [Agent Trace interchange](docs/agent-trace-interop.md).
-A provenance record is evidence of what was recorded, not a certification
-of correctness or compliance.
+1. **Save a decision.** You or your coding agent record a choice, its reason,
+   and any rejected approaches through MCP or the CLI.
+2. **Keep it with the project.** Selvedge stores the record in local SQLite,
+   keyed to the function, column, route or other entity it concerns.
+3. **Recall it before the next edit.** A later session queries the same store
+   and checks whether the earlier constraint still applies.
 
-Selvedge does **not** replace `git` (line-level what/when), PR review
-tools (review-time quality), agent observability (LLM call traces),
-or general-purpose code-host AI features. It sits between them — the
-provenance-as-first-class-citizen layer that everything else
-references.
+Git keeps the code history; review tools check changes; observability shows
+runtime behavior. Selvedge adds the recorded reasons behind decisions.
+[How it works](https://selvedge.sh/start/how-it-works/) ·
+[Agent Trace interchange](docs/agent-trace-interop.md)
 
 ---
 
@@ -191,7 +131,7 @@ Choose the simplest memory mechanism that fits your workflow:
 | Who changed a line and when | Git history and attribution tools | The stated reason and earlier approaches for an entity |
 | Carry recorded decisions into another session or client | Shared project documentation | MCP and CLI retrieval from the same local database |
 
-These approaches can be used together. Read the [source-linked comparison](https://selvedge.sh/compare/)
+These approaches can be used together. Read the [source-linked comparison](https://selvedge.sh/compare/codebase-memory-mcp-servers/)
 and [instructions versus ADRs versus decision memory](https://selvedge.sh/compare/instructions-and-adrs/)
 for specific selection criteria and limitations.
 
@@ -209,17 +149,11 @@ for checking applicability and testing its change.
 `add-stripe-billing` to retrieve a task's decisions across tables, environment
 variables, routes and functions.
 
-**Selvedge ↔ Agent Trace.** [Agent Trace](https://agent-trace.dev/) is an
-open AI code-attribution wire format published by Cursor (RFC, Jan 2026). Its
-original GitHub home went 404 in August 2026 and the multi-vendor momentum
-behind it has faded, but the spec and schema still resolve at agent-trace.dev,
-frozen at v0.1.0. Since **v0.3.9**, `selvedge export --format agent-trace`
-emits Agent Trace v0.1.0 records and `selvedge import --format agent-trace`
-reads them back — a portable, documented interchange format for file/line AI
-attribution, with reasoning and entity-level provenance carried in each
-record's `dev.selvedge` metadata. The mapping is in
-[`docs/agent-trace-interop.md`](docs/agent-trace-interop.md); Selvedge vendors
-the schema and has no runtime dependency on the upstream project.
+**Agent Trace interchange.** `selvedge export --format agent-trace` and
+`selvedge import --format agent-trace` exchange Agent Trace v0.1.0 records.
+Reasoning and entity history travel in the `dev.selvedge` metadata.
+The [mapping and limits](docs/agent-trace-interop.md) document the format;
+Selvedge vendors the schema and has no runtime dependency on the upstream project.
 
 ---
 
@@ -379,7 +313,7 @@ selvedge prompt | tee -a CLAUDE.md
 ```
 
 Prefer to copy-paste? The same block is one click away on the website:
-**[selvedge.sh/prompt-block](https://selvedge.sh/prompt-block)** — with a
+**[selvedge.sh/prompt-block](https://selvedge.sh/prompt-block/)** — with a
 copy button and notes on what your agent does with it.
 
 **4. Install the post-commit hook**
@@ -453,7 +387,7 @@ Docs: <https://cursor.com/docs/mcp>
 
 Windsurf hot-reloads the file — no restart needed. The in-app
 **Plugins → View raw config** button opens the exact file Cascade reads.
-Docs: <https://docs.windsurf.com/windsurf/cascade/mcp>
+Docs: <https://docs.devin.ai/desktop/cascade/mcp>
 </details>
 
 <details>
@@ -467,7 +401,7 @@ command = "selvedge-server"
 ```
 
 Or run `codex mcp add selvedge -- selvedge-server`.
-Docs: <https://developers.openai.com/codex/config-reference>
+Docs: <https://learn.chatgpt.com/docs/config-file/config-reference>
 </details>
 
 <details>

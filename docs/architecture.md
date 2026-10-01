@@ -5,6 +5,53 @@
 
 ---
 
+## Current release and next work
+
+**Updated October 1, 2026, against v0.3.16.** The
+[CHANGELOG](../CHANGELOG.md) records delivered behavior; the phase numbers below
+identify design work, not a release schedule. Earlier assignments of Phases
+2.18–2.24 to v0.3.12–v0.3.18 are retired. Unfinished phases have no assigned
+release; the v0.4.x sections are proposed breaking-change groupings, not dates
+or promises. Historical design notes remain below for context.
+
+| Release | Delivered |
+| --- | --- |
+| v0.3.12 | Explicit setup for six clients, corrected MCP configuration and a disposable decision-memory demo. |
+| v0.3.13 | Stale-decision and startup-summary corrections; explicit supersession remains the way to reopen a decision. |
+| v0.3.14 | MCP query-window parity, including an explicit seven-day `prior_attempts` window. |
+| v0.3.15 | Five additional native hook adapters, preserving setup merges and the published 48-trial synthetic pilot. |
+| v0.3.16 | Read-only agent/session ledger, optional trusted-base PR review Action, project hook diagnostics and the published 24-trial injection pilot. |
+
+The current core uses SQLite and **eight MCP tools**. `summary` is a library
+helper, not a ninth tool. The ledger's actor labels are self-reported; chain
+verification does not authenticate them. The review Action is opt-in and uses
+publication-approved base history. Neither an authenticated remote service nor
+cross-repo queries ship in v0.3.16. See [review context](review-context.md).
+
+**Next work:** validate lifecycle adapters in real clients (Phase 2.23), expand
+the evaluation beyond synthetic choices (Phase 2.24), and design authenticated
+remote access (Phase 3.1). The remote design must settle transport, actor
+identity, project permissions and safe concurrent storage before implementation;
+sharing a live SQLite WAL database over a network filesystem is not that design.
+The existing same-host ledger and optional review Action can be used now.
+
+**Still open:** Git Notes import and provenance work (2.18), opt-in local
+cross-repo reads (2.19/2.20), conditional salvage (2.21), and reporting commands
+(2.22). The v0.3.16 ledger and Action address part of the review workflow; they
+do not implement `audit`, `digest` or `pr-comment`. Standards participation
+remains a separate follow-up after the review workflow, with no version assigned.
+
+The pilots are evidence about small synthetic configuration tasks. The
+[48-trial pilot](../bench/decision_memory/results/2026-09-25/) tied Selvedge,
+decision-file and inline-fact conditions; the
+[24-trial pilot](../bench/decision_memory/results/2026-10-01/) observed 4/6
+eligible rejected-path repeats without memory and 0/6 with injected records.
+Neither establishes general coding performance, native hook delivery or
+superiority over maintained files. The detailed remaining evaluation gates are
+in Phase 2.24.
+
+---
+
 ## What this is
 
 Selvedge is an open-source MCP server that AI coding agents call as they work to log structured change events. It answers questions like:
@@ -66,7 +113,7 @@ selvedge/
 │   ├── config.py         DB path resolution (env → walk-up → ~/.selvedge)
 │   ├── storage.py        SelvedgeStorage — SQLite CRUD layer + entity-path canonicalization
 │   ├── aggregates.py     summary() — schema-versioned digest library (no LLM, no tool)
-│   ├── server.py         FastMCP server — 7 tools exposed to AI agents
+│   ├── server.py         FastMCP server — 8 tools exposed to AI agents
 │   ├── importers.py      Migration file parsers — SQL DDL + Alembic
 │   └── cli.py            Click + Rich CLI — init, status, diff, blame, history, search, log, migrate-paths, import, export, install-hook
 ├── scripts/
@@ -203,6 +250,8 @@ selvedge migrate-paths                     # dry-run re-canonicalization + colli
 selvedge migrate-paths --apply             # write canonical entity_paths (backfill)
 selvedge stats                             # tool call coverage (per-tool, per-agent, missing-reasoning)
 selvedge doctor                            # PASS/WARN/FAIL health check (DB path, schema, hook, MCP wiring)
+selvedge doctor --agent codex              # project hook configuration; client activation remains unverified
+selvedge ledger --json                     # read-only decision snapshot with attribution and chain checks
 selvedge import ./migrations/              # backfill from SQL/Alembic migration files
 selvedge import ./migrations/ --dry-run   # preview without writing
 selvedge import --from-git --since v0.3.0  # seed pre-Selvedge reverts from git history (v0.3.9.1)
@@ -211,7 +260,7 @@ selvedge install-hook                      # install git post-commit hook
 selvedge backfill-commit --hash abc123     # manually backfill a git commit hash
 ```
 
-All commands support `--json` for machine-readable output.
+Read commands support `--json` for machine-readable output; check each command's `--help` for its options.
 
 ---
 
@@ -321,10 +370,11 @@ Add --json to any read command; selvedge <command> --help gives detail on demand
 
 > **Keeping this accurate:** The source of truth for what's shipped is `CHANGELOG.md`.
 > If checkboxes here drift from reality, trust the changelog and update this file.
-> A weekly scheduled check flags any mismatch automatically.
+> Reconcile this plan against the changelog at each release. The current-status
+> section above takes precedence over historical sequencing notes.
 
 ### Phase 1 — Core (DONE ✓ · v0.1.0)
-- [x] MCP server with 5 tools (log_change, diff, blame, history, search) — `changeset` added in v0.2.1, current count is 6
+- [x] MCP server with 5 tools (log_change, diff, blame, history, search) — `changeset` added in v0.2.1; the current eight-tool surface also includes `prior_attempts` and `stale_decisions`
 - [x] SQLite storage with WAL mode
 - [x] CLI (init, status, diff, blame, history, search, log, stats)
 - [x] Local tool call telemetry + `scripts/coverage_check.py`
@@ -376,7 +426,7 @@ Add --json to any read command; selvedge <command> --help gives detail on demand
       "fixe"/"fixed", not "fix"/"fixed"; same for add/remove/update/change)
 - [x] Public API exports in `__init__.py` with `__all__` and frozen-surface
       test (`tests/test_public_api.py`)
-- [x] CI gates: ruff, mypy (pragmatic strict), pytest-cov ≥85%; current 92%
+- [x] CI gates: ruff, mypy (pragmatic strict), pytest-cov ≥85%; 92% at that milestone
 - [x] MCP protocol smoke tests (`tests/test_mcp_protocol.py`) — boots real
       `selvedge-server` subprocess and round-trips every tool over stdio
 
@@ -519,7 +569,7 @@ github.com).
 > wrong" surface. Verify so users can detect corruption. Backup so
 > they have a known-good snapshot to fall back to. The retention
 > half ships separately in v0.3.6; salvage (`selvedge repair`)
-> ships in v0.3.15 only if telemetry shows corruption incidents
+> remains conditional in Phase 2.21, only if reported corruption incidents
 > warrant it. Theme: *find out what's wrong, take a safe snapshot.*
 
 - [x] **`selvedge verify` command** — runs SQLite's
@@ -618,7 +668,7 @@ github.com).
 > the positioning artifacts (demo, comparison page, README) because
 > shipping the tool without making the wedge visible wastes the
 > cycle. Supporting CLI surface (`audit` / `digest` / `pr-comment`)
-> ships separately in v0.3.16 (deferred from v0.3.9, which was
+> remains proposed in Phase 2.22 (deferred from v0.3.9, which was
 > reassigned to the Agent Trace exporter). Theme: *make the wedge
 > legible — and
 > the entity matching it relies on canonical.*
@@ -692,8 +742,8 @@ github.com).
       The grouped-digest logic (changesets touched, agents
       involved, top entities by activity) lands in
       `selvedge.aggregates.summary()` as a pure Python function
-      that v0.3.16's `selvedge audit` and `selvedge digest`
-      consume directly. **Tool-surface discipline call**: an
+      that the proposed `selvedge audit` and `selvedge digest`
+      commands in Phase 2.22 would consume directly. **Tool-surface discipline call**: an
       MCP `summary` tool would be a genuinely new shape (aggregate
       vs. event-list), but the agent-facing use case is thin —
       agents calling `prior_attempts` already get the relevant
@@ -701,7 +751,7 @@ github.com).
       to MCP later only if usage telemetry shows agents actually
       reach for an aggregate primitive. Schema-versioned via
       `summary_version` in the dataclass so the shape can be
-      lifted to MCP without breaking the v0.3.16 CLI consumers.
+      lifted to MCP without breaking future CLI consumers.
 - [x] **Positioning artifacts (release-blocker, not optional polish):**
     * `docs/comparison.html` update naming `prior_attempts` as the
       "alternatives tried, rejected paths" capability the
@@ -765,8 +815,8 @@ github.com).
 - **`summary` library-only ships under-served if agents *do*
   want an aggregate MCP primitive**: defended by the
   `summary_version` field on the dataclass — schema-versioned
-  from day one so lifting it to MCP later doesn't break the
-  v0.3.16 CLI consumers. Promotion criterion is telemetry signal,
+  from day one so lifting it to MCP later doesn't break future
+  CLI consumers. Promotion criterion is telemetry signal,
   not a roadmap commitment.
 - **Keep-separate decision for `prior_attempts` (and v0.3.8's
   `stale_decisions`) deserves to be documented, not just
@@ -813,7 +863,7 @@ github.com).
       output, no LLM calls.
 - [x] **`selvedge stale` CLI command** — same data surface,
       terminal-formatted, `--json` for cron / Slack jobs. Composes
-      with `selvedge digest` (v0.3.16) so the morning report can
+      with the proposed `selvedge digest` (Phase 2.22) so the morning report can
       include "decisions that aged out yesterday."
 - [x] **Reasoning-quality validator nudge** — when `change_type` is
       in `{add, modify, create, migrate}` and `entity_type` looks
@@ -859,7 +909,7 @@ github.com).
 > native model, the 8-tool MCP surface, and SQLite storage are untouched.
 > **The originally-planned developer-ergonomics CLI surface (`audit` /
 > `digest` / `pr-comment`) was displaced by this pull-forward and now
-> lands in Phase 2.22 (v0.3.16).** Full mapping in
+> remains proposed in Phase 2.22, without a release assignment.** Full mapping in
 > `docs/agent-trace-interop.md`. Theme: *compatible producer, not
 > competitor — shipped early.*
 
@@ -1117,25 +1167,11 @@ github.com).
   warning that didn't fire; a false warning on every write teaches
   agents to ignore the warnings list.
 
-> **Sequencing after v0.3.10 (noted 2026-08-06, post-OpenLore).**
-> The order below holds, deliberately re-affirmed: **v0.3.11 (2.17)
-> ships next** — staleness is the least-crowded, best-evidenced half
-> of active memory, and OpenLore's `verify_claim(decision-current)`
-> independently converging on decision-currency checking is
-> validation, not preemption. **v0.3.12 (2.18) gains urgency**: its
-> append-only test and CI-verified context-cost bound are exactly
-> the two claims that separate Selvedge from the deterministic
-> newcomer — they should be machine-checkable before comparison copy
-> leans on them. One order decision considered and declined: pulling
-> 2.23 (cross-harness) ahead of cross-repo (2.19/2.20) — OpenLore is
-> not capture-based, so it adds no new capture-coverage pressure;
-> revisit with adoption signal at the v0.3.12 ship. 2.24
-> (SelvedgeBench) stays last before Phase 3, on purpose: the
-> benchmark's memory arm *requires retained failures* — a store that
-> purges rejected decisions structurally cannot power it — so the
-> bench is both the proof of the wedge and the consumer of 2.17's
-> `reject`/`revert` events and 2.18's trust tiers, which must ship
-> first.
+> **Historical sequencing, superseded October 1, 2026.** The August plan
+> placed cross-repo work before cross-harness delivery and evaluation. Actual
+> v0.3.12–v0.3.16 releases prioritized setup, correctness, native adapters,
+> synthetic pilots and review context. The current-status section records the
+> delivered scope; open design work below no longer reserves point releases.
 
 ### Phase 2.17 — Active memory v2 / semantic (v0.3.11)
 > The pattern-based half of active memory. The `expires_when` column
@@ -1302,7 +1338,7 @@ github.com).
   filtered on `confidence: proximity_high` should also accept
   `confidence: exact`.
 
-### Phase 2.18 — Competitive interop + verifiable claims (v0.3.12)
+### Phase 2.18 — Competitive interop + verifiable claims (partly delivered; remaining work unassigned)
 > Items sharing a theme: making Selvedge's positioning claims
 > observable, verifiable, and interoperable. Git Notes reader makes
 > Selvedge a complement to Git AI's "open standard" framing rather
@@ -1315,8 +1351,7 @@ github.com).
 > claim, which is exactly this phase's theme. Theme: *the positioning we
 > already claim, now machine-checkable.*
 >
-> The git-import cluster can pull forward to a v0.3.x point release if the
-> trust-tier gating is wanted before v0.3.12 — none of it needs a schema
+> The git-import cluster has no release assignment. Most of it needs no schema
 > migration (the `agent="git-import"` marker already distinguishes the
 > re-derivable slice retroactively; a dedicated `provenance` field is the
 > only schema-touching item and is optional).
@@ -1345,22 +1380,17 @@ github.com).
 - [ ] **`selvedge ci-check` — reporter mode only.** Runs in CI on
       PR branches, computes reasoning quality / coverage ratio /
       changeset coverage against thresholds in `config.toml`.
-      v0.3.12 **always exits 0**, prints metrics, posts PR comment
+      The proposed reporter **exits 0 on threshold violations**, prints metrics, posts a PR comment
       if configured. A `--enforce` flag opts in to gating. Default
       enforcement remains deferred (no version commitment) until
       telemetry shows what natural reasoning-quality distributions
       look like — Goodhart-trap defense.
-- [ ] **Context-cost claims, CI-verified.** `scripts/schema_tax.py`
-      wired into CI as a drift guard (`--max`, already used
-      locally) and `docs/coding-agents.md` finished as the
-      published context-cost page: the MCP tool surface measured
-      (~2.6–3.4k tokens resident), the CLI path's ~zero static
-      cost, and every public number stated as a CI-verified bound
-      regenerated by the script — not a hand-measured hero figure.
-      This is a positioning claim made machine-checkable, which is
-      this phase's whole theme. What replicates in the 2026
-      literature is cost/latency at accuracy parity, so the
-      economics page *is* the evidence surface.
+- [x] **Context-cost drift guard.** `scripts/schema_tax.py --max 4600`
+      runs in CI. The v0.3.16 release measured 4,504 tokens for eight MCP tools;
+      [coding-agent guidance](coding-agents.md) explains the measurement and
+      CLI alternative. Remeasure rather than carrying forward the old
+      2.6–3.4k estimate. This gate is separate from the proposed no-network
+      and append-only code-path tests in this phase.
 - [ ] **`dev.selvedge` namespace as a stable contract; upstream
       dead, exporter kept frozen.** The v0.3.9 Agent Trace exporter
       already emits reasoning + entity provenance under
@@ -1500,9 +1530,9 @@ github.com).
   diff is what backs the hard tier, and any tier gating ships behind
   `ci-check --enforce` (opt-in), never as a silent default.
 
-### Phase 2.19 — Cross-repo CLI (v0.3.13)
+### Phase 2.19 — Cross-repo CLI (proposed; no release assigned)
 > First half of cross-repo personal-OSS memory. CLI surface ships
-> first; MCP-parameter half waits for v0.3.14 once CLI usage tells
+> first; the MCP-parameter half waits for adoption evidence once CLI usage tells
 > us if agents would even use it. Read-only union over N local
 > `.selvedge/` directories; writes still scope to the current
 > project. Theme: *your portfolio is one queryable surface, opted
@@ -1557,15 +1587,15 @@ github.com).
   `links.audit.log` audit trail + doctor surfacing recent links.
 - **Schema skew across linked DBs**: surfaced as WARN by doctor;
   union still works. Per-DB scan summary on every query (the
-  `_scan_summary` field) lands in v0.3.14 alongside the MCP
+  `_scan_summary` field) is proposed in Phase 2.20 alongside the MCP
   parameter work.
 
-### Phase 2.20 — Cross-repo MCP + write disambiguation (v0.3.14)
+### Phase 2.20 — Cross-repo MCP + write disambiguation (proposed; no release assigned)
 > Second half of cross-repo personal-OSS memory. Lights up the
 > `all_projects: bool = False` parameter across MCP read tools, adds
 > the `project` field to `LogChangeResult` so cross-repo writes are
 > never ambiguous, and ships the `_scan_summary` response field that
-> makes filter-coverage gaps visible. Ships only if v0.3.13's CLI
+> makes filter-coverage gaps visible. Ships only if Phase 2.19's CLI
 > cross-repo gets adopted — otherwise the MCP parameter is overhead
 > for no demonstrated demand. Theme: *agents get the same cross-repo
 > view as the CLI, with write resolution made visible.*
@@ -1589,7 +1619,7 @@ github.com).
       failure mode where a filter on a field that didn't exist in
       older schemas drops entries with no indication.
 - [ ] **Doctor — schema-skew + allowlist-symmetry check** for linked
-      DBs (lands here rather than v0.3.13 because the MCP-side
+      DBs (lands here rather than Phase 2.19 because the MCP-side
       complications mean this needs to be tested at both surfaces).
 - [ ] **Read-union performance test** —
       `tests/test_linked_projects_perf.py` runs common queries
@@ -1605,21 +1635,21 @@ github.com).
 #### Risks acknowledged & mitigations
 
 - **MCP parameter overhead for unproven demand**: deferred from
-  v0.3.13 specifically so we observe whether CLI cross-repo gets
-  adopted. If v0.3.13 ships and no one uses `--all-projects` after
-  a release cycle, v0.3.14 ships only the `LogChangeResult.project`
-  field and the rest deprecates back to research.
+  Phase 2.19 specifically so we observe whether CLI cross-repo gets
+  adopted. If the CLI ships and no one uses `--all-projects` after
+  a release cycle, reconsider the MCP work; a standalone
+  `LogChangeResult.project` field may still be useful.
 - **Filter coverage silently missing old entries**:
   `_scan_summary` makes the gap explicit per linked DB.
 - **Read-union performance scaling**: `test_linked_projects_perf.py`
   regression test; doctor-surfaced N-recommendation if perf
   degrades.
 
-### Phase 2.21 — Salvage when needed (v0.3.15, conditional)
+### Phase 2.21 — Salvage when needed (conditional; no release assigned)
 > Originally scoped as part of v0.3.5; deferred here because corruption
 > is the rarest failure mode in the install base and `selvedge backup`
-> (v0.3.5) plus `selvedge verify` (v0.3.5) cover 95% of the recovery
-> need. v0.3.15 **ships only if** telemetry from the install base
+> (v0.3.5) plus `selvedge verify` (v0.3.5) provide the existing recovery
+> path. Salvage **ships only if** reports from the install base
 > shows real corruption incidents that backup-restoration alone
 > doesn't address. Otherwise the bullet stays open. Theme:
 > *salvage, when telemetry shows we need it.*
@@ -1656,16 +1686,25 @@ github.com).
 
 
 
-### Phase 2.22 — Developer ergonomics (v0.3.16)
+### Phase 2.22 — Developer ergonomics (partly delivered; remaining work unassigned)
 > The CLI surface that moves Selvedge into the developer's existing
 > review and reporting workflow. None of these are wedges — they're the
 > supporting cast that turns `prior_attempts` + `summary` into a usable
 > everyday surface. **Deferred from v0.3.9 (Phase 2.15)** when the Agent
-> Trace exporter was pulled forward from Phase 3.2; re-homed here as the
-> last 0.3.x feature release, immediately before the v0.4.0
-> tool-consolidation review that decides whether `digest` / `audit`
+> Trace exporter was pulled forward from Phase 3.2. The remaining commands
+> have no release assignment; a future tool-consolidation review will decide
+> whether `digest` / `audit`
 > become pure CLI views of `summary`. Theme: *make captured intent
 > visible in the developer's existing review loop.*
+
+**Delivered in v0.3.16:** read-only `selvedge ledger`, the opt-in
+`actions/review-context` Action and `doctor --agent` project hook diagnostics.
+See [review context](review-context.md) and [agent hooks](agent-hooks.md).
+The Action reports approved base history; it is not the proposed `pr-comment`
+command. Doctor checks project configuration, executable availability and the
+bypass setting; it does not verify client activation or implement the planned
+upstream-version compatibility table. Reassess the remaining commands against
+usage of these shipped surfaces before adding overlapping interfaces.
 
 - [ ] **`selvedge audit` command** — PR-review-ready quality report
       for a given branch or commit range. Lists every entity touched
@@ -1705,37 +1744,35 @@ github.com).
   doctor row, treating third-party config paths as a versioned
   contract.
 - **`audit` / `digest` overlap with the v0.4.0 consolidation review**:
-  intentionally landed right before it, so the review settles their
-  final relationship to the `summary` MCP tool with the CLI surface
-  already in hand.
+  their relationship to the existing `summary` library helper and any
+  proposed MCP aggregate tool must be settled before adding overlapping
+  surfaces. No aggregate MCP tool or reporting CLI is shipped today.
 
-### Phase 2.23 — Capture coverage: cross-harness delivery (v0.3.17)
-> The delivery loop (gate + session-start + pre-compact) is
-> Claude-Code-shaped as of v0.3.10. This phase ports the
-> capture/delivery contract to other harnesses, answering the one
-> real coverage gap in the capture story: an agent that never calls
-> the tool never writes the memory, and a harness with no hook wired
-> never gates or delivers. Cursor first — its hooks API is shipped
-> and documented, with pre-execution events and completed-thought
-> surfaces. Microsoft's Agent Host Protocol second, as an explicit
-> spike — a DRAFT protocol carrying a totally-ordered event stream
-> across four harnesses (Copilot / Claude / Codex / ACP), where one
-> integration covers all four but "breaking changes expected" is in
-> the spec's own words. Theme: *same store, same discipline, more
-> harnesses.*
+### Phase 2.23 — Capture coverage: cross-harness delivery (adapters shipped; validation ongoing)
+> **Partly delivered in v0.3.15; diagnostics added in v0.3.16.** Native
+> adapters now cover Codex, Cursor, VS Code Copilot Local, Gemini CLI and
+> Windsurf/Cascade alongside the existing Claude Code integration. Client
+> capabilities differ; configuration and protocol tests do not prove native
+> activation. Theme: *same store, explicit coverage and observable delivery.*
 
-- [ ] **Adapter contract doc** — what a harness must expose for
-      capture/delivery parity: a pre-write gate point, a
-      session-start injection point, a pre-destruction (compact)
-      point, and a place to run the `selvedge` CLI. Written against
-      the harnesses surveyed; becomes the checklist any new adapter
-      PR fills in, so adapters accrete against a contract instead
-      of ad hoc.
-- [ ] **Cursor hooks adapter** — gate + delivery parity where
-      Cursor's hook surface allows, wiring the existing hooks CLI
-      into Cursor's hook config the way the plugin does for Claude
-      Code. `selvedge setup` and the 2.22 setup-detection version
-      contract learn the Cursor hook config path.
+- [x] **Adapter capability and activation guide** — [agent hooks](agent-hooks.md)
+      documents each client's available lifecycle events, setup/trust steps,
+      fail-open behavior and a disposable-project validation procedure.
+- [x] **Native adapters and preserving setup merges** — v0.3.15 added five
+      client protocols. Codex, Cursor, Copilot Local and Gemini support startup
+      context and advisory compaction notifications; Windsurf supports edit
+      and command checks only. Notifications are not model context injection.
+- [x] **Protocol and configuration regression tests** — native payloads,
+      subprocess output/exit contracts, SQLite decisions and preservation of
+      unrelated or customized configuration are covered.
+- [x] **Project diagnostics** — v0.3.16 `doctor --agent CLIENT` checks the
+      six clients' project hook configuration, shell executable availability
+      and bypass setting. Client activation remains unknown.
+- [ ] **Broader native-client validation** — retain client/version receipts
+      for actual startup, edit, lookup/retry and compaction behavior. The
+      agent-hooks guide records one observed Codex edit-gate/lookup/retry
+      path; startup/compaction and the other four new clients still need
+      native end-to-end checks. Do not infer these from protocol tests.
 - [ ] **AHP watcher — a spike, explicitly.** Evaluate what
       *deterministic* capture and delivery the AHP event stream
       supports: ordered tool/file events are low-tier provenance
@@ -1745,9 +1782,9 @@ github.com).
       is out — that's the LLM-shaped hole the non-goals forbid.
       Timeboxed; ends in a written promote-or-park verdict either
       way.
-- [ ] **Tests** — adapter-contract conformance suite for the
-      Cursor path (~15), spike artifacts excluded from the suite.
-      Soft budget: ≤25 new tests.
+- [ ] **Follow-up tests** — add regression coverage for failures found in
+      native-client validation. Existing protocol coverage is delivered;
+      spike artifacts remain separate from the package suite.
 
 #### Risks acknowledged & mitigations
 
@@ -1761,21 +1798,26 @@ github.com).
   harness that can't meet the contract gets a documented partial
   integration, not a bespoke fork of the hook logic.
 
-### Phase 2.24 — SelvedgeBench: failure-avoidance evaluation (v0.3.18)
-> No published benchmark isolates "given memory of a prior failed
-> attempt, does the agent avoid repeating it?" on real repos with a
-> memory-ablated control — the closest prior art (BenchTrace's
-> failure-avoidance-rate metric, arXiv 2605.29225) stops at
-> reflection quality. A first-of-kind claim is available, and the
-> bar for 2026 reviewers is known: a token-matched control arm and
-> reported write-path cost, because three independent 2026 studies
-> found memory modules failing token-matched baselines on accuracy
-> while cost/latency-at-parity results replicate. This phase is
-> also the honest test of the entity-granularity bet: fine-grained
-> memory organization is unoccupied territory with a measured
-> warning attached (arXiv 2604.27003 — strong forward transfer can
-> coexist with induced forgetting). Measure it before it becomes a
-> headline claim. Theme: *the claim, measured, against a control.*
+### Phase 2.24 — SelvedgeBench: failure-avoidance evaluation (pilots published; broader evaluation open)
+> **Synthetic pilots published in v0.3.15 and v0.3.16; the broader benchmark
+> remains open.** The current harness tests configuration choices with
+> author-seeded decisions, not real repository coding or capture quality.
+> It establishes a reproducible starting point, not a first-of-kind or
+> general superiority claim. Theme: *the claim, measured against controls.*
+
+- [x] **In-repository harness** — `bench/decision_memory/`, outside runtime
+      dependencies, with frozen schedules, fresh sessions, model/configuration
+      receipts, observable tool traces and deterministic final-choice scoring.
+- [x] **48-trial configuration pilot** — published September 25. Selvedge,
+      decision-file and inline-fact conditions each scored 12/12; no-memory
+      scored 8/12. No demonstrated advantage over those information baselines.
+- [x] **24-trial matched injection pilot** — published October 1. Still-valid
+      rejected choices repeated in 4/6 eligible no-memory trials and 0/6
+      injected-record trials; stale/unrelated controls passed. Two eligible
+      synthetic tasks, three repeats each; not token-matched, not native hooks.
+- [x] **Results and limits retained** — both reports, every measured trial
+      and separate technical-smoke history are linked from the
+      [pilot README](../bench/decision_memory/README.md).
 
 - [ ] **Task substrate** — failed-attempt scenarios derived from
       real repository histories (revert-then-retry cycles; the 2.18
@@ -1800,15 +1842,10 @@ github.com).
       the measurement that decides whether Phase 2.17's
       selection-order contract ever grows a ranking step. Lives in
       the bench harness; the zero-LLM core is untouched.
-- [ ] **Harness placement** — separate repo or `bench/` directory,
-      decided at spike start (separate repo keeps the core
-      dependency footprint clean). CLI support lands in the package
-      only if the bench needs a stable export surface that doesn't
-      already exist.
 - [ ] **Entity-granularity ablation** — the same tasks run at
       file-level vs entity-level memory, so the granularity claim
       gets a number attached (in either direction).
-- [ ] **Written result, whatever the outcome** — including a
+- [ ] **Broader written result, whatever the outcome** — including a
       negative or mixed result. Audience: the SE-research cluster
       measuring agent-context decay and the agent-memory workshop
       venue that now exists for exactly this.
@@ -1840,12 +1877,12 @@ github.com).
 > Theme: *one breaking-change cycle, one focused scope.*
 
 - [ ] **MCP tool-surface consolidation review (gate before any
-      other v0.4.0 changes ship).** By v0.3.11 the tool count is
-      ~9 (`log_change`, `diff`, `blame`, `history`, `changeset`,
-      `search`, `summary`, `prior_attempts`, `stale_decisions`).
+      other v0.4.0 changes ship).** As of v0.3.16 there are eight tools:
+      `log_change`, `diff`, `blame`, `history`, `changeset`, `search`,
+      `prior_attempts`, `stale_decisions`. `summary` is library-only.
       `history` plus `changeset_id` filter overlaps `changeset`;
-      `summary` plus `selvedge digest` / `selvedge audit` overlap
-      in shape. Past ~10 tools agents hit decision-fatigue.
+      Any proposed aggregate MCP tool and `digest` / `audit` commands
+      would also need an overlap review before expanding this surface.
       Required output: a written decision in this section on
       whether `changeset` is subsumed by `history`, whether
       `summary` is the canonical digest with `digest` / `audit`
@@ -1854,10 +1891,9 @@ github.com).
 - [ ] **`StorageBackend` protocol + PostgreSQL backend** —
       `storage_sqlite.py` and `storage_pg.py` both implement
       `StorageBackend`. Configurable via `SELVEDGE_BACKEND` env var
-      (e.g. `postgresql://...`). **`LinkedReadStorage` rewrite**
-      lands as part of this work — v0.3.13 shipped SQLite-only;
-      this release reimplements it against the new protocol so
-      cross-repo union queries work against any backend mix.
+      (e.g. `postgresql://...`). If Phase 2.19's proposed
+      `LinkedReadStorage` ships first, adapt it to this protocol; otherwise
+      design both against it. Cross-repo union queries are not shipped.
 - [ ] **MCP tool-name prefix migration** — rename `diff`,
       `history`, `search` (and any tool kept after consolidation
       with a too-generic name) to `selvedge_*` form. Deprecation
@@ -1912,6 +1948,13 @@ github.com).
 > aren't tangled with storage regressions. Theme: *Selvedge over
 > the wire, gated.*
 
+- [ ] **Remote-agent design gate** — choose the client-facing transport
+      (REST, remote MCP or both), authentication and actor identity, project
+      permission boundaries, credential rotation and a storage/concurrency
+      model suitable for remote writers. API keys below are a proposed REST
+      baseline, not a claim of compatibility with authenticated MCP clients.
+      Keep local stdio and same-host SQLite available. Do not distribute a
+      live WAL database through network filesystems or file-sync services.
 - [ ] **HTTP REST API layer (FastAPI)** — exposes every MCP server
       operation over HTTP. Endpoint list reflects whatever the
       v0.4.0 tool-consolidation review produced. **Designed against
@@ -1997,8 +2040,8 @@ github.com).
 - [ ] Cross-repo queries (server-side, multi-tenant, with auth and
       cross-user permissioning). The single-user OSS variant —
       read-only local overlay across `.selvedge/` directories the same
-      user owns — ships separately as Phases 2.19 / 2.20 (v0.3.13 +
-      v0.3.14). Hosted is for teams sharing context across users;
+      user owns — remains proposed in Phases 2.19 / 2.20, with no release
+      assigned. Hosted is for teams sharing context across users;
       OSS is for individuals across their own portfolio.
 - [ ] Team/org-level retention policies (per-tenant, configurable
       independently from the project-local `retention_days_events` +
@@ -2110,11 +2153,11 @@ applies to every new result type by default.
 
 ### Test-surface budget per phase
 
-Test count: 57 at v0.1.0 → 244 at v0.3.1 → 282 at v0.3.2 → ~336 at
-v0.3.4. Continuing the trajectory naively puts the suite at 500+ by
-v0.4.0, with proportional CI-runtime and flakiness costs. The
-release-scope restructure (2026-05-10) replaced 4 broad phases with
-11 narrower phases, so the per-phase budgets shrunk in step.
+The v0.3.16 release ran 1,255 tests with no skips and 90.24% coverage.
+The budgets below originated in the May 2026 phase plan; they are scope
+guidance, not current test counts or assigned release capacity. Phases
+2.23/2.24 have already delivered subsets in v0.3.15–v0.3.16. Keep
+follow-up tests focused on meaningful behavior and regressions.
 
 **Soft budget per phase** (target, not a hard cap):
 
@@ -2127,13 +2170,13 @@ release-scope restructure (2026-05-10) replaced 4 broad phases with
 | 2.15 | v0.3.9  | ≤ 20 new tests (Agent Trace export, pulled forward from 3.2; actual 25) |
 | 2.16 | v0.3.10 | ≤ 45 new tests (two-theme combine: config + delivery; overrun called out) |
 | 2.17 | v0.3.11 | ≤ 40 new tests (raised from ≤25 for the release-thread cluster; overrun by the pulled-forward tamper-evidence chain — called out in release notes) |
-| 2.18 | v0.3.12 | ≤ 35 new tests (raised to absorb the git-import cluster + context-cost CI) |
-| 2.19 | v0.3.13 | ≤ 30 new tests |
-| 2.20 | v0.3.14 | ≤ 25 new tests |
-| 2.21 | v0.3.15 | ≤ 15 new tests (conditional ship) |
-| 2.22 | v0.3.16 | ≤ 30 new tests (developer ergonomics, deferred from v0.3.9) |
-| 2.23 | v0.3.17 | ≤ 25 new tests (cross-harness adapters; spike work excluded) |
-| 2.24 | v0.3.18 | ≤ 20 new tests (bench harness-internal; core delta ~0) |
+| 2.18 | Unassigned remaining work | ≤ 35 new tests (raised to absorb the git-import cluster + context-cost CI) |
+| 2.19 | Unassigned remaining work | ≤ 30 new tests |
+| 2.20 | Unassigned remaining work | ≤ 25 new tests |
+| 2.21 | Unassigned remaining work | ≤ 15 new tests (conditional ship) |
+| 2.22 | Unassigned remaining work | ≤ 30 new tests (developer ergonomics, deferred from v0.3.9) |
+| 2.23 | Unassigned remaining work | ≤ 25 new tests (cross-harness adapters; spike work excluded) |
+| 2.24 | Unassigned remaining work | ≤ 20 new tests (bench harness-internal; core delta ~0) |
 | 3    | v0.4.0  | ≤ 50 new tests |
 | 3.1  | v0.4.1  | ≤ 30 new tests |
 | 3.2  | v0.4.2  | — (delivered early in v0.3.9 / Phase 2.15) |
@@ -2341,8 +2384,9 @@ not lost in chat history — and so they can be promoted back into a
 phase when the gating condition is satisfied.
 
 **VS Code extension scaffolding.** Lives in a separate repo, has a
-separate ship cadence, and depends on the `summary` MCP tool from
-v0.3.7 to spec against. Promote to a phase when (a) a tracking
+separate ship cadence, and would consume the existing `summary` library
+helper or an explicitly designed API; no `summary` MCP tool is shipped.
+Promote to a phase when (a) a tracking
 issue exists, (b) a named owner commits to a 90-day shipping
 review, and (c) the extension repo has been created. Until then,
 roadmap noise.
@@ -2393,8 +2437,8 @@ Add observability surface to the HTTP layer post-v0.4.1.
 Promote when the HTTP layer ships and operational requirements
 surface from real deployments.
 
-**Selvedge → Git Notes writer (export direction).** v0.3.12 ships
-a one-way reader from Git Notes; the write direction would
+**Selvedge → Git Notes writer (export direction).** Phase 2.18 proposes
+a one-way reader from Git Notes; neither direction is shipped. A writer would
 emit Selvedge events back into `refs/notes/selvedge-intent`. The
 read direction is the load-bearing competitive defense; write
 adds two-product release-pacing entanglement (Selvedge's note

@@ -1,0 +1,5 @@
+{
+  "key": "archive_format",
+  "value": "gzip",
+  "rationale": "gzip produces the smallest output (9 MB) among formats reliably supported by the unupgraded downstream importer. zstd is smaller (6 MB) but is a newer standard; the current evidence states the importer has not been upgraded since the prior deployment, so zstd compatibility cannot be confirmed. gzip is a mature, universally supported format that safely reduces export size by ~25% compared to the zip default."
+}

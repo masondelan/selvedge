@@ -1,0 +1,5 @@
+{
+  "key": "archive_format",
+  "value": "zstd",
+  "rationale": "zstd produces the smallest nightly export at 6 MB, versus 9 MB for gzip and 12 MB for zip. The current evidence confirms that the downstream importer's zstd decode compatibility test passes on the deployed version (upgraded 2026-09-30), making it safe to select. No prior decisions override this. zstd is therefore the correct choice under the \"smallest supported format\" requirement."
+}

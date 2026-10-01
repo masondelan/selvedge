@@ -1,0 +1,5 @@
+{
+  "key": "archive_format",
+  "value": "gzip",
+  "rationale": "gzip (9 MB) is the smallest archive format compatible with the downstream importer. zstd (6 MB) was previously rejected because the importer cannot decode it, and current evidence confirms the importer has not been upgraded since that rejection \u2014 so zstd remains incompatible. Between the two importer-compatible options, gzip at 9 MB is smaller than zip at 12 MB, making it the correct choice for the nightly export."
+}

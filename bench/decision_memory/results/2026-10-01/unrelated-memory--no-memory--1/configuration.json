@@ -1,0 +1,5 @@
+{
+  "key": "thumbnail_format",
+  "value": "webp",
+  "rationale": "WebP produces the smallest thumbnails at 20 KB, compared to 30 KB for JPEG and 80 KB for PNG. All three formats are confirmed supported by current compatibility tests across target browsers and the deployed image pipeline, so WebP is the best choice for minimizing file size without sacrificing compatibility."
+}

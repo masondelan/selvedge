@@ -1,0 +1,3 @@
+{"timestamp": "2026-10-01T04:57:19.916162+00:00", "tool": "read_project"}
+{"timestamp": "2026-10-01T04:57:20.006987+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-10-01T04:57:31.265843+00:00", "tool": "apply_choice", "key": "worker_count", "value": "2", "rationale": "The upstream account is constrained to at most 2 concurrent workers. A prior load test confirmed that 4 workers caused retries and reduced net throughput. Current evidence records no new load test or account limit change, so that constraint is still in force. Within the allowed choices (1, 2, 4, 8), 2 is the highest value that remains within the account ceiling and therefore the best option for sustainably reducing the 8-feed backlog."}

@@ -416,7 +416,13 @@ def status(as_json):
 
 @cli.command()
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def doctor(as_json):
+@click.option(
+    "--agent",
+    type=click.Choice(["claude-code", "codex", "cursor", "copilot", "gemini", "windsurf"]),
+    default=None,
+    help="Also inspect this client's project hook file. Run from the project root; activation is not inferred.",
+)
+def doctor(as_json, agent):
     """Check Selvedge's ambient state and report PASS/WARN/FAIL per check.
 
     \b
@@ -440,7 +446,7 @@ def doctor(as_json):
       0 — all PASS/INFO/WARN
       1 — any FAIL
     """
-    checks = diagnostics_mod.run_checks()
+    checks = diagnostics_mod.run_checks(agent=agent)
 
     if as_json:
         click.echo(json.dumps({"checks": checks}, indent=2))
@@ -1061,6 +1067,25 @@ def search(query, limit, as_json):
 # ---------------------------------------------------------------------------
 # prior-attempts (CLI parity for the prior_attempts MCP tool)
 # ---------------------------------------------------------------------------
+
+
+@cli.command("ledger")
+@click.option("--entity", multiple=True, help="Exact entity or dotted subentity prefix; repeatable.")
+@click.option("--limit", default=100, type=click.IntRange(1, 1000), show_default=True)
+@click.option("--json", "as_json", is_flag=True, help="Emit the selected ledger and verification as JSON.")
+def ledger_cmd(entity: tuple[str, ...], limit: int, as_json: bool) -> None:
+    """Show recorded reasons, actors, and explicit revisions in a shared store."""
+    import sqlite3
+
+    from .ledger import read_ledger, render_ledger
+
+    try:
+        report = read_ledger(get_db_path(), list(entity), limit)
+    except (sqlite3.Error, ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    console.print(json.dumps(report, indent=2) if as_json else render_ledger(report), markup=False, highlight=False, soft_wrap=True)
+    if not report["chain"]["intact"]:
+        raise click.exceptions.Exit(1)
 
 
 @cli.command("prior-attempts")

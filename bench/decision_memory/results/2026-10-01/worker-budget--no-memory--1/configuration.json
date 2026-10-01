@@ -1,0 +1,5 @@
+{
+  "key": "worker_count",
+  "value": "2",
+  "rationale": "Eight feeds are queued, so increasing beyond 1 worker is justified to reduce the backlog. However, all workers share one upstream account, making that account's rate-limit budget the binding constraint. No load test or account-limit change has been recorded, so there is no evidence that 4 or 8 concurrent connections to the same account would be sustainable. Setting worker_count to 2 doubles throughput and begins draining the backlog while adding only one additional concurrent connection to the shared account \u2014 a conservative, evidence-supported increase that avoids rate-limit risk."
+}

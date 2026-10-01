@@ -93,6 +93,7 @@ def test_sdist_ships_exactly_the_enumerated_set():
         "LICENSE",
         "PKG-INFO",
         "README.md",
+        "docs/agent-hooks.md",
         "docs/coding-agents.md",
         "docs/getting-started.md",
         "docs/telemetry.md",

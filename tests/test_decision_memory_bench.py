@@ -131,3 +131,21 @@ def test_subscription_environment_ignores_api_billing_overrides(
     assert "ANTHROPIC_API_KEY" not in env and "ANTHROPIC_BASE_URL" not in env
     assert env["ENABLE_TOOL_SEARCH"] == "false"
     assert env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+
+
+@pytest.mark.parametrize("value,repeat", [("4", True), ("8", True), ("1", False), ("2", False)])
+def test_repeat_failure_is_not_every_wrong_choice(value, repeat):
+    result = RUNNER["score"](
+        CASE, "selvedge-injected", events_for("selvedge-injected"), {"value": value}, [], 0
+    )
+    assert result["repeat_eligible"]
+    assert result["repeated_rejected_path"] is repeat
+
+
+def test_stale_rejections_and_incomplete_runs_are_not_repeat_failures():
+    stale = json.loads((BENCH / "cases.json").read_text())[2]
+    result = RUNNER["score"](stale, "no-memory", events_for("no-memory"), {"value": "zstd"}, [], 0)
+    assert result["correct_application"] and not result["repeat_eligible"]
+    assert not result["repeated_rejected_path"]
+    failed = RUNNER["score"](CASE, "no-memory", events_for("no-memory"), {"value": "8"}, [], 1)
+    assert not failed["completed"] and not failed["repeated_rejected_path"]

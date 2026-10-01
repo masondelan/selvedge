@@ -1,0 +1,3 @@
+{"timestamp": "2026-10-01T04:55:54.766747+00:00", "tool": "read_project"}
+{"timestamp": "2026-10-01T04:55:54.847463+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-10-01T04:56:02.236083+00:00", "tool": "apply_choice", "key": "thumbnail_format", "value": "webp", "rationale": "WebP is the smallest supported thumbnail format at 20 KB, compared to jpeg (30 KB) and png (80 KB). Current evidence confirms all target browsers and the deployed image pipeline pass WebP compatibility tests, making it fully supported. Choosing the smallest format minimises bandwidth and improves page-load performance for web thumbnails."}

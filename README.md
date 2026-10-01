@@ -119,6 +119,27 @@ made.** The diff is git's job. The why is Selvedge's.
 
 ---
 
+## What's new in v0.3.16
+
+**Bring recorded decisions into code review.** `selvedge ledger` shows who
+recorded each decision and which later record explicitly revised it. The optional
+[PR review Action](docs/review-context.md) adds reasons and rejected alternatives
+for touched files from publication-approved base history. Attribution is
+self-reported; the Action is opt-in and never executes PR-head code.
+
+`selvedge doctor --agent CLIENT` checks project hook configuration for all six
+setup targets, with concrete next steps. Configuration checks do not prove that
+a client has activated its hooks.
+
+The [matched injection pilot](bench/decision_memory/results/2026-10-01/) completed
+24 synthetic trials: still-valid rejected choices recurred in 4/6 eligible runs
+without memory and 0/6 with injected records. Both conditions passed the stale
+and unrelated controls. Two synthetic tasks do not establish general coding
+performance or superiority over maintained files; the earlier four-arm tie is
+still disclosed. No new runtime dependencies, migrations or MCP tools.
+
+---
+
 ## What's new in v0.3.15
 
 **Native lifecycle adapters for all six setup targets.**
@@ -136,18 +157,6 @@ still matter. No new dependencies, MCP tools, migrations or default telemetry.
 The [configuration pilot](bench/decision_memory/results/2026-09-25/) publishes
 all 48 measured trials and controls, including failures. It does not establish
 an advantage over a maintained file or the same information in a prompt.
-
----
-
-## What's new in v0.3.14
-
-**Explicit seven-day lookups work as documented.**
-
-The MCP `prior_attempts` tool now accepts `window_minutes=10080`, matching its
-seven-day default. Previously, sending that value explicitly failed validation
-because the time window incorrectly shared the 1,000-result pagination cap.
-The allowed window is 1–10,080 minutes; result limits remain capped at 1,000.
-No new dependencies, migrations or MCP tools.
 
 ---
 
@@ -603,7 +612,7 @@ selvedge stale [--entity ENTITY]          Decisions due for a revisit: past
               [--agent NAME]              stale_when matched by a later change
               [--json]                    ("review suggested")
 selvedge stats [--since SINCE]            Tool call coverage report (per-tool, per-agent)
-selvedge doctor [--json]                  Health check: DB path, schema, hook, MCP wiring
+selvedge doctor [--agent CLIENT] [--json] Health check; optional project agent-hook diagnostics
 selvedge install-hook [--path PATH]       Install git post-commit hook
                      [--window MIN]       (default 60 minutes)
 selvedge backfill-commit --hash HASH      Backfill git_commit on recent events
@@ -749,7 +758,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.15   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.16   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only
@@ -783,3 +792,10 @@ See `CLAUDE.md` for architecture details and the phase roadmap.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### Decision context for reviewers
+
+The [shared ledger and PR review Action](docs/review-context.md) shows recorded
+reasons, rejected paths, actor/session attribution and integrity for touched
+entities. The [matched injection pilot](bench/decision_memory/results/2026-10-01/)
+reports every trial and limits its conclusion to the tested synthetic tasks.

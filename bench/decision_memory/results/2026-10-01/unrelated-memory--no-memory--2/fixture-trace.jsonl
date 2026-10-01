@@ -1,0 +1,3 @@
+{"timestamp": "2026-10-01T04:53:58.966592+00:00", "tool": "read_project"}
+{"timestamp": "2026-10-01T04:53:59.050400+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-10-01T04:54:04.230674+00:00", "tool": "apply_choice", "key": "thumbnail_format", "value": "webp", "rationale": "webp produces the smallest thumbnails at 20 KB, compared to jpeg (30 KB) and png (80 KB). All three formats are confirmed supported by the project's browser and image-pipeline compatibility tests, so webp is the optimal choice for minimizing web thumbnail file size."}

@@ -24,7 +24,7 @@ from selvedge.models import ChangeEvent
 from selvedge.storage import SelvedgeStorage
 
 HERE = Path(__file__).resolve().parent
-ARMS = ("no-memory", "decision-file", "inline-context", "selvedge-pull")
+ARMS = ("no-memory", "decision-file", "inline-context", "selvedge-pull", "selvedge-injected")
 SYSTEM = "You are working on a small configuration task. Use only the provided tools and evidence. Consult available project records when relevant. Apply a justified choice with apply_choice and briefly explain it. Do not invent tests or missing requirements."
 
 
@@ -123,7 +123,11 @@ def score(
         and not final.get("is_error", False)
         and bool(configuration)
     )
+    repeat_eligible = case["kind"] == "retained-constraint"
     return {
+        "repeat_eligible": repeat_eligible,
+        "repeated_rejected_path": completed and repeat_eligible
+        and configuration.get("value") in case.get("rejected_values", []),
         "completed": completed,
         "correct_application": completed and configuration.get("value") == case["expected"],
         "selected": configuration.get("value", ""),
@@ -158,7 +162,7 @@ def run_one(case: dict, arm: str, trial: int, root: Path, model: str, timeout: i
         }
     }
     record_ids = []
-    if arm == "selvedge-pull":
+    if arm in ("selvedge-pull", "selvedge-injected"):
         db = run_dir / "memory.db"
         storage = SelvedgeStorage(db)
         for decision in records:
@@ -174,6 +178,11 @@ def run_one(case: dict, arm: str, trial: int, root: Path, model: str, timeout: i
                 "SELVEDGE_LOG_LEVEL": "ERROR",
             },
         }
+    if arm == "selvedge-injected":
+        # Inject actual entity-scoped Selvedge retrieval; no memory tools in this arm.
+        injected = storage.get_prior_attempts(entity_path=case["entity"])
+        del servers["selvedge"]
+        (run_dir / "injected-context.json").write_text(json.dumps(injected, indent=2) + "\n")
     config = run_dir / "mcp.json"
     config.write_text(json.dumps({"mcpServers": servers}, indent=2) + "\n")
     prompt = case["task"]
@@ -181,6 +190,8 @@ def run_one(case: dict, arm: str, trial: int, root: Path, model: str, timeout: i
         prompt += "\n\nPrior project decisions (assess against current evidence):\n" + json.dumps(
             records
         )
+    if arm == "selvedge-injected":
+        prompt += "\n\nPrior Selvedge attempts (assess against current evidence):\n" + json.dumps(injected)
     (run_dir / "prompt.txt").write_text(prompt + "\n")
     command = [
         "claude",
@@ -257,7 +268,8 @@ def run_one(case: dict, arm: str, trial: int, root: Path, model: str, timeout: i
     result["stream_parse_errors"] = parse_errors
     if parse_errors or result["model_resolved"] != model:
         result.update(
-            completed=False, correct_application=False, error="Invalid stream or unexpected model"
+            completed=False, correct_application=False, repeated_rejected_path=False,
+            error="Invalid stream or unexpected model"
         )
     (run_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     # Public evidence intentionally excludes session IDs, account data and paths.
@@ -280,6 +292,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--model", required=True, help="Exact model ID; no moving alias.")
+    parser.add_argument("--arms", nargs="+", choices=ARMS, default=list(ARMS))
     parser.add_argument("--trials", type=int, default=3)
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--execute", action="store_true")
@@ -303,18 +316,19 @@ def main() -> None:
         cases = [case for case in cases if case["id"] == args.case]
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
-    schedule = [(c["id"], arm, t) for c in cases for arm in ARMS for t in range(1, args.trials + 1)]
+    schedule = [(c["id"], arm, t) for c in cases for arm in dict.fromkeys(args.arms) for t in range(1, args.trials + 1)]
     random.Random(20260925).shuffle(schedule)
     manifest = {
-        "protocol": "decision-memory-pilot/1",
+        "protocol": "decision-memory-pilot/2",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "selvedge_version": __version__,
         "model_requested": args.model,
         "trials": args.trials,
         "timeout_seconds": args.timeout,
         "workers": args.workers,
-        "arms": ARMS,
+        "arms": list(dict.fromkeys(args.arms)),
         "system_prompt": SYSTEM,
+        "primary_metric": "Final selections of still-valid rejected values / completed retained-constraint trials; report incomplete counts separately.",
         "cases": cases,
         "schedule": schedule,
         "source_sha256": {

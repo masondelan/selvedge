@@ -10,19 +10,25 @@ Selvedge, the decision-file fixture and inline facts each made 12/12 correct
 choices; no memory made 8/12. This does not demonstrate a Selvedge advantage over
 the other information-delivery conditions.
 
+[October 1 matched injection results](results/2026-10-01/): 24 completed trials;
+4/6 versus 0/6 still-valid rejected-path selections. This is a small synthetic
+result, with controls and limitations in the result report.
+
 ## Cases and controls
 
 Four transparent cases cover a worker-budget constraint, a rejected archive
 format, changed evidence that makes the old rejection obsolete, and irrelevant
 memory from another entity. Each has one expected configuration value.
 
-Every case runs in four conditions:
+The default schedule now includes five conditions; `--arms` selects a frozen subset.
+The original published pilot used the first four:
 
 | Condition | Information available |
 | --- | --- |
 | `no-memory` | Current project evidence only |
 | `decision-file` | Same prior facts through a fixture's `read_decisions` tool |
 | `inline-context` | Same prior facts supplied directly in the task prompt |
+| `selvedge-injected` | Entity-scoped real `prior_attempts` output injected before the agent starts; no memory tools |
 | `selvedge-pull` | Same prior facts pre-seeded in a fresh real Selvedge SQLite store, queried through its MCP server |
 
 The decision-file condition is a controlled stand-in for a maintained file, not
@@ -41,14 +47,17 @@ and alternate-provider environment overrides are removed for the child process.
 ```bash
 # Prepare and inspect a frozen schedule without any model call.
 python bench/decision_memory/run.py --model claude-sonnet-4-6 \
+  --arms no-memory decision-file inline-context selvedge-pull \
   --output /tmp/selvedge-pilot-plan
 
 # Technical smoke: four runs, excluded from the measured pilot.
 python bench/decision_memory/run.py --model claude-sonnet-4-6 \
+  --arms no-memory decision-file inline-context selvedge-pull \
   --case worker-budget --trials 1 --output /tmp/selvedge-pilot-smoke --execute
 
 # Measured pilot: 4 cases × 4 conditions × 3 trials = 48 fresh processes.
 python bench/decision_memory/run.py --model claude-sonnet-4-6 \
+  --arms no-memory decision-file inline-context selvedge-pull \
   --output /tmp/selvedge-pilot-measured --workers 3 --execute
 ```
 
@@ -60,7 +69,10 @@ clients may share provider prompt caches. The seeded schedule, cases, system pro
 hashes, package version and CLI version are retained in `manifest.json`.
 
 Native auto-memory, hooks, skills and unrelated MCP servers are disabled.
-Built-in filesystem/network tools are unavailable. MCP tools are loaded eagerly;
+The pinned Claude CLI receives `--tools ""` to disable all built-in tools;
+its observed init tool list is checked and any unexpected built-in invalidates
+the trial and stops the run after the current batch. Built-in filesystem/network
+tools are unavailable. MCP tools are loaded eagerly;
 a missing or unexpected tool set invalidates the run. Each subprocess has a fresh
 working directory and database, and cannot read the scorer through its tools.
 The custom system prompt is the same across conditions.
@@ -86,6 +98,14 @@ Inspect `tool-trace.json` before publication; it omits initialization/account
 metadata and thinking blocks and replaces local home/trial paths. Raw streams,
 MCP configs and database files are local debugging evidence and must not be
 published without separate review.
+
+Protocol v2 adds explicit `rejected_values` scorer labels (never sent to the
+agent), eligibility for retained constraints, and `repeated_rejected_path`.
+Report repeats over completed eligible trials, incomplete counts separately,
+and all-task correctness plus stale/unrelated controls. The injected arm uses
+real scoped Selvedge output; it is not counted as voluntary retrieval or native
+hook delivery. Historical v1 artifacts remain unchanged; use the v0.3.15 tag for the original
+v1 runner when reproducing those historical source hashes.
 
 ## Limits and next evidence
 

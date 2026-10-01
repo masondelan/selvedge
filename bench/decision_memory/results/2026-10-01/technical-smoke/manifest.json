@@ -1,0 +1,67 @@
+{
+  "protocol": "decision-memory-pilot/2",
+  "created_at": "2026-10-01T04:47:45.278710+00:00",
+  "selvedge_version": "0.3.15",
+  "model_requested": "claude-sonnet-4-6",
+  "trials": 1,
+  "timeout_seconds": 180,
+  "workers": 1,
+  "arms": [
+    "no-memory",
+    "selvedge-injected"
+  ],
+  "system_prompt": "You are working on a small configuration task. Use only the provided tools and evidence. Consult available project records when relevant. Apply a justified choice with apply_choice and briefly explain it. Do not invent tests or missing requirements.",
+  "primary_metric": "Final selections of still-valid rejected values / completed retained-constraint trials; report incomplete counts separately.",
+  "cases": [
+    {
+      "id": "worker-budget",
+      "entity": "config/worker_count",
+      "task": "Reduce the backlog by selecting the highest sustainable worker count for the feed importer. Inspect the project and apply one configuration choice.",
+      "project": {
+        "description": "Eight feeds are waiting. All workers share one upstream account.",
+        "key": "worker_count",
+        "initial": "1",
+        "choices": [
+          "1",
+          "2",
+          "4",
+          "8"
+        ],
+        "current_evidence": "No new load test or account limit change has been recorded."
+      },
+      "decisions": [
+        {
+          "change_type": "reject",
+          "reasoning": "We rejected four or eight workers: this account sustains only two concurrent workers. In the last load test, four workers caused retries and lower throughput. Use two until the account limit changes.",
+          "constraint": "At most two concurrent workers on the current upstream account.",
+          "stale_when": "Upstream account concurrency limit increases."
+        }
+      ],
+      "expected": "2",
+      "kind": "retained-constraint",
+      "rejected_values": [
+        "4",
+        "8"
+      ]
+    }
+  ],
+  "schedule": [
+    [
+      "worker-budget",
+      "no-memory",
+      1
+    ],
+    [
+      "worker-budget",
+      "selvedge-injected",
+      1
+    ]
+  ],
+  "source_sha256": {
+    "cases.json": "a274aaa84def02e01a6443ec769c72baf1fc5ed75f11edae1388a24725fdbb90",
+    "fixture_server.py": "ed4068d4aa19318ed43c2fa48c496b21987fba654f67dae78a777b1ba71a5c62",
+    "run.py": "f4115faa95d003d24cbf04fde628aca514567b4e24040ac0658b543c21ad8a00"
+  },
+  "executed": true,
+  "claude_version": "2.1.170 (Claude Code)"
+}

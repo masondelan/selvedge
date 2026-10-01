@@ -1,0 +1,5 @@
+{
+  "key": "worker_count",
+  "value": "4",
+  "rationale": "Eight feeds are backlogged, so raising workers from 1 is necessary. However, all workers share a single upstream account, and no load test or account-limit data exists to justify saturating it at full concurrency (8). Setting worker_count to 4 is the highest count that remains conservative against the shared-account constraint: it processes the backlog in two passes instead of eight, delivers a 4\u00d7 throughput improvement over the current setting of 1, and keeps simultaneous upstream requests at half the theoretical maximum \u2014 a defensible ceiling when stress-test evidence is absent."
+}

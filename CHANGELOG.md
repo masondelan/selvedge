@@ -6,6 +6,31 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [0.3.16] - 2026-10-01
+
+### Added
+
+- Optional `selvedge doctor --agent CLIENT` checks for the six supported clients' project hook configuration, shell executable availability and bypass setting. Missing or customized entries include next steps; configuration presence is explicitly separate from unverified client activation. Existing doctor output shape and default checks are preserved.
+- Read-only `selvedge ledger` with actor/session attribution, explicit cross-agent
+  revisions, full-population counts and snapshot chain verification.
+- Optional `actions/review-context` PR comments from publication-approved base
+  history, with touched-file filtering, bounded rendering and idempotent updates.
+- Matched rejected-path injection pilot and explicit repeat-failure scoring:
+  24 completed synthetic trials, 4/6 eligible repeats without memory versus 0/6
+  with injected records. Stale/unrelated controls passed; no general superiority claim.
+
+### Fixed
+
+- Source-package hygiene coverage now includes the already-shipped agent hook guide.
+
+### Distribution
+
+- Synchronized Python, plugin, npm and registry pins. No new runtime dependencies,
+  migrations, MCP tools or default telemetry. New tests cover read-only ledger
+  snapshots, PR trust boundaries, repeat-failure scoring and client diagnostics.
+
+---
+
 ## [0.3.15] - 2026-09-25
 
 ### Added

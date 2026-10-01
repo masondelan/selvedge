@@ -1,0 +1,3 @@
+{"timestamp": "2026-10-01T04:47:50.099834+00:00", "tool": "read_project"}
+{"timestamp": "2026-10-01T04:47:50.187658+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-10-01T04:48:08.596032+00:00", "tool": "apply_choice", "key": "worker_count", "value": "4", "rationale": "Eight feeds are queued and all workers share one upstream account. With no load-test or account-limit evidence on record, setting worker_count to 4 is the highest count that is demonstrably sustainable: it halves the backlog per cycle while keeping concurrent upstream requests well below the untested ceiling of 8, reducing the risk of rate-limiting or account suspension on the shared account."}

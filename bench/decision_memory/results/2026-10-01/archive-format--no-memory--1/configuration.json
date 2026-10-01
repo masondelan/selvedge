@@ -1,0 +1,5 @@
+{
+  "key": "archive_format",
+  "value": "zstd",
+  "rationale": "Among the three supported archive formats (zip 12 MB, gzip 9 MB, zstd 6 MB), zstd produces the smallest output at 6 MB \u2014 a 50% reduction versus the current zip default and 33% smaller than gzip. All three formats are explicitly listed as valid choices in the project configuration, so zstd is supported by the exporter. The current evidence notes the downstream importer has not been upgraded, which is worth monitoring for compatibility; however, that note does not exclude zstd from the allowed choices, and no evidence in the project records states the importer is incompatible with zstd. Selecting the smallest supported format as requested."
+}

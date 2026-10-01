@@ -1,0 +1,3 @@
+{"timestamp": "2026-10-01T04:55:03.363206+00:00", "tool": "read_project"}
+{"timestamp": "2026-10-01T04:55:03.461633+00:00", "tool": "read_decisions", "count": 0}
+{"timestamp": "2026-10-01T04:55:14.551285+00:00", "tool": "apply_choice", "key": "worker_count", "value": "2", "rationale": "The upstream account concurrency limit has not changed \u2014 current evidence confirms no new load test or account limit change. The prior load test established that four workers cause retries and lower net throughput, so the hard ceiling is two concurrent workers. Setting worker_count to 2 (up from 1) is the highest sustainable value: it doubles feed-processing throughput to reduce the eight-item backlog without breaching the upstream account limit or triggering retry degradation."}

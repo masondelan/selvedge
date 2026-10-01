@@ -1,0 +1,4 @@
+Choose the smallest supported format for web thumbnails. Inspect the project and apply one configuration choice.
+
+Prior Selvedge attempts (assess against current evidence):
+[]

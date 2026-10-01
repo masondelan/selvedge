@@ -6,6 +6,18 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- Read-only `selvedge ledger` with actor/session attribution, explicit cross-agent
+  revisions, full-population counts and snapshot chain verification.
+- Optional `actions/review-context` PR comments from publication-approved base
+  history, with touched-file filtering, bounded rendering and idempotent updates.
+- Matched rejected-path injection pilot and explicit repeat-failure scoring:
+  24 completed synthetic trials, 4/6 eligible repeats without memory versus 0/6
+  with injected records. Stale/unrelated controls passed; no general superiority claim.
+
 ## [0.3.15] - 2026-09-25
 
 ### Added

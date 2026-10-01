@@ -783,3 +783,10 @@ See `CLAUDE.md` for architecture details and the phase roadmap.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### Decision context for reviewers
+
+The [shared ledger and PR review Action](docs/review-context.md) shows recorded
+reasons, rejected paths, actor/session attribution and integrity for touched
+entities. The [matched injection pilot](bench/decision_memory/results/2026-10-01/)
+reports every trial and limits its conclusion to the tested synthetic tasks.

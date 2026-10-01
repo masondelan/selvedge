@@ -1,0 +1,30 @@
+name: Selvedge review context
+description: Comment touched-entity decisions, rejected alternatives, attribution and integrity on a PR.
+inputs:
+  token:
+    description: GitHub token with pull-requests write and contents read.
+    required: true
+  db-path:
+    description: Tracked, publication-approved database in the checked-out PR base.
+    default: .selvedge/selvedge.db
+  limit:
+    description: Maximum recent matching events (1-1000); omissions are reported.
+    default: '100'
+  dry-run:
+    description: Write only the job summary; do not create or update the PR comment.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Report recorded decision context
+      shell: bash
+      env:
+        SELVEDGE_REVIEW_TOKEN: ${{ inputs.token }}
+        SELVEDGE_REVIEW_DB: ${{ inputs.db-path }}
+        SELVEDGE_REVIEW_LIMIT: ${{ inputs.limit }}
+        SELVEDGE_REVIEW_DRY_RUN: ${{ inputs.dry-run }}
+        SELVEDGE_ACTION_PATH: ${{ github.action_path }}
+      run: python -I "$SELVEDGE_ACTION_PATH/../../scripts/review_context.py"

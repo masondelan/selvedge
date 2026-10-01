@@ -1,9 +1,11 @@
 # Eval feasibility — can Selvedge produce PAST-Bench-style pathway evidence?
 
-**Status:** assessment only, written 2026-08-10 against Selvedge v0.3.10. No
-benchmark was built. Nothing here is a commitment; this is scoping input to
-Phase 2.24 (SelvedgeBench, v0.3.18) in `docs/architecture.md`, which already
-plans a superset of what is proposed below.
+**Status:** historical assessment, written 2026-08-10 against Selvedge v0.3.10.
+No benchmark was built as part of that assessment. As of October 1, two
+[synthetic configuration pilots](../bench/decision_memory/README.md) have been
+published with v0.3.15–v0.3.16; they do not implement the real-project evaluation
+proposed here. This document remains scoping input to Phase 2.24 in
+[the architecture roadmap](architecture.md), with no assigned release.
 
 **Question this doc answers:** PAST-Bench asserts, as an independent
 third-party benchmark, the thing Selvedge asserts in marketing — that an

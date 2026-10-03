@@ -1,6 +1,6 @@
 # selvedge-mcp
 
-Long-term memory for AI-coded codebases — a `git blame` for AI agents, for the *why*, not just which line which model touched. Captured live, by the agent, as the change happens.
+Persistent decision memory for AI agents. Save stated reasons and rejected approaches locally, then retrieve them in a later session or a different compatible agent.
 
 This package is a **thin npx shim** for the [Selvedge](https://selvedge.sh) MCP server, which is a Python package on PyPI ([`selvedge`](https://pypi.org/project/selvedge/)). It exists for the many MCP hosts and quickstart docs that assume `npx`-style one-liners — no Node code beyond ~150 lines of runner dispatch, **zero npm dependencies**.
 
@@ -8,7 +8,8 @@ This package is a **thin npx shim** for the [Selvedge](https://selvedge.sh) MCP 
 
 ## Usage
 
-In your MCP client config (Claude Code, Claude Desktop, Cursor, etc.):
+Use any compatible client that can launch a local stdio MCP server. No particular
+agent or model provider is required. A common JSON configuration shape is:
 
 ```json
 {

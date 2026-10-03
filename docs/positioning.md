@@ -1,12 +1,24 @@
 # Positioning — canonical
 
-**Status:** current as of 2026-08-29 (prior-art fold-in — Zero-Mem and the
+**Status:** agent-agnostic standard updated October 2, 2026. Research below is
+dated as of 2026-08-29 (prior-art fold-in — Zero-Mem and the
 pull-model-memory evidence, per `docs/prior-art.md`; OpenLore purge scoping
 amended 2026-08-06 against the 2026-08-05 source-verified brief). Supersedes
 the differentiator framing in
 `README.md` §"How Selvedge compares", `docs/comparison.html`, and
 `docs/index.html`. This file is the source of truth; if copy anywhere disagrees
 with this doc, the copy is wrong.
+
+## Agent-neutral product identity — October 2, 2026
+
+Selvedge is for anyone using a compatible agent. Lead with persistent decision
+memory for AI agents, not a particular vendor, model, editor or setup preset.
+Compatibility means local stdio MCP tool access or the ability to invoke the CLI;
+it does not imply that every client has native lifecycle hooks. Keep client
+names in optional integration instructions and accurately attributed evidence.
+Named agents, companies and models are appropriate in accurate examples and
+commands. Historical research below is dated context, not a basis for claiming exclusive support or superiority.
+This guidance takes precedence over older messaging recommendations below.
 
 ---
 

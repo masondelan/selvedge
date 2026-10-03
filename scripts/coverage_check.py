@@ -190,7 +190,7 @@ def main():
 
     if ratio < 0.5:
         print("  Tip: coverage is low. Common causes:")
-        print("    - Agent CLAUDE.md / system prompt doesn't instruct log_change")
+        print("    - Agent instructions / system prompt doesn't instruct log_change")
         print("    - Commits include non-AI changes (human edits, merges, formatting)")
         print("    - DB path mismatch — check SELVEDGE_DB env var")
         print()

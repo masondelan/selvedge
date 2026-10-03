@@ -56,7 +56,7 @@
   <text x="284" y="238" class="mono" font-size="20" font-weight="700"
         fill="#1F3057">AI agent</text>
   <text x="284" y="262" class="mono" font-size="11"
-        fill="#1F3057" opacity="0.7">claude code · cursor · copilot · …</text>
+        fill="#1F3057" opacity="0.7">compatible agents · MCP or CLI</text>
   <text x="284" y="282" class="mono" font-size="10"
         fill="#1F3057" opacity="0.5">reads · writes · reasons in-session</text>
 

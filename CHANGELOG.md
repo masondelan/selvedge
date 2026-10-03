@@ -6,6 +6,20 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Changed
+- Make product positioning and onboarding agent-agnostic. General setup and CLI
+  guidance lead with compatible MCP/CLI access; client presets and lifecycle
+  adapters remain optional integrations. Named examples remain supported.
+- Record agent-agnostic core behavior and documentation as a standing contributor
+  standard, with a protocol check covering custom clients sharing history with
+  the CLI. No storage, MCP tool, transport or adapter behavior changes.
+- Apply the easy-to-use, robust and developer-focused values across shared
+  engineering standards, with a dated review of upstream guidance.
+- Add Python 3.14 to CI, pin Actions to upstream commits, verify SQLite source
+  checksums and validate registry publication inputs before shell use.
+
 ## [0.3.16] - 2026-10-01
 
 ### Added

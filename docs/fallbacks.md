@@ -87,7 +87,7 @@ Implement (1) and (3) together:
 2. **`selvedge import`** for backfilling schema history
 
 Leave file watchers out entirely. Invest in better agent prompting instead —
-a well-written CLAUDE.md instruction is worth more than any automated fallback
+a well-written project instruction is worth more than any automated fallback
 that bypasses the `reasoning` field.
 
 ---
@@ -95,7 +95,7 @@ that bypasses the `reasoning` field.
 ## Improving agent compliance through prompting
 
 The highest-leverage intervention is the system prompt. The current recommended
-instruction (from `CLAUDE.md`) is:
+instruction (from the agent's project rules) is:
 
 ```
 Call selvedge.log_change immediately after adding, modifying, or removing

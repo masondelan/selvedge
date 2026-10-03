@@ -15,10 +15,10 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
           python-version: "3.11"
 
@@ -45,13 +45,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -79,11 +79,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { sqlite: "3.37.2", year: "2022", numeric: "3370200" }
-          - { sqlite: "3.42.0", year: "2023", numeric: "3420000" }
-          - { sqlite: "3.45.3", year: "2024", numeric: "3450300" }
+          - { sqlite: "3.37.2", year: "2022", numeric: "3370200", sha256: "4089a8d9b467537b3f246f217b84cd76e00b1d1a971fe5aca1e30e230e46b2d8" }
+          - { sqlite: "3.42.0", year: "2023", numeric: "3420000", sha256: "7abcfd161c6e2742ca5c6c0895d1f853c940f203304a0b49da4e1eca5d088ca6" }
+          - { sqlite: "3.45.3", year: "2024", numeric: "3450300", sha256: "b2809ca53124c19c60f42bf627736eae011afdcc205bb48270a5ee9a38191531" }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Install system Python and build tools
         run: |
@@ -94,7 +94,9 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p /tmp/sqlite-build && cd /tmp/sqlite-build
-          curl -fsSL "https://www.sqlite.org/${{ matrix.year }}/sqlite-autoconf-${{ matrix.numeric }}.tar.gz" | tar xz
+          curl -fsSL -o sqlite.tar.gz "https://www.sqlite.org/${{ matrix.year }}/sqlite-autoconf-${{ matrix.numeric }}.tar.gz"
+          echo "${{ matrix.sha256 }}  sqlite.tar.gz" | sha256sum -c -
+          tar xzf sqlite.tar.gz
           cd "sqlite-autoconf-${{ matrix.numeric }}"
           ./configure --prefix="$HOME/sqlite" --enable-shared >/dev/null
           make -j"$(nproc)" >/dev/null

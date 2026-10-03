@@ -7,7 +7,11 @@ pending and continue the remaining independent steps.
 
 ## Prepare and verify
 
-Follow the version and validation checklist in [CLAUDE.md](../CLAUDE.md).
+Follow the version and validation checklist in [CLAUDE.md](../CLAUDE.md) and the
+[engineering standards](engineering-standards.md). Recheck runtime support and
+dependency advisories, record the source revision and artifact SHA-256 hashes,
+and verify PyPI attestations against the publishing workflow. Preserve the prior
+deployment/version as a rollback target; do not overwrite released artifacts.
 Work from a clean release checkout. The npm package has its own semver version;
 its `pypiVersion` must match the Python release. Every change to that pin requires
 a new npm publication, even when the JavaScript launcher is unchanged.

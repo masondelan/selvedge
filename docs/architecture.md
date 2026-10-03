@@ -68,6 +68,8 @@ The core insight: with human-written code, intent leaked into commit messages an
 
 ## Product values
 
+These values apply across design, code, documentation, the website, reviews,
+tests and releases; follow the [engineering standards](engineering-standards.md).
 Three values gate every phase addition. New bullets in the phase plan
 must defensibly serve at least one of these; bullets that serve none
 of them are deferred to the "Future work" appendix.
@@ -155,10 +157,10 @@ The central entity. Every recorded change is one row in the `events` table.
 | `timestamp` | TEXT | UTC ISO 8601 |
 | `entity_type` | TEXT | column, table, file, function, class, endpoint, dependency, env_var, index, schema, config, other |
 | `entity_path` | TEXT | Dot/slash notation path (see conventions below) |
-| `change_type` | TEXT | add, remove, modify, rename, retype, create, delete, index_add, index_remove, migrate |
+| `change_type` | TEXT | Validated `ChangeType` values: add, remove, modify, rename, retype, create, delete, index_add, index_remove, migrate, supersede, revert, reject |
 | `diff` | TEXT | The actual change — SQL migration, code diff, or description |
 | `reasoning` | TEXT | Why the change was made — the captured intent |
-| `agent` | TEXT | Which AI agent (claude-code, cursor, copilot, human, etc.) |
+| `agent` | TEXT | Agent or tool name (free text; use `human` for manual entries) |
 | `session_id` | TEXT | Agent session/conversation ID |
 | `git_commit` | TEXT | Git commit hash this change lands in |
 | `project` | TEXT | Repository/project name |
@@ -286,7 +288,10 @@ selvedge-server
 python -m selvedge.server
 ```
 
-### Claude Code config (~/.claude/config.json)
+### Local stdio MCP configuration
+
+Register `selvedge-server` in your client's MCP settings. This common JSON
+shape is illustrative; use the settings format and location your client expects.
 ```json
 {
   "mcpServers": {
@@ -315,7 +320,7 @@ python -m selvedge.server
 
 ## System prompt / end-user agent instructions
 
-Add this to the agent's system prompt or `CLAUDE.md` of any project that uses Selvedge:
+Add this to the agent's system prompt or project instruction file:
 
 ```
 You have access to Selvedge (MCP server: selvedge) for change tracking.
@@ -327,7 +332,7 @@ Rules:
   Write at least one full sentence — the server will warn on empty, very short,
   or generic values like "user request" or "done".
   Good example: "User asked to add 2FA — needs phone number to send SMS codes."
-- Set `agent` to "claude-code" (or whichever agent you are).
+- Set `agent` to a stable name for the agent or tool making the change.
 - Set `session_id` if you have access to the current session/conversation ID.
 - Set `git_commit` to the commit hash once you know it.
 - For multi-entity changes (e.g. adding a whole feature), set a shared `changeset_id`
@@ -336,9 +341,8 @@ Rules:
 - Before editing an entity, call selvedge.prior_attempts on it — if the same change
   was tried before and reverted, you'll see the prior reasoning and why it was
   rejected, and can change your plan instead of repeating a rejected approach.
-  (If the Selvedge PreToolUse hook is installed, this check is enforced:
-  schema/migration edits are blocked until prior_attempts has been consulted
-  this session.)
+  (Where a compatible edit-gate hook is installed and active, watched edits
+  require this lookup. Hook capabilities and activation depend on the client.)
 - A reverted decision is not a permanent ban. If the constraint that killed it
   no longer holds, re-open it explicitly with change_type="supersede" (never
   re-apply a reverted change without superseding it first). Use

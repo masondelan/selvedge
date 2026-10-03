@@ -1,7 +1,7 @@
 {
   "name": "selvedge",
   "metadata": {
-    "description": "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history."
+    "description": "Persistent decision memory for AI agents: rationale, rejected approaches, and entity history."
   },
   "owner": {
     "name": "Mason Delan"
@@ -10,7 +10,7 @@
     {
       "name": "selvedge",
       "source": "./",
-      "description": "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history."
+      "description": "Persistent decision memory for AI agents: rationale, rejected approaches, and entity history."
     }
   ]
 }

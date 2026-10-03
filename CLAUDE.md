@@ -1,6 +1,6 @@
-# CLAUDE.md — Selvedge agent instructions
+# CLAUDE.md — Selvedge contributor guidance
 
-This file is auto-loaded by Claude Code and Cowork on every session. It's the rules and conventions agents follow when working on Selvedge.
+These conventions apply to everyone contributing to Selvedge, with any compatible tooling. Some clients load this filename automatically; other contributors should read it directly.
 
 For everything else:
 
@@ -12,6 +12,8 @@ For everything else:
 
 ## Sources of truth
 
+- **Product values and engineering standards** → [`docs/engineering-standards.md`](docs/engineering-standards.md). Keep Selvedge easy to use, robust, developer focused and agent-agnostic across code, documentation, the website, reviews and releases. Check current primary guidance when relevant technology changes.
+
 - **Community feedback and publishing review** → [`docs/community-feedback.md`](docs/community-feedback.md). Track substantive feedback through a reasoned decision and follow-up; check released behavior before proposing features or publishing claims.
 
 - **What's shipped** → `CHANGELOG.md`. The phase-plan checkboxes in `docs/architecture.md` can drift; trust the changelog when they disagree.
@@ -22,6 +24,7 @@ For everything else:
 
 ## Code conventions
 
+- **Selvedge is agent-agnostic.** It is for anyone using any compatible agent. Keep core storage, decision semantics, MCP/CLI behavior and product positioning independent of an agent brand or model provider. Agent names are attribution labels, not a core allowlist. Keep client-specific setup and lifecycle handling in optional integrations/adapters. Setup presets are conveniences, not the compatibility limit. Named agents, companies and models are welcome in accurate commands, examples, compatibility tables and integration guides; they must not imply that Selvedge is intended for only one client. Preserve this standard in future code, docs and website changes.
 - **No external dependencies beyond the declared ones.** Keep the install footprint small.
 - **No LLM calls inside Selvedge core.** Templated, deterministic output only. When a feature design is tempted toward an LLM hop, the PR description must explain how the templated output covers the user need; reviewers reject "we'll add an LLM later if needed." See `docs/architecture.md` cross-cutting risk register for the full rationale.
 - **SQLite first, always.** Don't reach for Postgres until Phase 3. SQLite with WAL handles concurrent reads fine.

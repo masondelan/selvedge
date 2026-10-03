@@ -15,7 +15,7 @@ set -euo pipefail
 
 REPO="masondelan/selvedge"
 
-DESCRIPTION="Long-term memory for AI-coded codebases. A git blame for AI agents — but for the why. MCP server that captures the agent's reasoning live, in context, as each change is made. Local SQLite, zero deps."
+DESCRIPTION="Persistent decision memory for AI agents: rationale, rejected approaches, and entity history. Connect any compatible agent through local MCP or the CLI."
 
 HOMEPAGE="https://selvedge.sh"
 
@@ -23,15 +23,15 @@ HOMEPAGE="https://selvedge.sh"
 # Curated for the keyword strategy in launch/engagement/digests/2026-04-24-friday.md:
 #   - own "AI agent reasoning capture" (uncontested)
 #   - rank for "git blame for AI" / "AI code provenance" (contested but worth fighting for)
-#   - capture related-software discovery surface (mcp / claude-code / cursor / agent-trace)
+#   - capture related-software discovery surface (mcp / agent-memory / decision-memory / agent-trace)
 TOPICS=(
   "mcp"
   "mcp-server"
   "model-context-protocol"
   "ai-coding"
   "ai-agents"
-  "claude-code"
-  "cursor"
+  "agent-memory"
+  "decision-memory"
   "ai-code-provenance"
   "git-blame"
   "git-blame-for-ai"

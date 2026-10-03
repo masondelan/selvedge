@@ -18,14 +18,15 @@
 
 <!-- mcp-name: io.github.masondelan/selvedge -->
 
-**Persistent decision memory for AI coding agents.**
+**Persistent decision memory for AI agents.**
 
 Save why you chose an approach, what you rejected, and what would change your
 mind. Retrieve that context in the next coding session, using a function,
 database column, API route or dependency as the lookup key.
 
-Selvedge is a local MCP server and CLI. Claude Code, Codex, Cursor, Copilot,
-Gemini CLI and Windsurf can connect to the same SQLite store in `.selvedge/`.
+Selvedge is for anyone using a compatible agent. Connect through local MCP
+over stdio, or use the CLI from an agent with shell access. Decisions stay in
+the same SQLite store in `.selvedge/` when you switch tools.
 No hosted account is required; core storage and retrieval make no LLM calls.
 
 [**Get started**](#quickstart) · [Documentation](https://selvedge.sh/start/what-is-selvedge/) · [Agent compatibility](https://selvedge.sh/reference/compatibility/)
@@ -159,40 +160,7 @@ Selvedge vendors the schema and has no runtime dependency on the upstream projec
 
 ## Quickstart
 
-### Claude Code — install the plugin (recommended)
-
-Two commands, inside Claude Code. No prior `pip install` — the plugin
-bootstraps the server itself via `uvx` (or `pipx`):
-
-```
-/plugin marketplace add masondelan/selvedge
-/plugin install selvedge@selvedge
-```
-
-That's the whole agent-facing surface in one step:
-
-- the **MCP server** — 8 tools (`log_change`, `prior_attempts`, `blame`,
-  `diff`, `history`, `changeset`, `search`, `stale_decisions`);
-- a **skill** that tells the agent *when* to call them — before editing a
-  tracked entity, after any substantive change;
-- the **PreToolUse enforcement hook** — schema/migration edits are blocked
-  until `prior_attempts` has been checked this session, with the prior
-  reasoning in the block message;
-- **slash commands** — `/selvedge:status`, `/selvedge:blame <entity>`,
-  `/selvedge:history`, `/selvedge:prior-attempts <entity>`.
-
-The store (`.selvedge/selvedge.db`) creates itself on the first logged change.
-Two optional extras stay CLI-side: the post-commit hook that stamps each event
-with its commit hash (`selvedge install-hook`), and — if you want the
-`selvedge` command on your own shell `PATH` — `pip install selvedge`, which the
-launcher then prefers over `uvx` for an exact pinned version.
-
-> **Plugin or `selvedge setup` for Claude Code? Pick one.** Both wire the MCP
-> server; running both registers it twice. The plugin is the lighter path and
-> the one that updates itself. If you're on the plugin and only want the
-> post-commit commit-hash stamping, run `selvedge install-hook` on its own.
-
-### Choose your coding agent
+### Connect your agent
 
 With [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
 
@@ -200,24 +168,26 @@ With [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
 uv tool install --upgrade selvedge
 selvedge demo
 cd your-project
-selvedge setup --agent codex
+selvedge setup
 ```
 
-Use `codex`, `claude-code`, `cursor`, `copilot`, `gemini` or `windsurf`.
-Repeat `--agent` for multiple tools, or omit it to detect installed agents.
+Setup detects supported clients. To select a preset explicitly, use
+`--agent` with `claude-code`, `codex`, `copilot`, `cursor`, `gemini` or `windsurf`;
+repeat the flag for multiple clients. These presets are conveniences, not a
+compatibility limit. For another agent with local stdio MCP support, follow
+[manual setup](#works-with-any-mcp-client). Agents with shell access can use the CLI.
 Prefer pip? Use `python -m pip install --upgrade selvedge` in a virtual environment.
 The `selvedge-server` executable must be on your editor's PATH; launch the editor
 from that environment or use the executable's absolute path in its MCP config.
 
 Setup asks before changing files, backs up existing content, installs MCP and
 agent instructions, initializes the project, and offers a Git post-commit hook.
-For Codex it writes `.codex/config.toml` and `AGENTS.md`; Gemini CLI gets
-`.gemini/settings.json` and `GEMINI.md`; Copilot gets `.vscode/mcp.json` and
-`.github/copilot-instructions.md`. Custom Codex TOML entries require manual
-reconciliation, even with `--force`.
+Configuration files and lifecycle hooks vary by client. See the
+[compatibility guide](https://selvedge.sh/reference/compatibility/) for preset
+paths, activation requirements and limitations.
 
 Restart your agent in the project and approve Selvedge's tools if prompted.
-Codex must trust the project to load project-scoped configuration. Ask the agent:
+Follow your client's project-trust requirements. Ask the agent:
 
 > Use Selvedge to record one real approach we considered and rejected in this project.
 > Include the entity, why, and what would change our mind. Do not invent a decision.
@@ -278,22 +248,18 @@ selvedge init
 
 **2. Register the MCP server**
 
-Selvedge is a standard stdio MCP server, so it works with any MCP client —
-Claude Code, Cursor, Windsurf, Codex CLI, Gemini CLI, and more. See
-**[Works with any MCP client](#works-with-any-mcp-client)** for the exact
-config per client. For Claude Code:
-
-```bash
-claude mcp add selvedge -- selvedge-server
-```
+Configure your client to launch `selvedge-server` as a local stdio MCP server.
+Use its absolute path if it is not on the client's PATH, and set `SELVEDGE_DB`
+to the project database if the client starts outside your project. Configuration
+syntax varies; see [connection examples](#works-with-any-mcp-client).
 
 **3. Tell your agent to use it**
 
 ```bash
-selvedge prompt --install CLAUDE.md
+selvedge prompt --install path/to/agent-instructions.md
 ```
 
-Point `--install` at whichever prompt file your client reads — the block
+Replace `path/to/agent-instructions.md` with the actual file your client reads — the block
 itself is identical across clients:
 
 | Client | Prompt file |
@@ -306,10 +272,10 @@ itself is identical across clients:
 This installs the canonical agent-instructions block, sentinel-bracketed
 (`<!-- selvedge:start -->` / `<!-- selvedge:end -->`) so future
 `--install` calls update the bracketed region without disturbing
-anything else in the file. Or pipe it:
+anything else in the file. To print the block for copying:
 
 ```bash
-selvedge prompt | tee -a CLAUDE.md
+selvedge prompt
 ```
 
 Prefer to copy-paste? The same block is one click away on the website:
@@ -328,14 +294,56 @@ That's the same four steps the wizard runs.
 
 ---
 
-## Works with any MCP client
+<a id="works-with-any-mcp-client"></a>
 
-Selvedge is a standard stdio MCP server — its launch command is
-`selvedge-server`, put on your `PATH` by `pip install selvedge`. Any
-MCP-capable client can run it. Pick yours:
+## Works with compatible agents
+
+Selvedge has no required agent brand or model provider. Its MCP interface uses
+local stdio: a compatible client must be able to launch `selvedge-server` and
+call its tools. Remote-HTTP-only clients need a separate stdio bridge; Selvedge
+does not provide a hosted endpoint. An agent with shell access can instead use
+`selvedge log` and the read commands.
+
+The integrations below are examples. Choose the one matching your client, or
+configure another stdio MCP client using its own settings format:
 
 <details>
 <summary><b>Claude Code</b></summary>
+
+### Optional Claude Code plugin
+
+Two commands, inside Claude Code. No prior `pip install` — the plugin
+bootstraps the server itself via `uvx` (or `pipx`):
+
+```
+/plugin marketplace add masondelan/selvedge
+/plugin install selvedge@selvedge
+```
+
+That's the whole agent-facing surface in one step:
+
+- the **MCP server** — 8 tools (`log_change`, `prior_attempts`, `blame`,
+  `diff`, `history`, `changeset`, `search`, `stale_decisions`);
+- a **skill** that tells the agent *when* to call them — before editing a
+  tracked entity, after any substantive change;
+- the **PreToolUse enforcement hook** — schema/migration edits are blocked
+  until `prior_attempts` has been checked this session, with the prior
+  reasoning in the block message;
+- **slash commands** — `/selvedge:status`, `/selvedge:blame <entity>`,
+  `/selvedge:history`, `/selvedge:prior-attempts <entity>`.
+
+The store (`.selvedge/selvedge.db`) creates itself on the first logged change.
+Two optional extras stay CLI-side: the post-commit hook that stamps each event
+with its commit hash (`selvedge install-hook`), and — if you want the
+`selvedge` command on your own shell `PATH` — `pip install selvedge`, which the
+launcher then prefers over `uvx` for an exact pinned version.
+
+> **Plugin or `selvedge setup` for Claude Code? Pick one.** Both wire the MCP
+> server; running both registers it twice. The plugin is the lighter path and
+> the one that updates itself. If you're on the plugin and only want the
+> post-commit commit-hash stamping, run `selvedge install-hook` on its own.
+
+### Manual MCP connection
 
 ```bash
 claude mcp add selvedge -- selvedge-server
@@ -442,9 +450,8 @@ selvedge-server`).
 
 ## How it works
 
-Selvedge runs as an MCP server. AI agents in tools like Claude Code call
-Selvedge's tools as they work — logging structured change events to a local
-SQLite database.
+Selvedge runs as a local MCP server or CLI. Compatible agents call its tools
+as they work, logging structured change events to a local SQLite database.
 
 Each event records:
 - **What** changed (entity path, change type, diff)

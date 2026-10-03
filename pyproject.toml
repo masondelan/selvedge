@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "selvedge"
 version = "0.3.16"
-description = "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history."
+description = "Persistent decision memory for AI agents: rationale, rejected approaches, and entity history."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

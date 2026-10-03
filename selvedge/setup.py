@@ -54,6 +54,7 @@ from .prompt import _write_backup, install_to_file, render_block
 # ---------------------------------------------------------------------------
 
 
+# Setup preset names only; core event attribution accepts arbitrary agent labels.
 AgentName = Literal["claude-code", "cursor", "copilot", "codex", "gemini", "windsurf"]
 
 
@@ -547,8 +548,10 @@ def run_wizard(
                 "Detect AI tooling",
                 "skipped",
                 detail=(
-                    "No supported AI tools detected on this machine. "
-                    "Choose your tool explicitly, e.g. selvedge setup --agent codex."
+                    "No setup preset detected on this machine. "
+                    "Select a preset with --agent CLIENT, or connect a compatible stdio MCP "
+                    "client to selvedge-server. Use selvedge prompt for instructions; "
+                    "shell-capable agents can use the CLI."
                 ),
             )
         )

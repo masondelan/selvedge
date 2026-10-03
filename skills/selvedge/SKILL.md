@@ -17,8 +17,7 @@ You have access to Selvedge (MCP server: `selvedge`) for change tracking.
   empty, very short, or generic values like "user request" or "done".
   Good example: "User asked to add 2FA — needs phone number to send
   SMS verification codes."
-- Set `agent` to the tool you're using, e.g. "claude-code", "cursor",
-  or "codex".
+- Set `agent` to a stable name for the agent or tool making the change.
 - Set `session_id` if you have access to the current session/conversation ID.
 - Set `git_commit` to the commit hash once you know it.
 - For multi-entity changes (e.g. adding a whole feature), set a shared
@@ -28,9 +27,9 @@ You have access to Selvedge (MCP server: `selvedge`) for change tracking.
 - Before editing an entity, call `selvedge.prior_attempts` on it — if the
   same change was tried before and reverted, you'll see the prior
   reasoning and why it was rejected, and can change your plan instead of
-  repeating a rejected approach. (If the Selvedge PreToolUse hook is
-  installed, this check is enforced: schema/migration edits are blocked
-  until prior_attempts has been consulted this session.)
+  repeating a rejected approach. Where a compatible edit-gate hook is
+  installed and active, watched edits require this lookup. Hook capabilities
+  and activation depend on the client.
 - A reverted decision is not a permanent ban. If the constraint that
   killed it no longer holds, re-open it explicitly with
   `change_type="supersede"` (never re-apply a reverted change without

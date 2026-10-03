@@ -2,7 +2,7 @@
   "name": "selvedge-mcp",
   "version": "0.3.16",
   "pypiVersion": "0.3.16",
-  "description": "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history.",
+  "description": "Persistent decision memory for AI agents: rationale, rejected approaches, and entity history.",
   "bin": {
     "selvedge-mcp": "bin/selvedge-mcp.js"
   },
@@ -18,13 +18,13 @@
     "mcp-server",
     "model-context-protocol",
     "ai",
-    "claude",
-    "cursor",
     "changelog",
     "codebase",
     "memory",
     "devtools",
-    "selvedge"
+    "selvedge",
+    "agent-memory",
+    "decision-memory"
   ],
   "author": "Mason Delan <masondelan@gmail.com>",
   "license": "MIT",

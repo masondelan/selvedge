@@ -1,4 +1,4 @@
-"""Project-scoped hook configuration for non-Claude coding clients.
+"""Project-scoped hook configuration for optional client adapters.
 
 Formats are intentionally explicit: similar event names do not make hook
 protocols interchangeable. Existing configuration is validated before any write.

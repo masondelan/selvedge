@@ -306,7 +306,7 @@ def init(path):
     console.print(f"  Directory:  [dim]{selvedge_dir}[/dim]")
     console.print(f"  Database:   [dim]{db_path}[/dim]")
     console.print()
-    console.print("  [bold]Next step:[/bold] add Selvedge to your Claude Code MCP config:")
+    console.print("  [bold]Next step:[/bold] connect your agent to the local stdio MCP server:")
     console.print(
         """
   [dim]{
@@ -318,6 +318,7 @@ def init(path):
   }[/dim]
 """
     )
+    console.print("  [dim]Use your client's settings format; the JSON above is an example.[/dim]")
     console.print(
         "  Commit [bold].selvedge/[/bold] to share history with your team, "
         "or add it to .gitignore to keep it local."
@@ -2559,11 +2560,10 @@ def setup(path, non_interactive, assume_yes, force, skip_init, skip_hook, skip_e
     """Interactive first-run wizard — wires Selvedge into your AI tools.
 
     \b
-    Detects installed AI tools, or use --agent codex (repeatable) to
-    choose Codex, Claude Code, Cursor, Copilot, Gemini CLI or Windsurf:
+    Detects supported clients, or use --agent CLIENT (repeatable) to
+    select one of the presets listed in --help:
       • install Selvedge's MCP entry into each tool's config
-      • drop the canonical agent-instructions block into CLAUDE.md /
-        .cursorrules / copilot-instructions.md
+      • add the canonical instruction block to the client's project rules
       • install native lifecycle hooks for selected clients — checks watched
         schema/migration edits against recorded prior decisions
       • run `selvedge init` if .selvedge/ doesn't exist
@@ -2636,8 +2636,8 @@ def demo(json_output: bool) -> None:
     console.print(f"[green]{result['outcome']}[/green] · confidence: {result['confidence']}")
     console.print(f"Revisit when: {result['stale_when']}")
     console.print("\n[dim]Demo complete. Temporary database removed; your project is untouched.[/dim]")
-    console.print("\nTry it in your repo: [bold]selvedge setup --agent codex[/bold]")
-    console.print("[dim]Also: claude-code, cursor, copilot, gemini, windsurf. Then restart your agent.[/dim]")
+    console.print("\nTry it in your repo: [bold]selvedge setup[/bold]")
+    console.print("[dim]Use a setup preset or connect any compatible stdio MCP client.[/dim]")
 
 
 def _render_wizard_summary(outcome) -> None:
@@ -2692,7 +2692,7 @@ def _render_wizard_summary(outcome) -> None:
     type=click.Choice(["block", "skill"]),
     default="block",
     help=(
-        "Output shape: 'block' (CLAUDE.md-ready, sentinel-bracketed) or "
+        "Output shape: 'block' (project instructions, sentinel-bracketed) or "
         "'skill' (a plugin SKILL.md with frontmatter). Default: block."
     ),
 )
@@ -2713,7 +2713,7 @@ def prompt_cmd(fmt, install_path, no_backup):
 
     \b
     With no flags, prints the block to stdout — pipe-friendly:
-      selvedge prompt | tee -a CLAUDE.md
+      selvedge prompt
 
     \b
     With --install <file>, idempotently writes the block to <file>:
@@ -2736,8 +2736,8 @@ def prompt_cmd(fmt, install_path, no_backup):
     \b
     Examples:
       selvedge prompt
-      selvedge prompt --install CLAUDE.md
-      selvedge prompt --install .cursorrules --no-backup
+      selvedge prompt --install path/to/agent-instructions.md
+      selvedge prompt --install path/to/agent-instructions.md --no-backup
       selvedge prompt --format skill
     """
     from .prompt import PROMPT_BLOCK, install_to_file, render_block, render_skill

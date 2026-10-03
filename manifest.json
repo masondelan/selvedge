@@ -3,8 +3,8 @@
   "name": "selvedge",
   "display_name": "Selvedge",
   "version": "0.3.16",
-  "description": "Persistent decision memory for AI coding agents: rationale, rejected approaches, and entity history. A local MCP server: agents call `prior_attempts` before editing an entity — \"was this tried here before, and how did it turn out?\" — and the trail reads tried → reverted → re-opened, because a reverted decision is not a permanent ban. Entity-level rather than line-level: DB columns, functions, env vars, dependencies, API routes. An append-only, queryable audit trail — a git blame for decisions. Local SQLite, and no LLM anywhere in the storage or retrieval path, with retrieval based on stored records rather than generated explanations.",
-  "long_description": "Selvedge is an MCP server that AI coding agents call as they work to log structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning — the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code — your data stays yours.",
+  "description": "Persistent decision memory for AI agents: rationale, rejected approaches, and entity history. A local MCP server: agents call `prior_attempts` before editing an entity — \"was this tried here before, and how did it turn out?\" — and the trail reads tried → reverted → re-opened, because a reverted decision is not a permanent ban. Entity-level rather than line-level: DB columns, functions, env vars, dependencies, API routes. An append-only, queryable audit trail — a git blame for decisions. Local SQLite, and no LLM anywhere in the storage or retrieval path, with retrieval based on stored records rather than generated explanations.",
+  "long_description": "Selvedge is a local MCP server and CLI that any compatible AI agent can use to record decisions and structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning — the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code — your data stays yours.",
   "author": {
     "name": "Mason Delan",
     "email": "masondelan@gmail.com",
@@ -31,9 +31,8 @@
     "changeset",
     "audit",
     "ai-agents",
-    "claude-code",
-    "cursor",
-    "copilot"
+    "agent-memory",
+    "decision-memory"
   ],
   "server": {
     "type": "python",

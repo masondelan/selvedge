@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.types import Implementation
 
 _EXPECTED_TOOL_NAMES = frozenset({
     "log_change",
@@ -104,6 +105,48 @@ async def test_server_initializes_and_lists_eight_tools(server_params):
 # ---------------------------------------------------------------------------
 # Tool round-trips
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_custom_clients_share_decisions_with_cli(server_params, monkeypatch):
+    """Unlisted clients share ordinary history without a setup or hook adapter."""
+    from click.testing import CliRunner
+
+    from selvedge.cli import cli
+
+    entity = "custom-workflow/retry-policy"
+    actors = ("bespoke-planner/model-a", "in-house-reviewer/model-b")
+    for actor in actors:
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(
+                read, write, client_info=Implementation(name=actor, version="1.0")
+            ) as session:
+                await session.initialize()
+                result = await session.call_tool("log_change", arguments={
+                    "entity_path": entity,
+                    "change_type": "reject",
+                    "reasoning": "Unbounded retries exhaust the shared request budget.",
+                    "agent": actor,
+                })
+                assert not result.isError
+                assert _payload(result)["status"] == "logged"
+
+    # A fresh third client sees both writers through the same protocol.
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(
+            read, write, client_info=Implementation(name="custom-reader", version="1.0")
+        ) as session:
+            await session.initialize()
+            result = await session.call_tool("prior_attempts", arguments={"entity_path": entity})
+            assert not result.isError
+            rows = _payload(result)
+            assert {row["agent"] for row in rows} == set(actors)
+            assert all(row["outcome"] == "rejected" for row in rows)
+
+    monkeypatch.setenv("SELVEDGE_DB", server_params.env["SELVEDGE_DB"])
+    output = CliRunner().invoke(cli, ["prior-attempts", entity, "--json"])
+    assert output.exit_code == 0, output.output
+    assert json.loads(output.stdout) == rows
 
 
 @pytest.mark.asyncio

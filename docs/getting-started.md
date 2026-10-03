@@ -15,43 +15,21 @@ selvedge init
 
 This creates `.selvedge/selvedge.db` in your project root. Commit the `.selvedge/` directory to share change history with your team, or add it to `.gitignore` to keep it local.
 
-## Connect to Claude Code
+## Connect your agent
 
-### The plugin (recommended)
-
-Inside Claude Code, two commands — no prior `pip install`, the plugin
-bootstraps the server itself via `uvx`/`pipx`:
-
-```
-/plugin marketplace add masondelan/selvedge
-/plugin install selvedge@selvedge
-```
-
-This brings the MCP server, a skill that tells the agent when to use it, the
-PreToolUse enforcement hook, and the `/selvedge:status` / `blame` / `history` /
-`prior-attempts` slash commands. The store creates itself on the first logged
-change. (Prefer a pinned install? `pip install selvedge` and the launcher uses
-that instead of `uvx`.)
-
-### Or register the server manually
-
-Register the MCP server with Claude Code:
+Selvedge is for anyone using a compatible agent. It exposes a local stdio MCP
+server and a CLI; no particular agent or model provider is required.
 
 ```bash
-claude mcp add selvedge -- selvedge-server
+selvedge setup
 ```
 
-Or commit a project-level `.mcp.json` so your whole team gets it:
+Setup detects supported clients and offers their configuration and instructions.
+Use `selvedge setup --help` to see the optional client presets. Presets are not
+an exhaustive compatibility list.
 
-```json
-{
-  "mcpServers": {
-    "selvedge": { "command": "selvedge-server" }
-  }
-}
-```
-
-To pin a project-specific database instead of the global fallback, add an `env` block:
+For another client, register `selvedge-server` as a **local stdio MCP server**
+using that client's settings format. This is a common JSON configuration shape:
 
 ```json
 {
@@ -66,15 +44,18 @@ To pin a project-specific database instead of the global fallback, add an `env` 
 }
 ```
 
-Using a different client? Selvedge is a standard stdio MCP server — see
-[Works with any MCP client](../README.md#works-with-any-mcp-client) for
-Cursor, Windsurf, Codex CLI, and Gemini CLI.
+Replace the database path with your project's absolute path. Use the absolute
+path to `selvedge-server` if your client cannot find it on PATH. Clients that
+accept only remote HTTP endpoints cannot connect directly to this stdio server.
+Agents with shell access can use the CLI instead.
+
+See [client-specific examples and the optional plugin](../README.md#works-with-any-mcp-client)
+for exact setup instructions. Restart the client and approve tools if required.
 
 ## Tell your agent to log changes
 
-Add this to your agent's instructions file — `CLAUDE.md` (Claude Code),
-`AGENTS.md` (Codex CLI and others), `.cursor/rules/selvedge.md` (Cursor),
-or `GEMINI.md` (Gemini CLI):
+Add this to the project instructions or system prompt your agent reads.
+`selvedge prompt` prints the current full instruction block; the essentials are:
 
 ```
 You have access to Selvedge (MCP server: selvedge) for change tracking.
@@ -83,7 +64,7 @@ Rules:
 - Call selvedge.log_change immediately after adding, modifying, or removing
   any DB column, table, function, API endpoint, dependency, or env variable.
 - Set `reasoning` to the user's original request or the problem being solved.
-- Set `agent` to the tool you're using, e.g. "claude-code", "cursor", or "codex".
+- Set `agent` to a stable name for the agent or tool making the change.
 - Set `session_id` if you have access to the current session ID.
 - Set `git_commit` to the commit hash once you know it.
 - Before modifying an entity, call selvedge.diff or selvedge.blame to understand

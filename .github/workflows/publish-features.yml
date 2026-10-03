@@ -30,7 +30,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Publish features to GHCR
         uses: devcontainers/action@1082abd5d2bf3a11abccba70eef98df068277772  # v1

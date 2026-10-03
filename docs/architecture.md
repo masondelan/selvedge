@@ -157,7 +157,7 @@ The central entity. Every recorded change is one row in the `events` table.
 | `timestamp` | TEXT | UTC ISO 8601 |
 | `entity_type` | TEXT | column, table, file, function, class, endpoint, dependency, env_var, index, schema, config, other |
 | `entity_path` | TEXT | Dot/slash notation path (see conventions below) |
-| `change_type` | TEXT | add, remove, modify, rename, retype, create, delete, index_add, index_remove, migrate |
+| `change_type` | TEXT | Validated `ChangeType` values: add, remove, modify, rename, retype, create, delete, index_add, index_remove, migrate, supersede, revert, reject |
 | `diff` | TEXT | The actual change — SQL migration, code diff, or description |
 | `reasoning` | TEXT | Why the change was made — the captured intent |
 | `agent` | TEXT | Agent or tool name (free text; use `human` for manual entries) |

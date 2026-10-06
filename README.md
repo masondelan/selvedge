@@ -5,6 +5,8 @@
 <p align="center">
   <a href="https://selvedge.sh"><strong>selvedge.sh</strong></a>
   &nbsp;·&nbsp;
+  <a href="https://devhunt.org/tool/selvedge"><strong>DevHunt</strong></a>
+  &nbsp;·&nbsp;
   <a href="https://pypi.org/project/selvedge/"><strong>PyPI</strong></a>
   &nbsp;·&nbsp;
   <a href="https://github.com/masondelan/selvedge"><strong>GitHub</strong></a>

@@ -1,0 +1,43 @@
+{
+  "exported_sha256": {
+    "REPORT.md": "21af4df65bb2154dde2d6279366283cf89e28a17a17b9bf75daf884b576214a4",
+    "captures/retry-backoff.json": "a721b7e8e5f57299615f1fd005f7e38c130ad8513ce1cf38c90fa8855d629d6d",
+    "captures/retry-backoff.md": "34b5f744f91e946a8e8348f5a4b8db8bc3d6647a4d13576bc02c61b9ed23f949",
+    "execution.json": "48a29e9e8fb867ae7279c970d0da1e6c6f1474aaf236d5356d46bd8cf8f124c9",
+    "manifest.json": "ee5983292e65e8588122165ec16b37dbdfe35a85e50deda471b55b253f2024c2",
+    "results.jsonl": "d95561f84623bbaac741586eb2484ec15f4e671fb5d5e5310a44c3391a919cf3",
+    "summary.json": "7ef340df4128543c948c7e91c0ca2f43d2ba1ed21ac47dab32e0bed7262b7902",
+    "trials/01-retry-backoff-no-memory-1/client-trace.json": "e84f82ed2406fbea776c683cecb1defa57be59c61310d05b6ef7f99c9ff62755",
+    "trials/01-retry-backoff-no-memory-1/prompt.txt": "d39fc71c12ae468dce86c48d8ffbe01735a459d67a12e073940f83b6e7cf10c7",
+    "trials/01-retry-backoff-no-memory-1/result.json": "52323c60c38151f2960924790c180e36f6d42ed897bad4cde933f8c711dc723a",
+    "trials/01-retry-backoff-no-memory-1/visible-case.json": "755aa3ec800dcf011077505657be0ed733bd450261426d485846520cffa870f8"
+  },
+  "exporter_sha256": "987d2fb1c941ea433ee0ea28b0c25edee4b5c58451de9db5a4c71ec2072909f3",
+  "format": "coding-memory-publication/1",
+  "original_input_sha256": {
+    "captures/retry-backoff.json": "7e92a89ce46d2cec5c6fd2402323d2cd0449ec1fa497be8c82f540ed645198d4",
+    "captures/retry-backoff.md": "fa6663f3b74a6e4b978efa9ad19a8154a9eff33392b74fbc175a49b23227be93",
+    "execution.json": "48a29e9e8fb867ae7279c970d0da1e6c6f1474aaf236d5356d46bd8cf8f124c9",
+    "manifest.json": "ee5983292e65e8588122165ec16b37dbdfe35a85e50deda471b55b253f2024c2",
+    "results.jsonl": "d95561f84623bbaac741586eb2484ec15f4e671fb5d5e5310a44c3391a919cf3",
+    "summary.json": "f34cc4c010e4abb7de1aecb1b889b857f53e3b9873c7a26a5b54edd5ce6fa1bc",
+    "trials/01-retry-backoff-no-memory-1/prompt.txt": "d39fc71c12ae468dce86c48d8ffbe01735a459d67a12e073940f83b6e7cf10c7",
+    "trials/01-retry-backoff-no-memory-1/result.json": "52323c60c38151f2960924790c180e36f6d42ed897bad4cde933f8c711dc723a",
+    "trials/01-retry-backoff-no-memory-1/visible-case.json": "755aa3ec800dcf011077505657be0ed733bd450261426d485846520cffa870f8"
+  },
+  "phase": "technical-smoke",
+  "policy": "Explicit artifact projection; no databases or raw client streams. Synthetic decision rationale retained; client reasoning excluded. Independent inspection is required before publication.",
+  "transformed": {
+    "REPORT.md": null,
+    "captures/retry-backoff.json": true,
+    "captures/retry-backoff.md": true,
+    "execution.json": false,
+    "manifest.json": false,
+    "results.jsonl": false,
+    "summary.json": true,
+    "trials/01-retry-backoff-no-memory-1/client-trace.json": null,
+    "trials/01-retry-backoff-no-memory-1/prompt.txt": false,
+    "trials/01-retry-backoff-no-memory-1/result.json": false,
+    "trials/01-retry-backoff-no-memory-1/visible-case.json": false
+  }
+}

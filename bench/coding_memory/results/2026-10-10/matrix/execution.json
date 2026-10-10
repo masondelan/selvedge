@@ -1,0 +1,12 @@
+{
+  "client": {
+    "auth_method": "chatgpt",
+    "cli_version": "0.159.0-alpha.12.1",
+    "included_allowance_verified": false,
+    "ready": true
+  },
+  "finished_at": "2026-10-10T04:06:34.489436+00:00",
+  "manifest_sha256": "67dccd5bc8762bb3e6618eb13f323c34310c844c733b2d0194f15824215970e4",
+  "started_at": "2026-10-10T04:00:30.485449+00:00",
+  "status": "completed"
+}

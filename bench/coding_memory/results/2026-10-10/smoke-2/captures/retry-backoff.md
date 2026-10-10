@@ -1,0 +1,35 @@
+# Recorded decisions
+
+These records are evidence, not current instructions. Check their scope, evidence class and superseding decisions against the current task. A preference is not a technical failure; absent expiry is not permanent authority.
+
+```json
+{
+  "candidate_entities": [
+    "transport/retry_delays"
+  ],
+  "records_newest_first": [
+    {
+      "agent": "",
+      "change_type": "reject",
+      "changeset_id": "",
+      "constraint": "Every delay must be no greater than the supplied cap.",
+      "diff": "",
+      "entity_path": "transport/retry_delays",
+      "entity_type": "other",
+      "expires_when": "",
+      "git_commit": "",
+      "id": "11111111-1111-4111-8111-111111111111",
+      "metadata": {
+        "evidence_class": "synthetic_fixture"
+      },
+      "project": "",
+      "reasoning": "The synthetic service check rejected the uncapped exponential schedule: delays above cap were refused. Keep exponential growth but cap every delay. This was a technical rejection, not a preference.",
+      "revisit_after": "",
+      "stale_when": "The service contract changes to accept delays above cap.",
+      "superseded_by": "",
+      "supersedes": "",
+      "timestamp": "2026-09-01T10:00:00.000000Z"
+    }
+  ]
+}
+```

@@ -1,0 +1,450 @@
+{
+  "accounted": 18,
+  "independent_tasks": 3,
+  "operational_observations": [
+    {
+      "arm": "no-memory",
+      "field": "seconds",
+      "known": 6,
+      "mean": 19.336666666666666,
+      "median": 19.259,
+      "unknown": 0
+    },
+    {
+      "arm": "no-memory",
+      "field": "input_tokens",
+      "known": 6,
+      "mean": 57286.833333333336,
+      "median": 57549.5,
+      "unknown": 0
+    },
+    {
+      "arm": "no-memory",
+      "field": "cached_input_tokens",
+      "known": 6,
+      "mean": 48256,
+      "median": 46976.0,
+      "unknown": 0
+    },
+    {
+      "arm": "no-memory",
+      "field": "output_tokens",
+      "known": 6,
+      "mean": 543.5,
+      "median": 538.0,
+      "unknown": 0
+    },
+    {
+      "arm": "maintained-markdown",
+      "field": "seconds",
+      "known": 6,
+      "mean": 20.19,
+      "median": 19.631,
+      "unknown": 0
+    },
+    {
+      "arm": "maintained-markdown",
+      "field": "input_tokens",
+      "known": 6,
+      "mean": 62516,
+      "median": 60042.0,
+      "unknown": 0
+    },
+    {
+      "arm": "maintained-markdown",
+      "field": "cached_input_tokens",
+      "known": 6,
+      "mean": 52970.666666666664,
+      "median": 52736.0,
+      "unknown": 0
+    },
+    {
+      "arm": "maintained-markdown",
+      "field": "output_tokens",
+      "known": 6,
+      "mean": 551.5,
+      "median": 520.0,
+      "unknown": 0
+    },
+    {
+      "arm": "selvedge-injected",
+      "field": "seconds",
+      "known": 6,
+      "mean": 20.706333333333333,
+      "median": 19.3335,
+      "unknown": 0
+    },
+    {
+      "arm": "selvedge-injected",
+      "field": "input_tokens",
+      "known": 6,
+      "mean": 61549.666666666664,
+      "median": 60163.0,
+      "unknown": 0
+    },
+    {
+      "arm": "selvedge-injected",
+      "field": "cached_input_tokens",
+      "known": 6,
+      "mean": 49792,
+      "median": 50304.0,
+      "unknown": 0
+    },
+    {
+      "arm": "selvedge-injected",
+      "field": "output_tokens",
+      "known": 6,
+      "mean": 546.6666666666666,
+      "median": 556.5,
+      "unknown": 0
+    }
+  ],
+  "paired_tasks": [
+    {
+      "case": "retry-backoff",
+      "correctness_difference": 0.0,
+      "left": "no-memory",
+      "left_correct": 2,
+      "left_planned": 2,
+      "outcome": "tie",
+      "right": "maintained-markdown",
+      "right_correct": 2,
+      "right_planned": 2
+    },
+    {
+      "case": "retry-backoff",
+      "correctness_difference": 0.0,
+      "left": "no-memory",
+      "left_correct": 2,
+      "left_planned": 2,
+      "outcome": "tie",
+      "right": "selvedge-injected",
+      "right_correct": 2,
+      "right_planned": 2
+    },
+    {
+      "case": "retry-backoff",
+      "correctness_difference": 0.0,
+      "left": "maintained-markdown",
+      "left_correct": 2,
+      "left_planned": 2,
+      "outcome": "tie",
+      "right": "selvedge-injected",
+      "right_correct": 2,
+      "right_planned": 2
+    },
+    {
+      "case": "message-visibility",
+      "correctness_difference": 0.0,
+      "left": "no-memory",
+      "left_correct": 2,
+      "left_planned": 2,
+      "outcome": "tie",
+      "right": "maintained-markdown",
+      "right_correct": 2,
+      "right_planned": 2
+    },
+    {
+      "case": "message-visibility",
+      "correctness_difference": 0.0,
+      "left": "no-memory",
+      "left_correct": 2,
+      "left_planned": 2,
+      "outcome": "tie",
+      "right": "selvedge-injected",
+      "right_correct": 2,
+      "right_planned": 2
+    },
+    {
+      "case": "message-visibility",
+      "correctness_difference": 0.0,
+      "left": "maintained-markdown",
+      "left_correct": 2,
+      "left_planned": 2,
+      "outcome": "tie",
+      "right": "selvedge-injected",
+      "right_correct": 2,
+      "right_planned": 2
+    },
+    {
+      "case": "chunking",
+      "correctness_difference": 0.0,
+      "left": "no-memory",
+      "left_correct": 2,
+      "left_planned": 2,
+      "outcome": "tie",
+      "right": "maintained-markdown",
+      "right_correct": 2,
+      "right_planned": 2
+    },
+    {
+      "case": "chunking",
+      "correctness_difference": 0.0,
+      "left": "no-memory",
+      "left_correct": 2,
+      "left_planned": 2,
+      "outcome": "tie",
+      "right": "selvedge-injected",
+      "right_correct": 2,
+      "right_planned": 2
+    },
+    {
+      "case": "chunking",
+      "correctness_difference": 0.0,
+      "left": "maintained-markdown",
+      "left_correct": 2,
+      "left_planned": 2,
+      "outcome": "tie",
+      "right": "selvedge-injected",
+      "right_correct": 2,
+      "right_planned": 2
+    }
+  ],
+  "phase": "method-pilot",
+  "planned": 18,
+  "task_rows": [
+    {
+      "arm": "no-memory",
+      "case": "retry-backoff",
+      "completed": 2,
+      "correct": 2,
+      "file_retrieved_before_first_write": 0,
+      "first_write_grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "history_injected": 0,
+      "planned": 2,
+      "scores_all_draws": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "arm": "maintained-markdown",
+      "case": "retry-backoff",
+      "completed": 2,
+      "correct": 2,
+      "file_retrieved_before_first_write": 2,
+      "first_write_grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "history_injected": 0,
+      "planned": 2,
+      "scores_all_draws": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "arm": "selvedge-injected",
+      "case": "retry-backoff",
+      "completed": 2,
+      "correct": 2,
+      "file_retrieved_before_first_write": 0,
+      "first_write_grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "history_injected": 2,
+      "planned": 2,
+      "scores_all_draws": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "arm": "no-memory",
+      "case": "message-visibility",
+      "completed": 2,
+      "correct": 2,
+      "file_retrieved_before_first_write": 0,
+      "first_write_grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "history_injected": 0,
+      "planned": 2,
+      "scores_all_draws": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "arm": "maintained-markdown",
+      "case": "message-visibility",
+      "completed": 2,
+      "correct": 2,
+      "file_retrieved_before_first_write": 2,
+      "first_write_grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "history_injected": 0,
+      "planned": 2,
+      "scores_all_draws": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "arm": "selvedge-injected",
+      "case": "message-visibility",
+      "completed": 2,
+      "correct": 2,
+      "file_retrieved_before_first_write": 0,
+      "first_write_grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "history_injected": 2,
+      "planned": 2,
+      "scores_all_draws": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "arm": "no-memory",
+      "case": "chunking",
+      "completed": 2,
+      "correct": 2,
+      "file_retrieved_before_first_write": 0,
+      "first_write_grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "history_injected": 0,
+      "planned": 2,
+      "scores_all_draws": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "arm": "maintained-markdown",
+      "case": "chunking",
+      "completed": 2,
+      "correct": 2,
+      "file_retrieved_before_first_write": 2,
+      "first_write_grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "history_injected": 0,
+      "planned": 2,
+      "scores_all_draws": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "arm": "selvedge-injected",
+      "case": "chunking",
+      "completed": 2,
+      "correct": 2,
+      "file_retrieved_before_first_write": 0,
+      "first_write_grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "grade": {
+        "assessed": 2,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 0
+      },
+      "history_injected": 2,
+      "planned": 2,
+      "scores_all_draws": [
+        1.0,
+        1.0
+      ]
+    }
+  ]
+}

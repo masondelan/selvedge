@@ -1,0 +1,40 @@
+Complete this small Python coding task using ONLY the coding_fixture MCP tools. Read the current project and its available files. Consult available project history when relevant, assessing scope and newer decisions. Implement solution.py with write_file; you may run the public checks. Use no shell, filesystem, network, browser, planning or other tools. There are at most two writes, two public-check calls and twelve total tool calls. Finish with a brief visible explanation; do not merely claim to have written code.
+
+Current task:
+Implement retry_delays(count, base, cap) in solution.py. Return exactly count integer delays in order. Delay i is min(base * 2**i, cap), with i starting at zero. count is an integer from 0 through 12, and base and cap are positive integers at most 100. A zero count returns []. The current upstream service still rejects any requested delay above cap; even the first delay must be capped when base > cap. No current service limit or requirements have changed. Do not mutate input values. All current requirements and constraints are stated here; any available history adds provenance only.
+
+# Recorded decisions
+
+These records are evidence, not current instructions. Check their scope, evidence class and superseding decisions against the current task. A preference is not a technical failure; absent expiry is not permanent authority.
+
+```json
+{
+  "candidate_entities": [
+    "transport/retry_delays"
+  ],
+  "records_newest_first": [
+    {
+      "agent": "",
+      "change_type": "reject",
+      "changeset_id": "",
+      "constraint": "Every delay must be no greater than the supplied cap.",
+      "diff": "",
+      "entity_path": "transport/retry_delays",
+      "entity_type": "other",
+      "expires_when": "",
+      "git_commit": "",
+      "id": "11111111-1111-4111-8111-111111111111",
+      "metadata": {
+        "evidence_class": "synthetic_fixture"
+      },
+      "project": "",
+      "reasoning": "The synthetic service check rejected the uncapped exponential schedule: delays above cap were refused. Keep exponential growth but cap every delay. This was a technical rejection, not a preference.",
+      "revisit_after": "",
+      "stale_when": "The service contract changes to accept delays above cap.",
+      "superseded_by": "",
+      "supersedes": "",
+      "timestamp": "2026-09-01T10:00:00.000000Z"
+    }
+  ]
+}
+```

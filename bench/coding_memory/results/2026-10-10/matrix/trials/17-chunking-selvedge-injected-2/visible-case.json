@@ -1,0 +1,67 @@
+{
+  "entrypoint": "chunk_items",
+  "id": "chunking",
+  "project_files": {
+    "README.md": "Implement chunk_items(items, size) in solution.py. Return consecutive nonempty lists containing at most size items each, using exactly size items in every chunk except a possibly shorter final chunk. Preserve the original order and values, do not mutate items, and return [] for an empty input. items is a list of at most 20 JSON values; size is a positive integer from 1 through 20. The current local batching requirement has no concurrency or upstream-service cap: sizes above two are explicitly supported and must be honored. All current requirements are stated here; history from other entities must not impose additional restrictions.\n\nImplementation contract: submit solution.py containing exactly one function with the requested name. Use Python 3.10+ with ordinary assignments, conditionals, loops, comprehensions, arithmetic, comparisons and indexing/slicing. No imports, decorators, default arguments, helper/nested functions, classes, async, exceptions, private/dunder names, filesystem, network, introspection, or print. Available builtins: abs, all, any, bool, dict, enumerate, float, int, len, list, max, min, range, reversed, round, set, sorted, str, sum, tuple, zip. The only permitted methods are list.append, list.extend and dict.get. Type annotations are optional and ignored. Augmented assignments such as x += 1 require a simple variable target. String percent-formatting, converting containers with str(), and storing bound methods as values are not supported. Return a plain JSON-shaped value (lists rather than tuples/sets), at most 1000 items per list and 4096 encoded bytes. Do not mutate arguments. Inputs follow the task's stated valid domain; no invalid-input handling is required. The grader runs the function in an isolated subprocess with a 3-second wall timeout, 2-second CPU limit, 10000-step budget, 1000-item container/range limit and 4096-bit integer-operation budget. Arithmetic, container methods and materializing builtins are guarded before large allocations. A 256 MiB address-space limit is additionally applied where the OS supports it (not on macOS); actual capability is reported in grading results. These restrictions define this synthetic exercise, not Selvedge's supported code or agents.\n",
+    "solution.py": "def chunk_items(items, size):\n    return None\n"
+  },
+  "public_checks": [
+    {
+      "args": [
+        [],
+        2
+      ],
+      "expected": [],
+      "id": "empty",
+      "label": "Do not create an empty chunk",
+      "weight": 1
+    },
+    {
+      "args": [
+        [
+          1,
+          2,
+          3
+        ],
+        2
+      ],
+      "expected": [
+        [
+          1,
+          2
+        ],
+        [
+          3
+        ]
+      ],
+      "id": "pairs",
+      "label": "Retain a shorter final chunk",
+      "weight": 1
+    },
+    {
+      "args": [
+        [
+          1,
+          2,
+          3
+        ],
+        1
+      ],
+      "expected": [
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ]
+      ],
+      "id": "singles",
+      "label": "Honor a one-item size",
+      "weight": 1
+    }
+  ],
+  "task": "Implement chunk_items(items, size) in solution.py. Return consecutive nonempty lists containing at most size items each, using exactly size items in every chunk except a possibly shorter final chunk. Preserve the original order and values, do not mutate items, and return [] for an empty input. items is a list of at most 20 JSON values; size is a positive integer from 1 through 20. The current local batching requirement has no concurrency or upstream-service cap: sizes above two are explicitly supported and must be honored. All current requirements are stated here; history from other entities must not impose additional restrictions."
+}

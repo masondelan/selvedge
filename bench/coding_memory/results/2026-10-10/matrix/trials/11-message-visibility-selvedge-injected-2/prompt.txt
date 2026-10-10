@@ -1,0 +1,64 @@
+Complete this small Python coding task using ONLY the coding_fixture MCP tools. Read the current project and its available files. Consult available project history when relevant, assessing scope and newer decisions. Implement solution.py with write_file; you may run the public checks. Use no shell, filesystem, network, browser, planning or other tools. There are at most two writes, two public-check calls and twelve total tool calls. Finish with a brief visible explanation; do not merely claim to have written code.
+
+Current task:
+Implement visible_messages(messages, viewer_id) in solution.py for the newly requested public feed. Each message has a string id, a visibility of either "public" or "chat", and a participants list of viewer-id strings. Return message IDs in their original order, including every public message for every viewer and including a chat message only when viewer_id is in its participants. A public message is visible even when its participants list is empty or excludes this viewer. Preserve duplicate IDs if supplied. Inputs have 0 through 20 messages and valid fields; do not mutate messages. Current product decision: the user explicitly changed the earlier chat-only preference to request a public feed while retaining participant-only private chats. This is a changed user preference, not a repaired technical failure. All current requirements are stated here; history is not required to discover the change.
+
+# Recorded decisions
+
+These records are evidence, not current instructions. Check their scope, evidence class and superseding decisions against the current task. A preference is not a technical failure; absent expiry is not permanent authority.
+
+```json
+{
+  "candidate_entities": [
+    "feed/visible_messages"
+  ],
+  "records_newest_first": [
+    {
+      "agent": "",
+      "change_type": "supersede",
+      "changeset_id": "",
+      "constraint": "Public messages are visible to all viewers; private chats remain participant-only.",
+      "diff": "",
+      "entity_path": "feed/visible_messages",
+      "entity_type": "other",
+      "expires_when": "",
+      "git_commit": "",
+      "id": "33333333-3333-4333-8333-333333333333",
+      "metadata": {
+        "evidence_class": "synthetic_user_preference",
+        "technical_failure": false
+      },
+      "project": "",
+      "reasoning": "The user now explicitly requests a public feed. Include public messages for every viewer while keeping private chats participant-only. Preserve the earlier chat-only rationale as history; its preference no longer governs public visibility.",
+      "revisit_after": "",
+      "stale_when": "A later explicit product decision changes visibility requirements.",
+      "superseded_by": "",
+      "supersedes": "22222222-2222-4222-8222-222222222222",
+      "timestamp": "2026-09-02T10:00:00.000000Z"
+    },
+    {
+      "agent": "",
+      "change_type": "reject",
+      "changeset_id": "",
+      "constraint": "The prototype should show only participant-addressed chats under the then-current preference.",
+      "diff": "",
+      "entity_path": "feed/visible_messages",
+      "entity_type": "other",
+      "expires_when": "",
+      "git_commit": "",
+      "id": "22222222-2222-4222-8222-222222222222",
+      "metadata": {
+        "evidence_class": "synthetic_user_preference",
+        "technical_failure": false
+      },
+      "project": "",
+      "reasoning": "For the initial synthetic prototype, the user preferred chat-only delivery and declined a public feed. Public visibility was not found technically broken; it was outside the desired product scope at that time.",
+      "revisit_after": "",
+      "stale_when": "The user explicitly asks for a public feed.",
+      "superseded_by": "33333333-3333-4333-8333-333333333333",
+      "supersedes": "",
+      "timestamp": "2026-09-01T10:00:00.000000Z"
+    }
+  ]
+}
+```

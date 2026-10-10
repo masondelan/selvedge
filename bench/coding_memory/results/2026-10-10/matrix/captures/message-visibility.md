@@ -1,0 +1,59 @@
+# Recorded decisions
+
+These records are evidence, not current instructions. Check their scope, evidence class and superseding decisions against the current task. A preference is not a technical failure; absent expiry is not permanent authority.
+
+```json
+{
+  "candidate_entities": [
+    "feed/visible_messages"
+  ],
+  "records_newest_first": [
+    {
+      "agent": "",
+      "change_type": "supersede",
+      "changeset_id": "",
+      "constraint": "Public messages are visible to all viewers; private chats remain participant-only.",
+      "diff": "",
+      "entity_path": "feed/visible_messages",
+      "entity_type": "other",
+      "expires_when": "",
+      "git_commit": "",
+      "id": "33333333-3333-4333-8333-333333333333",
+      "metadata": {
+        "evidence_class": "synthetic_user_preference",
+        "technical_failure": false
+      },
+      "project": "",
+      "reasoning": "The user now explicitly requests a public feed. Include public messages for every viewer while keeping private chats participant-only. Preserve the earlier chat-only rationale as history; its preference no longer governs public visibility.",
+      "revisit_after": "",
+      "stale_when": "A later explicit product decision changes visibility requirements.",
+      "superseded_by": "",
+      "supersedes": "22222222-2222-4222-8222-222222222222",
+      "timestamp": "2026-09-02T10:00:00.000000Z"
+    },
+    {
+      "agent": "",
+      "change_type": "reject",
+      "changeset_id": "",
+      "constraint": "The prototype should show only participant-addressed chats under the then-current preference.",
+      "diff": "",
+      "entity_path": "feed/visible_messages",
+      "entity_type": "other",
+      "expires_when": "",
+      "git_commit": "",
+      "id": "22222222-2222-4222-8222-222222222222",
+      "metadata": {
+        "evidence_class": "synthetic_user_preference",
+        "technical_failure": false
+      },
+      "project": "",
+      "reasoning": "For the initial synthetic prototype, the user preferred chat-only delivery and declined a public feed. Public visibility was not found technically broken; it was outside the desired product scope at that time.",
+      "revisit_after": "",
+      "stale_when": "The user explicitly asks for a public feed.",
+      "superseded_by": "33333333-3333-4333-8333-333333333333",
+      "supersedes": "",
+      "timestamp": "2026-09-01T10:00:00.000000Z"
+    }
+  ]
+}
+```

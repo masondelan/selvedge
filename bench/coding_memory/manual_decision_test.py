@@ -33,6 +33,7 @@ def demonstrate(output: Path) -> dict:
     )
     for check in before["public_checks"] + before["private_checks"]:
         messages, viewer = check["args"]
+        check["label"] = f"Original participant-only filtering ({check['id']})"
         check["expected"] = [message["id"] for message in messages
                              if viewer in message["participants"]]
     store = SelvedgeStorage(output / "memory.db")

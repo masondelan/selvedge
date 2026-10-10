@@ -1,0 +1,6 @@
+{"at": "2026-10-10T04:02:45.363205+00:00", "tool": "read_project"}
+{"at": "2026-10-10T04:02:47.890061+00:00", "path": "DECISIONS.md", "tool": "read_file"}
+{"at": "2026-10-10T04:02:47.891459+00:00", "path": "README.md", "tool": "read_file"}
+{"at": "2026-10-10T04:02:47.892477+00:00", "path": "solution.py", "tool": "read_file"}
+{"at": "2026-10-10T04:02:52.624225+00:00", "characters": 95, "path": "solution.py", "tool": "write_file", "write": 1}
+{"at": "2026-10-10T04:02:54.527625+00:00", "result": {"case_id": "retry-backoff", "check_scope": "public", "checks": [{"actual": [], "error": "", "id": "zero", "input_unchanged": true, "label": "Zero retries produces no delays", "passed": true, "weight": 1}, {"actual": [2, 4, 8], "error": "", "id": "growth", "input_unchanged": true, "label": "Double delays below the cap", "passed": true, "weight": 1}, {"actual": [1, 2, 4, 4, 4], "error": "", "id": "cap", "input_unchanged": true, "label": "Retain the cap after reaching it", "passed": true, "weight": 1}], "execution_status": "completed", "functional_correct": true, "limits": {"address_space_bytes": null, "cpu_seconds": 2, "max_container_items": 1000, "max_integer_bits": 4096, "max_steps": 10000, "wall_seconds": 3.0}, "score": 1.0}, "tool": "run_checks"}

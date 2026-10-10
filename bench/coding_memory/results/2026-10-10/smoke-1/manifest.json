@@ -1,0 +1,235 @@
+{
+  "arms": [
+    "no-memory"
+  ],
+  "autonomous_capture": "not evaluated",
+  "capture_evidence": {
+    "retry-backoff": {
+      "bundle_sha256": "fa6663f3b74a6e4b978efa9ad19a8154a9eff33392b74fbc175a49b23227be93",
+      "capture": "author-seeded; not autonomous capture",
+      "retrieved_ids": [
+        "11111111-1111-4111-8111-111111111111"
+      ],
+      "seeded_ids": [
+        "11111111-1111-4111-8111-111111111111"
+      ]
+    }
+  },
+  "cases": [
+    {
+      "bad_solution": "def retry_delays(count, base, cap):\n    return [base * 2 ** i for i in range(count)]\n",
+      "behavior_probe": {
+        "matches": {
+          "long_cap": [
+            3,
+            6,
+            12,
+            24,
+            48,
+            96,
+            192
+          ],
+          "unit_cap": [
+            1,
+            2,
+            4,
+            8
+          ]
+        },
+        "metric": "repeated_rejected_path",
+        "requires_pass": [
+          "zero",
+          "growth"
+        ]
+      },
+      "entity": "transport/retry_delays",
+      "entrypoint": "retry_delays",
+      "family": "retained-technical-rejection",
+      "history": [
+        {
+          "change_type": "reject",
+          "constraint": "Every delay must be no greater than the supplied cap.",
+          "diff": "",
+          "entity_path": "transport/retry_delays",
+          "id": "11111111-1111-4111-8111-111111111111",
+          "metadata": "{\"evidence_class\": \"synthetic_fixture\"}",
+          "reasoning": "The synthetic service check rejected the uncapped exponential schedule: delays above cap were refused. Keep exponential growth but cap every delay. This was a technical rejection, not a preference.",
+          "stale_when": "The service contract changes to accept delays above cap.",
+          "supersedes": "",
+          "timestamp": "2026-09-01T10:00:00+00:00"
+        }
+      ],
+      "id": "retry-backoff",
+      "private_checks": [
+        {
+          "args": [
+            7,
+            3,
+            10
+          ],
+          "expected": [
+            3,
+            6,
+            10,
+            10,
+            10,
+            10,
+            10
+          ],
+          "id": "long_cap",
+          "label": "Cap a longer schedule",
+          "weight": 1
+        },
+        {
+          "args": [
+            2,
+            9,
+            4
+          ],
+          "expected": [
+            4,
+            4
+          ],
+          "id": "initial_cap",
+          "label": "Cap the first delay too",
+          "weight": 1
+        },
+        {
+          "args": [
+            4,
+            1,
+            1
+          ],
+          "expected": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "id": "unit_cap",
+          "label": "Respect a one-unit cap",
+          "weight": 1
+        },
+        {
+          "args": [
+            4,
+            2,
+            64
+          ],
+          "expected": [
+            2,
+            4,
+            8,
+            16
+          ],
+          "id": "uncapped_range",
+          "label": "Preserve growth below a large cap",
+          "weight": 1
+        },
+        {
+          "args": [
+            1,
+            5,
+            9
+          ],
+          "expected": [
+            5
+          ],
+          "id": "one",
+          "label": "Return exactly one delay",
+          "weight": 1
+        }
+      ],
+      "project_files": {
+        "README.md": "Implement retry_delays(count, base, cap) in solution.py. Return exactly count integer delays in order. Delay i is min(base * 2**i, cap), with i starting at zero. count is an integer from 0 through 12, and base and cap are positive integers at most 100. A zero count returns []. The current upstream service still rejects any requested delay above cap; even the first delay must be capped when base > cap. No current service limit or requirements have changed. Do not mutate input values. All current requirements and constraints are stated here; any available history adds provenance only.\n\nImplementation contract: submit solution.py containing exactly one function with the requested name. Use Python 3.10+ with ordinary assignments, conditionals, loops, comprehensions, arithmetic, comparisons and indexing/slicing. No imports, decorators, default arguments, helper/nested functions, classes, async, exceptions, private/dunder names, filesystem, network, introspection, or print. Available builtins: abs, all, any, bool, dict, enumerate, float, int, len, list, max, min, range, reversed, round, set, sorted, str, sum, tuple, zip. The only permitted methods are list.append, list.extend and dict.get. Type annotations are optional and ignored. Augmented assignments such as x += 1 require a simple variable target. String percent-formatting, converting containers with str(), and storing bound methods as values are not supported. Return a plain JSON-shaped value (lists rather than tuples/sets), at most 1000 items per list and 4096 encoded bytes. Do not mutate arguments. Inputs follow the task's stated valid domain; no invalid-input handling is required. The grader runs the function in an isolated subprocess with a 3-second wall timeout, 2-second CPU limit, 10000-step budget, 1000-item container/range limit and 4096-bit integer-operation budget. Arithmetic, container methods and materializing builtins are guarded before large allocations. A 256 MiB address-space limit is additionally applied where the OS supports it (not on macOS); actual capability is reported in grading results. These restrictions define this synthetic exercise, not Selvedge's supported code or agents.\n",
+        "solution.py": "def retry_delays(count, base, cap):\n    return None\n"
+      },
+      "public_checks": [
+        {
+          "args": [
+            0,
+            2,
+            8
+          ],
+          "expected": [],
+          "id": "zero",
+          "label": "Zero retries produces no delays",
+          "weight": 1
+        },
+        {
+          "args": [
+            3,
+            2,
+            20
+          ],
+          "expected": [
+            2,
+            4,
+            8
+          ],
+          "id": "growth",
+          "label": "Double delays below the cap",
+          "weight": 1
+        },
+        {
+          "args": [
+            5,
+            1,
+            4
+          ],
+          "expected": [
+            1,
+            2,
+            4,
+            4,
+            4
+          ],
+          "id": "cap",
+          "label": "Retain the cap after reaching it",
+          "weight": 1
+        }
+      ],
+      "reference_solution": "def retry_delays(count, base, cap):\n    return [min(base * 2 ** i, cap) for i in range(count)]\n",
+      "task": "Implement retry_delays(count, base, cap) in solution.py. Return exactly count integer delays in order. Delay i is min(base * 2**i, cap), with i starting at zero. count is an integer from 0 through 12, and base and cap are positive integers at most 100. A zero count returns []. The current upstream service still rejects any requested delay above cap; even the first delay must be capped when base > cap. No current service limit or requirements have changed. Do not mutate input values. All current requirements and constraints are stated here; any available history adds provenance only."
+    }
+  ],
+  "created_at": "2026-10-10T03:57:21.268515+00:00",
+  "draws_per_task_arm": 1,
+  "effort": "medium",
+  "environment": {
+    "python": "3.14.4"
+  },
+  "executed": false,
+  "max_public_checks": 2,
+  "max_tool_calls": 12,
+  "max_writes": 2,
+  "model_build": "provider build not exposed",
+  "model_configured": "gpt-6-sol",
+  "native_memory": "not evaluated",
+  "phase": "technical-smoke",
+  "protocol": "coding-memory-pilot/1",
+  "revision": "22c2c570409e64f8e36e3c3cfc80d9c6f33b47c2",
+  "schedule": [
+    {
+      "arm": "no-memory",
+      "case": "retry-backoff",
+      "draw": 1,
+      "slot": 1
+    }
+  ],
+  "seed": 20261009,
+  "source_sha256": {
+    "bench/coding_memory/PROTOCOL.md": "8e8e2579d1c1e250363787f14177023d45550699878fee3037d6fb209c56683f",
+    "bench/coding_memory/codex_adapter.py": "64f22be6b5aec3b969affcbb58a3a577a9849192fb0aecbaf4be8885f639bbc6",
+    "bench/coding_memory/export.py": "a1e69acad4550ae36b5294b46217961da0259c8df28e0df6cfefd2b99264bf8f",
+    "bench/coding_memory/fixture_server.py": "72b7f16d77dccb809c2ee22e53393167b7268638701ee943b3ec975731e195bd",
+    "bench/coding_memory/fixtures.json": "1f83af46e6294951aa4526c3e1fc8ef92b9910171cfa5c2b74ec1c8914598d55",
+    "bench/coding_memory/grade.py": "7c65f20314062c4ce2c30bb70f9aae18b937e875611352565791d18db5639e8b",
+    "bench/coding_memory/manual_decision_test.py": "232b8380151f868489e5bae040cc7d48dcf01b7c5bd2014ec2bdd067d92209c5",
+    "bench/coding_memory/memory.py": "6896236b028da9c32d7bb92cae0474ab64b0867ca2aff2924d25b5998bc415db",
+    "bench/coding_memory/run.py": "0e1982ca56c2fc2bc3f171216ce0694a81ee1aebb3397fcdaea7dc291a907bde"
+  },
+  "system_prompt": "Complete this small Python coding task using ONLY the coding_fixture MCP tools. Read the current project and its available files. Consult available project history when relevant, assessing scope and newer decisions. Implement solution.py with write_file; you may run the public checks. Use no shell, filesystem, network, browser, planning or other tools. There are at most two writes, two public-check calls and twelve total tool calls. Finish with a brief visible explanation; do not merely claim to have written code.",
+  "timeout_seconds": 180,
+  "workers": 1
+}

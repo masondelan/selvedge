@@ -6,6 +6,10 @@ They extend the evidence beyond the earlier [configuration-choice pilot](../deci
 without changing Selvedge runtime behavior. Read the [versioned protocol](PROTOCOL.md)
 before interpreting or running anything.
 
+[October 10 method-pilot evidence](results/2026-10-10/README.md): all 18 attempts
+passed, with a ceiling tie across all three arms. No performance advantage is
+established; both technical smoke attempts are retained separately.
+
 The fixture/grader and memory reconstruction are agent-agnostic. The optional
 `codex_adapter.py` runs one installed client on an existing ChatGPT subscription;
 it is an execution adapter, not a product compatibility restriction. No API

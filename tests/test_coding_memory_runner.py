@@ -295,6 +295,12 @@ def test_manual_decision_example_preserves_history_and_changes_the_contract(tmp_
     output = tmp_path / "manual"
     result = manual_decision_test.demonstrate(output)
     assert result["old_contract_old_code"]["functional_correct"]
+    assert all(check["label"] == f"Original participant-only filtering ({check['id']})"
+               for check in result["original_contract_checks"])
+    assert all(check["label"].startswith("Original participant-only filtering")
+               for check in result["old_contract_old_code"]["checks"])
+    assert any("Public visibility" in check["label"]
+               for check in result["new_contract_new_code"]["checks"])
     assert BEHAVIOR_KEYS.isdisjoint(result["old_contract_old_code"])
     assert not result["new_contract_old_code"]["functional_correct"]
     assert result["new_contract_old_code"]["harmful_avoidance"]

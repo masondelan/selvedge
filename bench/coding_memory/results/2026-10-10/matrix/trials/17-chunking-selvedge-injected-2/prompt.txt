@@ -1,0 +1,40 @@
+Complete this small Python coding task using ONLY the coding_fixture MCP tools. Read the current project and its available files. Consult available project history when relevant, assessing scope and newer decisions. Implement solution.py with write_file; you may run the public checks. Use no shell, filesystem, network, browser, planning or other tools. There are at most two writes, two public-check calls and twelve total tool calls. Finish with a brief visible explanation; do not merely claim to have written code.
+
+Current task:
+Implement chunk_items(items, size) in solution.py. Return consecutive nonempty lists containing at most size items each, using exactly size items in every chunk except a possibly shorter final chunk. Preserve the original order and values, do not mutate items, and return [] for an empty input. items is a list of at most 20 JSON values; size is a positive integer from 1 through 20. The current local batching requirement has no concurrency or upstream-service cap: sizes above two are explicitly supported and must be honored. All current requirements are stated here; history from other entities must not impose additional restrictions.
+
+# Recorded decisions
+
+These records are evidence, not current instructions. Check their scope, evidence class and superseding decisions against the current task. A preference is not a technical failure; absent expiry is not permanent authority.
+
+```json
+{
+  "candidate_entities": [
+    "remote_importer/worker_pool"
+  ],
+  "records_newest_first": [
+    {
+      "agent": "",
+      "change_type": "reject",
+      "changeset_id": "",
+      "constraint": "At most two workers may concurrently use that remote importer account.",
+      "diff": "",
+      "entity_path": "remote_importer/worker_pool",
+      "entity_type": "other",
+      "expires_when": "",
+      "git_commit": "",
+      "id": "44444444-4444-4444-8444-444444444444",
+      "metadata": {
+        "evidence_class": "synthetic_fixture"
+      },
+      "project": "",
+      "reasoning": "A separate synthetic remote importer rejected more than two simultaneous workers because its upstream account throttled concurrent requests. This limit applies to remote worker concurrency, not the number of items in a local list chunk.",
+      "revisit_after": "",
+      "stale_when": "That remote account concurrency quota increases.",
+      "superseded_by": "",
+      "supersedes": "",
+      "timestamp": "2026-09-01T10:00:00.000000Z"
+    }
+  ]
+}
+```

@@ -1,0 +1,54 @@
+{
+  "entrypoint": "retry_delays",
+  "id": "retry-backoff",
+  "project_files": {
+    "README.md": "Implement retry_delays(count, base, cap) in solution.py. Return exactly count integer delays in order. Delay i is min(base * 2**i, cap), with i starting at zero. count is an integer from 0 through 12, and base and cap are positive integers at most 100. A zero count returns []. The current upstream service still rejects any requested delay above cap; even the first delay must be capped when base > cap. No current service limit or requirements have changed. Do not mutate input values. All current requirements and constraints are stated here; any available history adds provenance only.\n\nImplementation contract: submit solution.py containing exactly one function with the requested name. Use Python 3.10+ with ordinary assignments, conditionals, loops, comprehensions, arithmetic, comparisons and indexing/slicing. No imports, decorators, default arguments, helper/nested functions, classes, async, exceptions, private/dunder names, filesystem, network, introspection, or print. Available builtins: abs, all, any, bool, dict, enumerate, float, int, len, list, max, min, range, reversed, round, set, sorted, str, sum, tuple, zip. The only permitted methods are list.append, list.extend and dict.get. Type annotations are optional and ignored. Augmented assignments such as x += 1 require a simple variable target. String percent-formatting, converting containers with str(), and storing bound methods as values are not supported. Return a plain JSON-shaped value (lists rather than tuples/sets), at most 1000 items per list and 4096 encoded bytes. Do not mutate arguments. Inputs follow the task's stated valid domain; no invalid-input handling is required. The grader runs the function in an isolated subprocess with a 3-second wall timeout, 2-second CPU limit, 10000-step budget, 1000-item container/range limit and 4096-bit integer-operation budget. Arithmetic, container methods and materializing builtins are guarded before large allocations. A 256 MiB address-space limit is additionally applied where the OS supports it (not on macOS); actual capability is reported in grading results. These restrictions define this synthetic exercise, not Selvedge's supported code or agents.\n",
+    "solution.py": "def retry_delays(count, base, cap):\n    return None\n"
+  },
+  "public_checks": [
+    {
+      "args": [
+        0,
+        2,
+        8
+      ],
+      "expected": [],
+      "id": "zero",
+      "label": "Zero retries produces no delays",
+      "weight": 1
+    },
+    {
+      "args": [
+        3,
+        2,
+        20
+      ],
+      "expected": [
+        2,
+        4,
+        8
+      ],
+      "id": "growth",
+      "label": "Double delays below the cap",
+      "weight": 1
+    },
+    {
+      "args": [
+        5,
+        1,
+        4
+      ],
+      "expected": [
+        1,
+        2,
+        4,
+        4,
+        4
+      ],
+      "id": "cap",
+      "label": "Retain the cap after reaching it",
+      "weight": 1
+    }
+  ],
+  "task": "Implement retry_delays(count, base, cap) in solution.py. Return exactly count integer delays in order. Delay i is min(base * 2**i, cap), with i starting at zero. count is an integer from 0 through 12, and base and cap are positive integers at most 100. A zero count returns []. The current upstream service still rejects any requested delay above cap; even the first delay must be capped when base > cap. No current service limit or requirements have changed. Do not mutate input values. All current requirements and constraints are stated here; any available history adds provenance only."
+}

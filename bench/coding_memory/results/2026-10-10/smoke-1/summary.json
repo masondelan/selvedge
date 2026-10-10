@@ -1,0 +1,69 @@
+{
+  "accounted": 1,
+  "independent_tasks": 1,
+  "operational_observations": [
+    {
+      "arm": "no-memory",
+      "field": "seconds",
+      "known": 1,
+      "mean": 18.375,
+      "median": 18.375,
+      "unknown": 0
+    },
+    {
+      "arm": "no-memory",
+      "field": "input_tokens",
+      "known": 1,
+      "mean": 46680,
+      "median": 46680,
+      "unknown": 0
+    },
+    {
+      "arm": "no-memory",
+      "field": "cached_input_tokens",
+      "known": 1,
+      "mean": 37504,
+      "median": 37504,
+      "unknown": 0
+    },
+    {
+      "arm": "no-memory",
+      "field": "output_tokens",
+      "known": 1,
+      "mean": 572,
+      "median": 572,
+      "unknown": 0
+    }
+  ],
+  "paired_tasks": [],
+  "phase": "technical-smoke",
+  "planned": 1,
+  "task_rows": [
+    {
+      "arm": "no-memory",
+      "case": "retry-backoff",
+      "completed": 0,
+      "correct": 0,
+      "file_retrieved_before_first_write": 0,
+      "first_write_grade": {
+        "assessed": 0,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 1
+      },
+      "grade": {
+        "assessed": 0,
+        "harmful_avoidance": 0,
+        "irrelevant_interference": 0,
+        "repeated_rejected_path": 0,
+        "unassessed": 1
+      },
+      "history_injected": 0,
+      "planned": 1,
+      "scores_all_draws": [
+        0
+      ]
+    }
+  ]
+}

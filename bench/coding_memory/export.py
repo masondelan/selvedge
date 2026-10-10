@@ -388,6 +388,7 @@ def export_run(source: Path, output: Path, manual_input: Path | None = None) -> 
     exported_hashes = {name: hashlib.sha256(value.encode()).hexdigest()
                        for name, value in sorted(files.items())}
     index = {"format": "coding-memory-publication/1", "phase": manifest["phase"],
+             "exporter_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
              "original_input_sha256": originals,
              "exported_sha256": exported_hashes,
              "transformed": {name: originals[name] != digest if name in originals else None

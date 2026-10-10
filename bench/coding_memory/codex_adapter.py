@@ -94,7 +94,7 @@ def command(
         "mcp_servers.fixture.cwd": str(root),
         "mcp_servers.fixture.enabled": True, "mcp_servers.fixture.required": True,
         "mcp_servers.fixture.enabled_tools": sorted(FIXTURE_TOOLS),
-        "mcp_servers.fixture.default_tools_approval_mode": "auto",
+        "mcp_servers.fixture.default_tools_approval_mode": "prompt",
         "mcp_servers.fixture.startup_timeout_sec": 15,
         "mcp_servers.fixture.tool_timeout_sec": 20,
         "mcp_servers.fixture.env.SELVEDGE_CODING_RUN": str(root),
@@ -102,6 +102,10 @@ def command(
         "mcp_servers.fixture.env.SELVEDGE_QUIET": "1",
         "mcp_servers.fixture.env.PYTHONDONTWRITEBYTECODE": "1",
     }
+    # Explicit grants cover only these trusted bounded fixture operations.
+    # "auto" still prompts for unclassified MCP tools under policy="never".
+    for tool in FIXTURE_TOOLS:
+        config[f"mcp_servers.fixture.tools.{tool}.approval_mode"] = "approve"
     for key, value in config.items():
         # JSON scalars/arrays are valid TOML values here; no shell interpolation.
         args.extend(["-c", f"{key}={json.dumps(value)}"])
@@ -186,10 +190,13 @@ def parse_events(
                 continue
             calls.add(call_id)
             if event_type == "item.completed":
+                if item.get("status") == "failed" or item.get("error"):
+                    reasons.add("fixture_tool_failure")
                 trace.append(_sanitize({
                     "type": "fixture_tool", "tool": item["tool"],
                     "arguments": item.get("arguments", {}),
-                    "result": item.get("result"), "status": item.get("status", "unknown"),
+                    "result": item.get("result"), "error": item.get("error"),
+                    "status": item.get("status", "unknown"),
                 }, run_dir))
         elif _is_action(item):
             reasons.add("nonfixture_tool_activity")

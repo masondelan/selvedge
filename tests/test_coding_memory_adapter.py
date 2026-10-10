@@ -87,6 +87,10 @@ def test_command_and_env_do_not_inherit_credentials(tmp_path, monkeypatch):
     assert "read-only" in command
     assert 'forced_login_method="chatgpt"' in command
     assert 'web_search="disabled"' in command
+    assert 'mcp_servers.fixture.default_tools_approval_mode="prompt"' in command
+    for tool in adapter.FIXTURE_TOOLS:
+        assert f'mcp_servers.fixture.tools.{tool}.approval_mode="approve"' in command
+    assert 'approval_policy="never"' in command
     assert command[-1] == "-"
     assert "test prompt" not in command
 
@@ -102,3 +106,13 @@ def test_redacts_machine_and_account_metadata(tmp_path):
     assert str(tmp_path) not in encoded
     assert "owner@example.com" not in encoded
     assert "secret" not in encoded
+
+
+def test_fixture_permission_or_transport_failure_is_invalid(tmp_path):
+    stream = events()
+    stream[2]["item"].update(status="failed", error={
+        "message": "MCP tool call requires approval, but approval policy is never"})
+    result = adapter.parse_events(stream, adapter.MODEL, tmp_path)
+    assert not result["completed"]
+    assert "fixture_tool_failure" in result["invalid_reasons"]
+    assert "requires approval" in result["trace"][0]["error"]["message"]

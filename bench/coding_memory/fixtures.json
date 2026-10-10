@@ -1,0 +1,707 @@
+[
+  {
+    "id": "retry-backoff",
+    "family": "retained-technical-rejection",
+    "entity": "transport/retry_delays",
+    "entrypoint": "retry_delays",
+    "task": "Implement retry_delays(count, base, cap) in solution.py. Return exactly count integer delays in order. Delay i is min(base * 2**i, cap), with i starting at zero. count is an integer from 0 through 12, and base and cap are positive integers at most 100. A zero count returns []. The current upstream service still rejects any requested delay above cap; even the first delay must be capped when base > cap. No current service limit or requirements have changed. Do not mutate input values. All current requirements and constraints are stated here; any available history adds provenance only.",
+    "project_files": {
+      "solution.py": "def retry_delays(count, base, cap):\n    return None\n",
+      "README.md": "Implement retry_delays(count, base, cap) in solution.py. Return exactly count integer delays in order. Delay i is min(base * 2**i, cap), with i starting at zero. count is an integer from 0 through 12, and base and cap are positive integers at most 100. A zero count returns []. The current upstream service still rejects any requested delay above cap; even the first delay must be capped when base > cap. No current service limit or requirements have changed. Do not mutate input values. All current requirements and constraints are stated here; any available history adds provenance only.\n\nImplementation contract: submit solution.py containing exactly one function with the requested name. Use Python 3.10+ with ordinary assignments, conditionals, loops, comprehensions, arithmetic, comparisons and indexing/slicing. No imports, decorators, default arguments, helper/nested functions, classes, async, exceptions, private/dunder names, filesystem, network, introspection, or print. Available builtins: abs, all, any, bool, dict, enumerate, float, int, len, list, max, min, range, reversed, round, set, sorted, str, sum, tuple, zip. The only permitted methods are list.append, list.extend and dict.get. Type annotations are optional and ignored. Augmented assignments such as x += 1 require a simple variable target. String percent-formatting, converting containers with str(), and storing bound methods as values are not supported. Return a plain JSON-shaped value (lists rather than tuples/sets), at most 1000 items per list and 4096 encoded bytes. Do not mutate arguments. Inputs follow the task's stated valid domain; no invalid-input handling is required. The grader runs the function in an isolated subprocess with a 3-second wall timeout, 2-second CPU limit, 10000-step budget, 1000-item container/range limit and 4096-bit integer-operation budget. Arithmetic, container methods and materializing builtins are guarded before large allocations. A 256 MiB address-space limit is additionally applied where the OS supports it (not on macOS); actual capability is reported in grading results. These restrictions define this synthetic exercise, not Selvedge's supported code or agents.\n"
+    },
+    "public_checks": [
+      {
+        "id": "zero",
+        "label": "Zero retries produces no delays",
+        "args": [
+          0,
+          2,
+          8
+        ],
+        "expected": [],
+        "weight": 1
+      },
+      {
+        "id": "growth",
+        "label": "Double delays below the cap",
+        "args": [
+          3,
+          2,
+          20
+        ],
+        "expected": [
+          2,
+          4,
+          8
+        ],
+        "weight": 1
+      },
+      {
+        "id": "cap",
+        "label": "Retain the cap after reaching it",
+        "args": [
+          5,
+          1,
+          4
+        ],
+        "expected": [
+          1,
+          2,
+          4,
+          4,
+          4
+        ],
+        "weight": 1
+      }
+    ],
+    "private_checks": [
+      {
+        "id": "long_cap",
+        "label": "Cap a longer schedule",
+        "args": [
+          7,
+          3,
+          10
+        ],
+        "expected": [
+          3,
+          6,
+          10,
+          10,
+          10,
+          10,
+          10
+        ],
+        "weight": 1
+      },
+      {
+        "id": "initial_cap",
+        "label": "Cap the first delay too",
+        "args": [
+          2,
+          9,
+          4
+        ],
+        "expected": [
+          4,
+          4
+        ],
+        "weight": 1
+      },
+      {
+        "id": "unit_cap",
+        "label": "Respect a one-unit cap",
+        "args": [
+          4,
+          1,
+          1
+        ],
+        "expected": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "weight": 1
+      },
+      {
+        "id": "uncapped_range",
+        "label": "Preserve growth below a large cap",
+        "args": [
+          4,
+          2,
+          64
+        ],
+        "expected": [
+          2,
+          4,
+          8,
+          16
+        ],
+        "weight": 1
+      },
+      {
+        "id": "one",
+        "label": "Return exactly one delay",
+        "args": [
+          1,
+          5,
+          9
+        ],
+        "expected": [
+          5
+        ],
+        "weight": 1
+      }
+    ],
+    "reference_solution": "def retry_delays(count, base, cap):\n    return [min(base * 2 ** i, cap) for i in range(count)]\n",
+    "bad_solution": "def retry_delays(count, base, cap):\n    return [base * 2 ** i for i in range(count)]\n",
+    "history": [
+      {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "timestamp": "2026-09-01T10:00:00+00:00",
+        "entity_path": "transport/retry_delays",
+        "change_type": "reject",
+        "diff": "",
+        "reasoning": "The synthetic service check rejected the uncapped exponential schedule: delays above cap were refused. Keep exponential growth but cap every delay. This was a technical rejection, not a preference.",
+        "constraint": "Every delay must be no greater than the supplied cap.",
+        "stale_when": "The service contract changes to accept delays above cap.",
+        "supersedes": "",
+        "metadata": "{\"evidence_class\": \"synthetic_fixture\"}"
+      }
+    ],
+    "behavior_probe": {
+      "metric": "repeated_rejected_path",
+      "matches": {
+        "long_cap": [
+          3,
+          6,
+          12,
+          24,
+          48,
+          96,
+          192
+        ],
+        "unit_cap": [
+          1,
+          2,
+          4,
+          8
+        ]
+      },
+      "requires_pass": [
+        "zero",
+        "growth"
+      ]
+    }
+  },
+  {
+    "id": "message-visibility",
+    "family": "changed-user-preference",
+    "entity": "feed/visible_messages",
+    "entrypoint": "visible_messages",
+    "task": "Implement visible_messages(messages, viewer_id) in solution.py for the newly requested public feed. Each message has a string id, a visibility of either \"public\" or \"chat\", and a participants list of viewer-id strings. Return message IDs in their original order, including every public message for every viewer and including a chat message only when viewer_id is in its participants. A public message is visible even when its participants list is empty or excludes this viewer. Preserve duplicate IDs if supplied. Inputs have 0 through 20 messages and valid fields; do not mutate messages. Current product decision: the user explicitly changed the earlier chat-only preference to request a public feed while retaining participant-only private chats. This is a changed user preference, not a repaired technical failure. All current requirements are stated here; history is not required to discover the change.",
+    "project_files": {
+      "solution.py": "def visible_messages(messages, viewer_id):\n    return None\n",
+      "README.md": "Implement visible_messages(messages, viewer_id) in solution.py for the newly requested public feed. Each message has a string id, a visibility of either \"public\" or \"chat\", and a participants list of viewer-id strings. Return message IDs in their original order, including every public message for every viewer and including a chat message only when viewer_id is in its participants. A public message is visible even when its participants list is empty or excludes this viewer. Preserve duplicate IDs if supplied. Inputs have 0 through 20 messages and valid fields; do not mutate messages. Current product decision: the user explicitly changed the earlier chat-only preference to request a public feed while retaining participant-only private chats. This is a changed user preference, not a repaired technical failure. All current requirements are stated here; history is not required to discover the change.\n\nImplementation contract: submit solution.py containing exactly one function with the requested name. Use Python 3.10+ with ordinary assignments, conditionals, loops, comprehensions, arithmetic, comparisons and indexing/slicing. No imports, decorators, default arguments, helper/nested functions, classes, async, exceptions, private/dunder names, filesystem, network, introspection, or print. Available builtins: abs, all, any, bool, dict, enumerate, float, int, len, list, max, min, range, reversed, round, set, sorted, str, sum, tuple, zip. The only permitted methods are list.append, list.extend and dict.get. Type annotations are optional and ignored. Augmented assignments such as x += 1 require a simple variable target. String percent-formatting, converting containers with str(), and storing bound methods as values are not supported. Return a plain JSON-shaped value (lists rather than tuples/sets), at most 1000 items per list and 4096 encoded bytes. Do not mutate arguments. Inputs follow the task's stated valid domain; no invalid-input handling is required. The grader runs the function in an isolated subprocess with a 3-second wall timeout, 2-second CPU limit, 10000-step budget, 1000-item container/range limit and 4096-bit integer-operation budget. Arithmetic, container methods and materializing builtins are guarded before large allocations. A 256 MiB address-space limit is additionally applied where the OS supports it (not on macOS); actual capability is reported in grading results. These restrictions define this synthetic exercise, not Selvedge's supported code or agents.\n"
+    },
+    "public_checks": [
+      {
+        "id": "empty",
+        "label": "An empty feed stays empty",
+        "args": [
+          [],
+          "a"
+        ],
+        "expected": [],
+        "weight": 1
+      },
+      {
+        "id": "chat_access",
+        "label": "Private chats remain participant-only",
+        "args": [
+          [
+            {
+              "id": "mine",
+              "visibility": "chat",
+              "participants": [
+                "a",
+                "b"
+              ]
+            },
+            {
+              "id": "other",
+              "visibility": "chat",
+              "participants": [
+                "b"
+              ]
+            }
+          ],
+          "a"
+        ],
+        "expected": [
+          "mine"
+        ],
+        "weight": 1
+      },
+      {
+        "id": "mixed",
+        "label": "Public and permitted chat messages coexist",
+        "args": [
+          [
+            {
+              "id": "notice",
+              "visibility": "public",
+              "participants": []
+            },
+            {
+              "id": "mine",
+              "visibility": "chat",
+              "participants": [
+                "a"
+              ]
+            },
+            {
+              "id": "other",
+              "visibility": "chat",
+              "participants": [
+                "b"
+              ]
+            }
+          ],
+          "a"
+        ],
+        "expected": [
+          "notice",
+          "mine"
+        ],
+        "weight": 1
+      }
+    ],
+    "private_checks": [
+      {
+        "id": "public_outside",
+        "label": "Public visibility does not require participation",
+        "args": [
+          [
+            {
+              "id": "public-outside",
+              "visibility": "public",
+              "participants": [
+                "b"
+              ]
+            }
+          ],
+          "a"
+        ],
+        "expected": [
+          "public-outside"
+        ],
+        "weight": 1
+      },
+      {
+        "id": "new_feed",
+        "label": "Preserve order across multiple public and chat messages",
+        "args": [
+          [
+            {
+              "id": "p1",
+              "visibility": "public",
+              "participants": []
+            },
+            {
+              "id": "c1",
+              "visibility": "chat",
+              "participants": [
+                "a"
+              ]
+            },
+            {
+              "id": "p2",
+              "visibility": "public",
+              "participants": [
+                "b"
+              ]
+            },
+            {
+              "id": "c2",
+              "visibility": "chat",
+              "participants": [
+                "b"
+              ]
+            }
+          ],
+          "a"
+        ],
+        "expected": [
+          "p1",
+          "c1",
+          "p2"
+        ],
+        "weight": 1
+      },
+      {
+        "id": "outsider",
+        "label": "Do not expose private chats to outsiders",
+        "args": [
+          [
+            {
+              "id": "secret",
+              "visibility": "chat",
+              "participants": [
+                "a",
+                "b"
+              ]
+            }
+          ],
+          "c"
+        ],
+        "expected": [],
+        "weight": 1
+      },
+      {
+        "id": "duplicates",
+        "label": "Preserve duplicate IDs and input order",
+        "args": [
+          [
+            {
+              "id": "same",
+              "visibility": "public",
+              "participants": []
+            },
+            {
+              "id": "same",
+              "visibility": "public",
+              "participants": []
+            },
+            {
+              "id": "last",
+              "visibility": "chat",
+              "participants": [
+                "a"
+              ]
+            }
+          ],
+          "a"
+        ],
+        "expected": [
+          "same",
+          "same",
+          "last"
+        ],
+        "weight": 1
+      },
+      {
+        "id": "public_participant",
+        "label": "Include a public message only once",
+        "args": [
+          [
+            {
+              "id": "once",
+              "visibility": "public",
+              "participants": [
+                "a",
+                "a"
+              ]
+            }
+          ],
+          "a"
+        ],
+        "expected": [
+          "once"
+        ],
+        "weight": 1
+      }
+    ],
+    "reference_solution": "def visible_messages(messages, viewer_id):\n    return [message[\"id\"] for message in messages\n            if message[\"visibility\"] == \"public\" or viewer_id in message[\"participants\"]]\n",
+    "bad_solution": "def visible_messages(messages, viewer_id):\n    return [message[\"id\"] for message in messages\n            if viewer_id in message[\"participants\"]]\n",
+    "retained_solution": "def visible_messages(messages, viewer_id):\n    return [message[\"id\"] for message in messages\n            if viewer_id in message[\"participants\"]]\n",
+    "superseded_solution": "def visible_messages(messages, viewer_id):\n    return [message[\"id\"] for message in messages\n            if message[\"visibility\"] == \"public\" or viewer_id in message[\"participants\"]]\n",
+    "history": [
+      {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "timestamp": "2026-09-01T10:00:00+00:00",
+        "entity_path": "feed/visible_messages",
+        "change_type": "reject",
+        "diff": "",
+        "reasoning": "For the initial synthetic prototype, the user preferred chat-only delivery and declined a public feed. Public visibility was not found technically broken; it was outside the desired product scope at that time.",
+        "constraint": "The prototype should show only participant-addressed chats under the then-current preference.",
+        "stale_when": "The user explicitly asks for a public feed.",
+        "supersedes": "",
+        "metadata": "{\"evidence_class\": \"synthetic_user_preference\", \"technical_failure\": false}"
+      },
+      {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "timestamp": "2026-09-02T10:00:00+00:00",
+        "entity_path": "feed/visible_messages",
+        "change_type": "supersede",
+        "diff": "",
+        "reasoning": "The user now explicitly requests a public feed. Include public messages for every viewer while keeping private chats participant-only. Preserve the earlier chat-only rationale as history; its preference no longer governs public visibility.",
+        "constraint": "Public messages are visible to all viewers; private chats remain participant-only.",
+        "stale_when": "A later explicit product decision changes visibility requirements.",
+        "supersedes": "22222222-2222-4222-8222-222222222222",
+        "metadata": "{\"evidence_class\": \"synthetic_user_preference\", \"technical_failure\": false}"
+      }
+    ],
+    "behavior_probe": {
+      "metric": "harmful_avoidance",
+      "matches": {
+        "public_outside": [],
+        "new_feed": [
+          "c1"
+        ]
+      },
+      "requires_pass": [
+        "chat_access",
+        "outsider"
+      ]
+    }
+  },
+  {
+    "id": "chunking",
+    "family": "irrelevant-history-control",
+    "entity": "local/chunk_items",
+    "entrypoint": "chunk_items",
+    "task": "Implement chunk_items(items, size) in solution.py. Return consecutive nonempty lists containing at most size items each, using exactly size items in every chunk except a possibly shorter final chunk. Preserve the original order and values, do not mutate items, and return [] for an empty input. items is a list of at most 20 JSON values; size is a positive integer from 1 through 20. The current local batching requirement has no concurrency or upstream-service cap: sizes above two are explicitly supported and must be honored. All current requirements are stated here; history from other entities must not impose additional restrictions.",
+    "project_files": {
+      "solution.py": "def chunk_items(items, size):\n    return None\n",
+      "README.md": "Implement chunk_items(items, size) in solution.py. Return consecutive nonempty lists containing at most size items each, using exactly size items in every chunk except a possibly shorter final chunk. Preserve the original order and values, do not mutate items, and return [] for an empty input. items is a list of at most 20 JSON values; size is a positive integer from 1 through 20. The current local batching requirement has no concurrency or upstream-service cap: sizes above two are explicitly supported and must be honored. All current requirements are stated here; history from other entities must not impose additional restrictions.\n\nImplementation contract: submit solution.py containing exactly one function with the requested name. Use Python 3.10+ with ordinary assignments, conditionals, loops, comprehensions, arithmetic, comparisons and indexing/slicing. No imports, decorators, default arguments, helper/nested functions, classes, async, exceptions, private/dunder names, filesystem, network, introspection, or print. Available builtins: abs, all, any, bool, dict, enumerate, float, int, len, list, max, min, range, reversed, round, set, sorted, str, sum, tuple, zip. The only permitted methods are list.append, list.extend and dict.get. Type annotations are optional and ignored. Augmented assignments such as x += 1 require a simple variable target. String percent-formatting, converting containers with str(), and storing bound methods as values are not supported. Return a plain JSON-shaped value (lists rather than tuples/sets), at most 1000 items per list and 4096 encoded bytes. Do not mutate arguments. Inputs follow the task's stated valid domain; no invalid-input handling is required. The grader runs the function in an isolated subprocess with a 3-second wall timeout, 2-second CPU limit, 10000-step budget, 1000-item container/range limit and 4096-bit integer-operation budget. Arithmetic, container methods and materializing builtins are guarded before large allocations. A 256 MiB address-space limit is additionally applied where the OS supports it (not on macOS); actual capability is reported in grading results. These restrictions define this synthetic exercise, not Selvedge's supported code or agents.\n"
+    },
+    "public_checks": [
+      {
+        "id": "empty",
+        "label": "Do not create an empty chunk",
+        "args": [
+          [],
+          2
+        ],
+        "expected": [],
+        "weight": 1
+      },
+      {
+        "id": "pairs",
+        "label": "Retain a shorter final chunk",
+        "args": [
+          [
+            1,
+            2,
+            3
+          ],
+          2
+        ],
+        "expected": [
+          [
+            1,
+            2
+          ],
+          [
+            3
+          ]
+        ],
+        "weight": 1
+      },
+      {
+        "id": "singles",
+        "label": "Honor a one-item size",
+        "args": [
+          [
+            1,
+            2,
+            3
+          ],
+          1
+        ],
+        "expected": [
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ],
+        "weight": 1
+      }
+    ],
+    "private_checks": [
+      {
+        "id": "threes",
+        "label": "Honor sizes above the unrelated concurrency limit",
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          3
+        ],
+        "expected": [
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            4,
+            5,
+            6
+          ],
+          [
+            7
+          ]
+        ],
+        "weight": 1
+      },
+      {
+        "id": "fours",
+        "label": "Use the requested four-item chunks",
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          4
+        ],
+        "expected": [
+          [
+            1,
+            2,
+            3,
+            4
+          ],
+          [
+            5,
+            6
+          ]
+        ],
+        "weight": 1
+      },
+      {
+        "id": "oversized",
+        "label": "Do not pad an oversized final chunk",
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4
+          ],
+          8
+        ],
+        "expected": [
+          [
+            1,
+            2,
+            3,
+            4
+          ]
+        ],
+        "weight": 1
+      },
+      {
+        "id": "exact",
+        "label": "Do not append an empty trailing chunk",
+        "args": [
+          [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          3
+        ],
+        "expected": [
+          [
+            1,
+            2,
+            3
+          ],
+          [
+            4,
+            5,
+            6
+          ]
+        ],
+        "weight": 1
+      },
+      {
+        "id": "values",
+        "label": "Preserve mixed JSON values",
+        "args": [
+          [
+            {
+              "id": "a"
+            },
+            null,
+            false,
+            "x",
+            2
+          ],
+          3
+        ],
+        "expected": [
+          [
+            {
+              "id": "a"
+            },
+            null,
+            false
+          ],
+          [
+            "x",
+            2
+          ]
+        ],
+        "weight": 1
+      }
+    ],
+    "reference_solution": "def chunk_items(items, size):\n    return [items[start:start + size] for start in range(0, len(items), size)]\n",
+    "bad_solution": "def chunk_items(items, size):\n    size = min(size, 2)\n    return [items[start:start + size] for start in range(0, len(items), size)]\n",
+    "history": [
+      {
+        "id": "44444444-4444-4444-8444-444444444444",
+        "timestamp": "2026-09-01T10:00:00+00:00",
+        "entity_path": "remote_importer/worker_pool",
+        "change_type": "reject",
+        "diff": "",
+        "reasoning": "A separate synthetic remote importer rejected more than two simultaneous workers because its upstream account throttled concurrent requests. This limit applies to remote worker concurrency, not the number of items in a local list chunk.",
+        "constraint": "At most two workers may concurrently use that remote importer account.",
+        "stale_when": "That remote account concurrency quota increases.",
+        "supersedes": "",
+        "metadata": "{\"evidence_class\": \"synthetic_fixture\"}"
+      }
+    ],
+    "behavior_probe": {
+      "metric": "irrelevant_interference",
+      "matches": {
+        "threes": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4
+          ],
+          [
+            5,
+            6
+          ],
+          [
+            7
+          ]
+        ],
+        "fours": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4
+          ],
+          [
+            5,
+            6
+          ]
+        ]
+      },
+      "requires_pass": [
+        "pairs",
+        "singles"
+      ]
+    }
+  }
+]

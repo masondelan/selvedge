@@ -115,7 +115,11 @@ def _client(value: dict) -> dict:
                        if key in event}
             history_read = event.get("tool") == "read_file" and isinstance(event.get("arguments"), dict) \
                 and event["arguments"].get("path") == "DECISIONS.md"
-            result["trace"].append(_clean(payload, synthetic=history_read))
+            cleaned = _clean(payload, synthetic=history_read)
+            if "error" in event:
+                # Errors are client diagnostics even when the tool reads authored history.
+                cleaned["error"] = _clean(event["error"])
+            result["trace"].append(cleaned)
         elif event.get("type") == "final_text":
             result["trace"].append(_pick(event, ["type", "text"]))
     return result

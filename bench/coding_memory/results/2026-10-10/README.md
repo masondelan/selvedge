@@ -27,10 +27,12 @@ autonomous capture, native memory or an automatic lifecycle hook.
 - [Frozen matrix manifest](matrix/manifest.json) and
   [hash index](matrix/export-index.json). Model execution used source commit
   `14dd2a5c81b45890ff86f5ba066f8f546aa7c2e9` from 04:00:30 to 04:06:34 UTC.
-- [First technical smoke](smoke-1/REPORT.md): failed because all three attempted
-  MCP tool calls required approval; no code was written. Its original record
-  says `missing_implementation`. This is a setup failure, not a historical-path
-  recurrence or model-quality comparison.
+- [First technical smoke](smoke-1/REPORT.md): all three attempted MCP tool calls
+  failed; the retained client final response reports that approval was required.
+  No code was written, and the original record says `missing_implementation`.
+  The frozen export omitted the tool-error field, so the approval diagnosis
+  cannot be independently verified from its tool trace. This is a setup failure,
+  not a historical-path recurrence or model-quality comparison.
 - [Second technical smoke](smoke-2/REPORT.md): passed after explicit grants for
   the four bounded fixture tools. Global approval policy and read-only client
   restrictions remained in place. Both smoke attempts are separate from the
@@ -49,6 +51,11 @@ After the matrix, historical labels in the separate manual demonstration were
 corrected to describe the old participant-only contract. The manual demonstration
 was rerun and carries its own source hashes. This presentation correction did
 not change matrix tasks, grader, inputs, model attempts or results.
+
+Independent review found that the exporter omitted fixture tool-error details.
+The exporter now retains those diagnostics with private metadata removed. These
+frozen exports and their hashes are unchanged; missing historical diagnostics
+have not been reconstructed from the client's explanation.
 
 Local validation: **1,331 tests passed**, 90.24% core coverage, Ruff passed,
 mypy passed for 39 core source files, and the MCP schema budget passed at

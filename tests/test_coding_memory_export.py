@@ -126,6 +126,37 @@ def test_export_retains_failures_unknown_slots_and_observable_evidence(tmp_path:
     assert index["transformed"][str(first.relative_to(source) / "solution.py")] is False
 
 
+@pytest.mark.parametrize("tool,path", [("read_project", None), ("read_file", "DECISIONS.md")])
+def test_failed_tool_diagnostics_survive_export_without_private_metadata(
+    tmp_path: Path, tool: str, path: str | None,
+) -> None:
+    """A failed attempt stays diagnosable without trusting the model's explanation."""
+    source, output = tmp_path / "private", tmp_path / "public"
+    manifest = _plan(source)
+    record = _record(manifest["schedule"][0], completed=False)
+    record["client"]["trace"] = [{
+        "type": "fixture_tool", "tool": tool, "arguments": {"path": path} if path else {},
+        "status": "failed", "result": None, "error": {
+            "message": "Approval required at /Users/private-person/run for owner@example.test",
+            "code": "approval_required", "session_id": "private-session",
+            "access_token": "private-token", "reasoning": "private-analysis",
+        },
+    }]
+    (source / "results.jsonl").write_text(json.dumps(record) + "\n")
+    trial = _trial(source, record)
+    _json(trial / "result.json", record)
+    export_run(source, output)
+    expected = {"message": "Approval required at <host-path> for <email>",
+                "code": "approval_required"}
+    published = json.loads((output / "results.jsonl").read_text().splitlines()[0])
+    saved = json.loads((output / trial.relative_to(source) / "result.json").read_text())
+    trace = json.loads((output / trial.relative_to(source) / "client-trace.json").read_text())
+    assert not published["completed"] and not saved["completed"]
+    assert published["client"]["trace"][0]["error"] == expected
+    assert saved["client"]["trace"][0]["error"] == expected
+    assert trace[0]["error"] == expected
+
+
 def test_input_history_and_code_survive_without_client_private_reasoning(tmp_path: Path) -> None:
     """Synthetic rationale is valid input evidence, and division/routes are not host paths."""
     source, output = tmp_path / "private", tmp_path / "public"

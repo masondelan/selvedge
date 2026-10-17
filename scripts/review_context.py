@@ -74,8 +74,8 @@ def compose(report: dict, base: str, head: str) -> str:
     )
 
 
-def upsert(api: GitHub, number: int, body: str) -> str:
-    """Update this bot's marked comment, preserving human comments and other bots."""
+def upsert(api: GitHub, number: int, body: str, *, create: bool = True) -> str:
+    """Refresh this bot's comment, optionally avoiding a new empty-history comment."""
     comments = api.pages(f"/issues/{number}/comments", 100)
     if len(comments) == 10000:
         raise ValueError("Comment pagination limit reached; no comment was sent")
@@ -92,6 +92,8 @@ def upsert(api: GitHub, number: int, body: str) -> str:
             return "unchanged"
         api.request(f"/issues/comments/{int(comment['id'])}", {"body": body}, "PATCH")
         return "updated"
+    if not create:
+        return "no-matching-history"
     api.request(f"/issues/{number}/comments", {"body": body}, "POST")
     return "created"
 
@@ -150,7 +152,11 @@ def main() -> None:
     latest = api.request(f"/pulls/{number}")
     if latest["base"]["sha"] != base or latest["head"]["sha"] != head or latest["state"] != "open":
         raise ValueError("PR changed while reporting; no stale comment sent")
-    print("dry-run" if dry_run == "true" else upsert(api, number, body))
+    # Keep healthy no-match runs quiet on the PR. Refresh an existing comment
+    # so a previous revision's context cannot masquerade as the current result.
+    # A broken chain remains visible even when none of its events match.
+    create = bool(report["total_matching"]) or not report["chain"]["intact"]
+    print("dry-run" if dry_run == "true" else upsert(api, number, body, create=create))
     if not report["chain"]["intact"]:
         raise SystemExit("Recorded chain verification failed; inspect the report")
 

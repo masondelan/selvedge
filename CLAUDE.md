@@ -24,10 +24,11 @@ For everything else:
 
 ## Code conventions
 
+- **Useful without unnecessary weight.** Always ask: "Does this make Selvedge more useful without making everyone's experience heavier?" Keep the local core small, fast, deterministic and usable directly as a library. GitHub, editor and MCP integrations reuse it; optional integrations must not add required services or model calls to ordinary local use. For substantial changes, explain the user benefit and added default versus optional cost, with proportionate measurements. Follow the [lightweight standard](docs/engineering-standards.md#lightweight-and-powerful).
 - **Selvedge is agent-agnostic.** It is for anyone using any compatible agent. Keep core storage, decision semantics, MCP/CLI behavior and product positioning independent of an agent brand or model provider. Agent names are attribution labels, not a core allowlist. Keep client-specific setup and lifecycle handling in optional integrations/adapters. Setup presets are conveniences, not the compatibility limit. Named agents, companies and models are welcome in accurate commands, examples, compatibility tables and integration guides; they must not imply that Selvedge is intended for only one client. Preserve this standard in future code, docs and website changes.
 - **No external dependencies beyond the declared ones.** Keep the install footprint small.
 - **No LLM calls inside Selvedge core.** Templated, deterministic output only. When a feature design is tempted toward an LLM hop, the PR description must explain how the templated output covers the user need; reviewers reject "we'll add an LLM later if needed." See `docs/architecture.md` cross-cutting risk register for the full rationale.
-- **SQLite first, always.** Don't reach for Postgres until Phase 3. SQLite with WAL handles concurrent reads fine.
+- **SQLite first.** A new backend requires a demonstrated sharing/concurrency need and a reviewed design; reaching a phase number is not justification. Preserve the local SQLite default. WAL supports same-host concurrency, not sharing live files across machines.
 - **`ChangeEvent` is a dataclass, not Pydantic.** Keep the core dependency-free. MCP serialization uses `to_dict()`.
 - **New TypedDict result types must justify themselves.** Before introducing a new MCP tool result shape, check whether an existing one (`LogChangeResult`, `BlameResult`, the auto-generated list-shapes) extends to fit. Prefer extending an existing type to introducing a new one. Every field always populated, never `null` — same convention as `LogChangeResult` / `BlameResult` (empty string / empty list / empty dict for "absent").
 - **Every public function has a docstring.** The MCP tool docstrings in `server.py` are user-facing — they appear in agent tool listings and propagate into `manifest.json`.
@@ -52,7 +53,7 @@ Tests live in `tests/`. Run with `pytest` from the repo root.
 - `test_public_api.py` — frozen `__init__.py` surface
 - `test_mcp_protocol.py` — boots real `selvedge-server` subprocess and round-trips every tool over stdio
 
-Each phase has a soft test-budget target (see the cross-cutting risk register in `docs/architecture.md`). When a phase exceeds its budget, the release notes call out *why* — typically a perf-regression suite or a new protocol smoke test. The HTTP layer in v0.4.0 must ship with `test_http_protocol.py` parallel to `test_mcp_protocol.py` — release-blocker, not optional.
+Each phase has a soft test-budget target (see the cross-cutting risk register in `docs/architecture.md`). When a phase exceeds its budget, the release notes call out *why* — typically a perf-regression suite or a new protocol smoke test. Any future HTTP layer must ship with `test_http_protocol.py` parallel to `test_mcp_protocol.py` — release-blocker, not optional; no release is assigned to that work.
 
 Never write to the real DB in tests — always set `SELVEDGE_DB` to a `tmp_path` fixture.
 

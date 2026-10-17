@@ -5,7 +5,9 @@ description: Use before editing a tracked entity (a DB column, table, function, 
 
 ## Selvedge — change tracking
 
-You have access to Selvedge (MCP server: `selvedge`) for change tracking.
+Use Selvedge for change tracking through its CLI or optional MCP connection
+(MCP server: `selvedge`). Both use the same local store. Use whichever route is
+available in the current workflow.
 
 **Rules:**
 
@@ -42,10 +44,10 @@ You have access to Selvedge (MCP server: `selvedge`) for change tracking.
 - Then call `selvedge.diff` or `selvedge.blame` for the entity's broader
   history before conflicting with past decisions.
 
-**The same operations are on your shell.** Selvedge is MCP-first, but the
-identical local store is also a CLI (`selvedge` is on your PATH after
-install). When the MCP server isn't loaded, you're in a shell-only subagent,
-or you just want to keep context light, use the equivalents:
+**The same operations are on your shell.** The CLI and MCP interface use the
+same local store (`selvedge` is on your PATH after install). The CLI does not
+require a running MCP server. Use the route that fits the current workflow
+and keeps context light:
 
 - Check an entity first: `selvedge prior-attempts <entity>` (was it tried and
   reverted before?), then `selvedge blame <entity>` / `selvedge diff <entity>`

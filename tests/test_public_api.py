@@ -79,6 +79,76 @@ def test_top_level_import_does_not_pull_in_mcp_server():
     )
 
 
+def test_library_round_trip_without_site_packages_or_network(tmp_path):
+    """Embedded storage must work offline without CLI/MCP dependencies.
+
+    Resolve the lazy exports and use them in separate writing/reading
+    processes. Isolated mode excludes user Python configuration; ``-S``
+    excludes site packages, including the test environment's dependencies.
+    This checks the core boundary, not optional adapters or CLI notices.
+    """
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = """
+import json
+import sys
+from pathlib import Path
+
+network_attempts = []
+
+def deny_network(event, args):
+    if event.startswith("socket."):
+        network_attempts.append(event)
+        raise AssertionError("embedded storage attempted network access: " + event)
+
+sys.addaudithook(deny_network)
+sys.path.insert(0, sys.argv[1])
+from selvedge import ChangeEvent, SelvedgeStorage
+
+storage = SelvedgeStorage(Path(sys.argv[2]))
+if sys.argv[3] == "write":
+    storage.log_event(ChangeEvent(
+        entity_path="src/payments.py",
+        change_type="reject",
+        reasoning="Retries duplicated charges before an idempotency key was enforced.",
+    ))
+record = storage.get_blame("src/payments.py")
+assert record is not None
+assert not network_attempts, network_attempts
+adapters = {"mcp", "click", "rich", "pydantic", "httpx", "model2vec"}
+loaded = {name.split(".")[0] for name in sys.modules}
+assert not (adapters & loaded), sorted(adapters & loaded)
+assert "selvedge.server" not in sys.modules
+assert "selvedge.cli" not in sys.modules
+print(json.dumps(record, sort_keys=True))
+"""
+    repo_root = Path(__file__).resolve().parents[1]
+    db = tmp_path / "embedded.db"
+    records = []
+    for operation in ("write", "read"):
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", script, str(repo_root), str(db), operation],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"{operation}: stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        records.append(json.loads(result.stdout))
+
+    assert records[0] == records[1]
+    assert records[1]["id"]
+    assert records[1]["change_type"] == "reject"
+    assert records[1]["reasoning"] == (
+        "Retries duplicated charges before an idempotency key was enforced."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Symbol identity — exports point at the canonical implementation
 # ---------------------------------------------------------------------------

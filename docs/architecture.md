@@ -7,12 +7,13 @@
 
 ## Current release and next work
 
-**Updated October 1, 2026, against v0.3.16.** The
+**Updated October 17, 2026, against v0.3.17.** The
 [CHANGELOG](../CHANGELOG.md) records delivered behavior; the phase numbers below
 identify design work, not a release schedule. Earlier assignments of Phases
 2.18–2.24 to v0.3.12–v0.3.18 are retired. Unfinished phases have no assigned
 release; the v0.4.x sections are proposed breaking-change groupings, not dates
-or promises. Historical design notes remain below for context.
+or promises. The current sequence below supersedes older MCP-first and
+hosted-platform assumptions; historical design notes remain for context.
 
 | Release | Delivered |
 | --- | --- |
@@ -21,19 +22,33 @@ or promises. Historical design notes remain below for context.
 | v0.3.14 | MCP query-window parity, including an explicit seven-day `prior_attempts` window. |
 | v0.3.15 | Five additional native hook adapters, preserving setup merges and the published 48-trial synthetic pilot. |
 | v0.3.16 | Read-only agent/session ledger, optional trusted-base PR review Action, project hook diagnostics and the published 24-trial injection pilot. |
+| v0.3.17 | MCP save/restart/retrieve demo, Markdown digest drift checks, clearer rejection labels and literal CLI output; includes the published 18-attempt synthetic coding pilot. |
 
 The current core uses SQLite and **eight MCP tools**. `summary` is a library
 helper, not a ninth tool. The ledger's actor labels are self-reported; chain
 verification does not authenticate them. The review Action is opt-in and uses
 publication-approved base history. Neither an authenticated remote service nor
-cross-repo queries ship in v0.3.16. See [review context](review-context.md).
+cross-repo queries ship in v0.3.17. See [review context](review-context.md).
 
-**Next work:** validate lifecycle adapters in real clients (Phase 2.23), expand
-the evaluation beyond synthetic choices (Phase 2.24), and design authenticated
-remote access (Phase 3.1). The remote design must settle transport, actor
-identity, project permissions and safe concurrent storage before implementation;
-sharing a live SQLite WAL database over a network filesystem is not that design.
-The existing same-host ledger and optional review Action can be used now.
+**Current work, unreleased:** this branch adds the standing lightweight standard,
+core isolation checks and quieter GitHub reporting when there is no matching
+history. These changes are not part of v0.3.17. Compact review presentation,
+native GitHub validation and an editor integration remain future work.
+
+**Next work:** keep a small local core shared by the Python library, CLI, MCP
+and optional integrations (Phase 2.25); improve proposed-change review on GitHub
+first (Phase 2.26); then bring the same useful context into one editor
+(Phase 2.27). MCP is one route to the core, not a prerequisite for using it.
+The current package still installs MCP dependencies; making those optional
+requires a separate compatibility assessment. These phases add no release dates
+or promise of new commands.
+
+Validate the workflow and its cost before expanding it. Native lifecycle
+validation (2.23) and broader evaluation (2.24) remain open. Remote access becomes
+implementation work only when an actual sharing need cannot be served by the
+local workflow. Its design must then settle transport, actor identity, project
+permissions and concurrent storage. It is not a prerequisite for GitHub review
+or the first editor, and does not make a hosted account the default.
 
 **Still open:** Git Notes import and provenance work (2.18), opt-in local
 cross-repo reads (2.19/2.20), conditional salvage (2.21), and reporting commands
@@ -41,20 +56,25 @@ cross-repo reads (2.19/2.20), conditional salvage (2.21), and reporting commands
 do not implement `audit`, `digest` or `pr-comment`. Standards participation
 remains a separate follow-up after the review workflow, with no version assigned.
 
-The pilots are evidence about small synthetic configuration tasks. The
+The pilots are evidence about small synthetic tasks. The
 [48-trial pilot](../bench/decision_memory/results/2026-09-25/) tied Selvedge,
 decision-file and inline-fact conditions; the
 [24-trial pilot](../bench/decision_memory/results/2026-10-01/) observed 4/6
 eligible rejected-path repeats without memory and 0/6 with injected records.
-Neither establishes general coding performance, native hook delivery or
-superiority over maintained files. The detailed remaining evaluation gates are
-in Phase 2.24.
+The [18-attempt coding pilot](../bench/coding_memory/results/2026-10-10/README.md)
+tied at 6/6 for no memory, maintained Markdown and Selvedge-injected history.
+It used three author-written function tasks with two draws per task and arm,
+not 18 independent projects; there were no no-memory failures to reduce.
+None establishes general coding performance, native hook delivery or superiority
+over maintained files. The remaining evaluation gates are in Phase 2.24.
 
 ---
 
 ## What this is
 
-Selvedge is an open-source MCP server that AI coding agents call as they work to log structured change events. It answers questions like:
+Selvedge is an open-source local decision store for developers and compatible
+agents. Its Python library, CLI and MCP interface share recorded reasons,
+rejected approaches and entity history. It answers questions like:
 
 - "When was `users.stripe_customer_id` added and why?"
 - "What changed in the auth module in the last 30 days?"
@@ -62,7 +82,13 @@ Selvedge is an open-source MCP server that AI coding agents call as they work to
 
 The core insight: with human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that evaporates when the session ends. Selvedge captures it before it's gone.
 
-**Positioning:** "What pandas is to data manipulation, Selvedge is to codebase change tracking." Open source core, hosted platform as the business model.
+**Direction:** a lightweight, useful local core that fits existing developer
+workflows. GitHub change review comes first, followed by one editor using the
+same core. The earlier pandas analogy and hosted-platform destination are
+historical positioning, not implementation requirements. DuckDB's simple local
+use and optional extensions are a design reference for the
+[lightweight standard](engineering-standards.md#lightweight-and-powerful), not
+a claim of equivalent features, performance or certification.
 
 ---
 
@@ -77,8 +103,8 @@ of them are deferred to the "Future work" appendix.
 **Easy to use** — minimal install friction (one-command setup,
 doctor-driven self-diagnosis), conventions over configuration
 (sensible defaults, no required flags for happy-path use),
-discoverable inside the developer's existing tooling (MCP-first,
-IDE-discoverable). The user shouldn't have to learn Selvedge before
+discoverable inside the developer's existing tooling through the library, CLI,
+MCP or an optional integration. The user shouldn't have to learn Selvedge before
 Selvedge becomes useful.
 
 **Robust** — data integrity over feature breadth (the events table
@@ -104,6 +130,15 @@ additions; "nice to have" is not a value. When a feature serves
 only justification is competitive parity, name the competitive risk
 explicitly in the bullet and cross-link to the "Competitive narrative
 drift" cross-cutting entry.
+
+**Does this make Selvedge more useful without making everyone’s experience heavier?**
+Apply this standing question to product and engineering decisions. For substantial
+changes, name the user task, the benefit over the existing workflow and the added
+default versus optional cost. Measure the affected costs, keep output and
+background work bounded, and avoid making people who do not use an integration
+pay its setup or service cost. The [engineering standard](engineering-standards.md#lightweight-and-powerful)
+defines the evidence expected; routine prose corrections need no new measurement
+exercise.
 
 ---
 
@@ -325,7 +360,9 @@ shape is illustrative; use the settings format and location your client expects.
 Add this to the agent's system prompt or project instruction file:
 
 ```
-You have access to Selvedge (MCP server: selvedge) for change tracking.
+Use Selvedge for change tracking through its CLI or optional MCP connection
+(MCP server: selvedge). Both use the same local store. Use whichever route is
+available in the current workflow.
 
 Rules:
 - Call selvedge.log_change immediately after adding, modifying, or removing
@@ -352,10 +389,10 @@ Rules:
 - Then call selvedge.diff or selvedge.blame for the entity's broader history before
   conflicting with past decisions.
 
-The same operations are on your shell. Selvedge is MCP-first, but the identical
-local store is also a CLI (selvedge is on your PATH after install). When the MCP
-server isn't loaded, you're in a shell-only subagent, or you just want to keep
-context light, use the equivalents:
+The same operations are on your shell. The CLI and MCP interface use the same
+local store (selvedge is on your PATH after install). The CLI does not require
+a running MCP server. Use the route that fits the current workflow and keeps
+context light:
 - Check an entity first: selvedge prior-attempts <entity>, then selvedge blame /
   selvedge diff for its broader history.
 - Log a change: selvedge log <entity> <change_type> --reasoning "<why>"
@@ -1695,9 +1732,10 @@ github.com).
 
 ### Phase 2.22 — Developer ergonomics (partly delivered; remaining work unassigned)
 > The CLI surface that moves Selvedge into the developer's existing
-> review and reporting workflow. None of these are wedges — they're the
-> supporting cast that turns `prior_attempts` + `summary` into a usable
-> everyday surface. **Deferred from v0.3.9 (Phase 2.15)** when the Agent
+> review and reporting workflow. The original plan treated these as supporting
+> surfaces; Phase 2.26 now makes useful GitHub change review the first workflow
+> to improve. That does not require every command proposed here.
+> **Deferred from v0.3.9 (Phase 2.15)** when the Agent
 > Trace exporter was pulled forward from Phase 3.2. The remaining commands
 > have no release assignment; a future tool-consolidation review will decide
 > whether `digest` / `audit`
@@ -1806,9 +1844,9 @@ usage of these shipped surfaces before adding overlapping interfaces.
   integration, not a bespoke fork of the hook logic.
 
 ### Phase 2.24 — SelvedgeBench: failure-avoidance evaluation (pilots published; broader evaluation open)
-> **Synthetic pilots published in v0.3.15 and v0.3.16; the broader benchmark
-> remains open.** The current harness tests configuration choices with
-> author-seeded decisions, not real repository coding or capture quality.
+> **Synthetic pilots are included through v0.3.17; the broader benchmark
+> remains open.** They cover configuration choices and small authored function
+> edits with seeded decisions, not real repository histories or capture quality.
 > It establishes a reproducible starting point, not a first-of-kind or
 > general superiority claim. Theme: *the claim, measured against controls.*
 
@@ -1822,9 +1860,15 @@ usage of these shipped surfaces before adding overlapping interfaces.
       rejected choices repeated in 4/6 eligible no-memory trials and 0/6
       injected-record trials; stale/unrelated controls passed. Two eligible
       synthetic tasks, three repeats each; not token-matched, not native hooks.
-- [x] **Results and limits retained** — both reports, every measured trial
-      and separate technical-smoke history are linked from the
-      [pilot README](../bench/decision_memory/README.md).
+- [x] **18-attempt coding method pilot** — published October 10 and included
+      in v0.3.17. No memory, maintained Markdown and Selvedge-injected history
+      each passed 6/6. Three authored function tasks, two draws per task and arm;
+      no performance advantage or avoided no-memory failure was observed.
+      Delivery was verified; autonomous capture and native hook delivery were not.
+- [x] **Results and limits retained** — reports, every measured trial and
+      separate technical-smoke history are linked from the
+      [decision-memory pilot](../bench/decision_memory/README.md) and
+      [coding-memory pilot](../bench/coding_memory/README.md).
 
 - [ ] **Task substrate** — failed-attempt scenarios derived from
       real repository histories (revert-then-retry cycles; the 2.18
@@ -1873,7 +1917,108 @@ usage of these shipped surfaces before adding overlapping interfaces.
   front, and no leaderboard ambitions — one rigorous result beats
   a maintained ranking.
 
+### Phase 2.25 — Lightweight shared core
+
+**Status: initial checks and standard implemented in this branch, unreleased;
+remaining work has no release assigned.** Preserve a local core that the Python
+library, CLI, MCP and review integrations can reuse. This serves all three product
+values without requiring a new service or a wholesale rewrite.
+
+- [x] **Standing standard and core isolation check.** The
+      [engineering standard](engineering-standards.md#lightweight-and-powerful)
+      records the usefulness-versus-cost question. A regression check exercises
+      saving, reopening and retrieving a decision without third-party packages
+      and with Python socket activity blocked. It protects that path, not every
+      CLI or integration.
+- [ ] **Measure the affected boundaries before changing them.** Record the
+      environment, command and baseline for installation dependencies, startup,
+      storage/retrieval and context/output size where a proposed change affects
+      them. Use the [core audit](design/lightweight-core-audit.md) as a starting
+      point. Local samples do not establish a performance advantage.
+- [ ] **Keep decision behavior shared.** Reuse the existing storage, validation
+      and presentation helpers. Where a second integration needs a common
+      operation, define that boundary and verify event identity, rejection and
+      supersession meaning, unknown states and limits across its callers.
+      Transport, authentication and UI stay in adapters; do not make one adapter
+      call another or duplicate decision semantics.
+- [ ] **Assess optional packaging separately.** The current distribution
+      requires MCP, Click and Rich even when a caller uses only the library.
+      Compare the installation benefit and migration cost of making integration
+      dependencies optional. Preserve existing install commands and entry points
+      unless a reviewed compatibility plan says otherwise. This is an assessment,
+      not a shipped smaller package or a commitment to split it.
+
+Accept a core change when it improves a named workflow, the affected behavior
+passes its existing and focused new checks, and the measured cost is justified.
+Do not add a dependency or abstraction solely for a hypothetical future adapter.
+
+### Phase 2.26 — GitHub change review first
+
+**Status: quieter no-match reporting implemented in this branch, unreleased;
+the broader workflow remains planned.** Improve the existing ledger and Action
+before adding overlapping commands. The goal is to help a reviewer understand
+applicable recorded decisions with less reading and fewer interruptions.
+
+- [x] **Quiet when there is no matching history.** A healthy no-match run does
+      not create a new PR comment. It still records a job summary and updates
+      an existing comment so old context cannot appear current. Integrity
+      failures remain visible; missing history never means approval.
+- [ ] **Compact, useful context.** Put the recorded reason, constraint,
+      rejected/reverted approach and explicit revision evidence ahead of routine
+      metadata. Keep details available within a stated output budget and disclose
+      omissions. Do not infer semantic conflict, correctness or capture
+      completeness. An unevaluated expiry condition must remain labeled as such.
+- [ ] **Preserve source and trust boundaries.** Keep publication-approved base
+      history, exact base/head revisions, literal untrusted text and explicit
+      unknown states. Do not execute PR-head code or silently include decisions
+      authored only on the PR branch. Retain deterministic output and no model
+      calls in core; use the same local read path for inspectable evidence.
+- [ ] **Validate on GitHub.** Exercise relevant, irrelevant, superseded, renamed,
+      empty and oversized cases, then retain native GitHub run evidence for the
+      supported workflow. Protocol tests or a generated workflow are not proof
+      that GitHub executed it. This is separate from native agent-hook activation.
+- [ ] **Observe actual review use.** Compare with normal review and maintained
+      decision files. Record relevant and distracting context, decisions affected,
+      reading effort and notification volume, including negative feedback.
+      Set the pilot sample and stop/expand criteria before running it. If the
+      report adds effort without useful decisions, simplify or narrow it before
+      expanding to another surface.
+
+Completion requires evidence of usefulness and acceptable burden in the tested
+review workflow. A compact template alone does not establish that result.
+
+### Phase 2.27 — One editor, same core
+
+**Status: future work, conditional on useful GitHub review evidence; no editor
+or release assigned.** Choose one editor from an actual user workflow. Existing
+client setup presets do not establish a need for an extension in every editor.
+
+- [ ] **Select one concrete task and editor.** Start with on-demand context for
+      the current file or proposed change, with a way to inspect the source
+      decision. Add explicit recording or supersession only where that workflow
+      needs it; avoid recreating all CLI and MCP commands in a new UI.
+- [ ] **Use the shared core.** Reuse the same records, retrieval rules, limits
+      and unknown states. The integration must work without a running MCP
+      server, hosted account or new default background service. Keep its UI and
+      integration dependencies optional for users of other paths.
+- [ ] **Validate the chosen workflow.** Test the actual editor/version, evidence
+      navigation, bounded output, disabled behavior and removal. Measure the
+      setup, response and attention costs that it adds. Claim only the tested
+      capabilities, not cross-editor parity.
+- [ ] **Expand only after use.** Retain real user feedback and compare with the
+      CLI/review path. A second editor or remote service needs its own demonstrated
+      problem; integration count is not the success measure.
+
+The earlier separate-extension-repository and 90-day scaffolding gate is
+superseded by this workflow gate. Repository layout is an implementation choice.
+
 ### Phase 3 — Backend rewrite + tool rename (v0.4.0)
+> **Conditional proposal.** Phases 2.25–2.27 are the current sequence. A backend
+> rewrite or remote service is not a prerequisite for them. Revisit the storage
+> proposal only when an actual sharing or concurrency need justifies its cost;
+> assess necessary MCP maintenance independently. The version labels below are
+> historical groupings, not release commitments.
+>
 > First release in the breaking-changes window. Bundles the storage
 > backend abstraction and the deferred MCP tool-name rename so users
 > absorb both API breaks in one cycle. HTTP+auth ships separately in
@@ -1946,6 +2091,13 @@ usage of these shipped surfaces before adding overlapping interfaces.
   full test suite runs against both backends in CI from day one.
 
 ### Phase 3.1 — HTTP REST + auth (v0.4.1)
+> **Conditional proposal.** Start implementation only for a demonstrated remote
+> sharing need that the local workflow cannot serve. Choose the appropriate
+> transport then; REST and remote MCP are options, not mandatory expansion.
+> Preserve local use without accounts or a paid/hosted default. The detailed
+> design below is retained for that decision, not scheduled ahead of GitHub
+> review or the first editor.
+>
 > The wire-protocol layer. Exposes every MCP server operation over
 > HTTP for clients that can't speak MCP directly (CI gates,
 > compliance scanners, dashboards). API-key authentication for the
@@ -2043,6 +2195,12 @@ usage of these shipped surfaces before adding overlapping interfaces.
 
 
 ### Phase 4 — Platform (hosted business)
+> **Deferred options, not the product's destination.** The earlier hosted-business
+> assumption is superseded by the lightweight local-core direction. Each item
+> needs a concrete user need and a review of its burden. None is a prerequisite
+> for the library, CLI, MCP, GitHub review or first editor; no hosted or paid
+> account becomes the default.
+
 - [ ] Web dashboard (React + the REST API)
 - [ ] Cross-repo queries (server-side, multi-tenant, with auth and
       cross-user permissioning). The single-user OSS variant —
@@ -2165,6 +2323,9 @@ The budgets below originated in the May 2026 phase plan; they are scope
 guidance, not current test counts or assigned release capacity. Phases
 2.23/2.24 have already delivered subsets in v0.3.15–v0.3.16. Keep
 follow-up tests focused on meaningful behavior and regressions.
+Phases 2.25–2.27 use the existing relevant checks and add focused coverage at
+changed boundaries; size that work with each implementation rather than treating
+a new test count as evidence of usefulness.
 
 **Soft budget per phase** (target, not a hard cap):
 
@@ -2390,7 +2551,11 @@ headline goal. They live here so the decision to defer is visible —
 not lost in chat history — and so they can be promoted back into a
 phase when the gating condition is satisfied.
 
-**VS Code extension scaffolding.** Lives in a separate repo, has a
+**VS Code extension scaffolding — historical gate superseded by Phase 2.27.**
+One editor is now the next workflow after useful GitHub review evidence; it is
+not yet selected. The following older repository/ownership conditions do not
+block a focused implementation using the same core. The original proposal:
+lives in a separate repo, has a
 separate ship cadence, and would consume the existing `summary` library
 helper or an explicitly designed API; no `summary` MCP tool is shipped.
 Promote to a phase when (a) a tracking

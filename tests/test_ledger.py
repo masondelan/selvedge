@@ -176,6 +176,9 @@ def test_action_refuses_untrusted_event(monkeypatch):
         "wal",
         "shm",
         "bad-limit",
+        "no-history",
+        "no-history-existing-comment",
+        "no-history-broken-chain",
     ],
 )
 def test_action_main_trust_checks(tmp_path, monkeypatch, failure):
@@ -185,6 +188,11 @@ def test_action_main_trust_checks(tmp_path, monkeypatch, failure):
     store.log_event(
         ChangeEvent(entity_path="src/a.py", change_type="reject", reasoning="A recorded rejection")
     )
+    no_history = failure.startswith("no-history")
+    if failure == "no-history-broken-chain":
+        with sqlite3.connect(db) as conn:
+            conn.execute("UPDATE events SET reasoning='tampered'")
+        conn.close()
     base, head = "a" * 40, "b" * 40
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"number": 7}))
@@ -197,7 +205,7 @@ def test_action_main_trust_checks(tmp_path, monkeypatch, failure):
         "GITHUB_STEP_SUMMARY": str(summary),
         "SELVEDGE_REVIEW_TOKEN": "test",
         "SELVEDGE_REVIEW_DB": "store.db",
-        "SELVEDGE_REVIEW_DRY_RUN": "true",
+        "SELVEDGE_REVIEW_DRY_RUN": "false" if no_history else "true",
     }.items():
         monkeypatch.setenv(key, value)
 
@@ -207,7 +215,9 @@ def test_action_main_trust_checks(tmp_path, monkeypatch, failure):
         def request(self, path, data=None, method="GET"):
             self.reads += 1
             if data is not None:
-                raise AssertionError("dry run must not write")
+                assert no_history, "dry run must not write"
+                self.writes.append((path, data, method))
+                return {}
             return {
                 "state": "open",
                 "base": {"sha": base},
@@ -218,13 +228,24 @@ def test_action_main_trust_checks(tmp_path, monkeypatch, failure):
             }
 
         def pages(self, path, max_pages):
-            return [] if failure == "empty-files" else [{"filename": "src/a.py"}]
+            if path.endswith("/comments"):
+                return self.comments
+            return [] if failure == "empty-files" else [
+                {"filename": "src/unrecorded.py" if no_history else "src/a.py"}
+            ]
 
     if failure in ("wal", "shm"):
         Path(str(db) + "-" + failure).write_text("sidecar")
     if failure == "bad-limit":
         monkeypatch.setenv("SELVEDGE_REVIEW_LIMIT", "bad")
-    api = API([])
+    comments = []
+    if failure == "no-history-existing-comment":
+        comments.append({
+            "id": 2,
+            "body": ACTION["MARKER"] + "\nold revision context",
+            "user": {"login": "github-actions[bot]", "type": "Bot"},
+        })
+    api = API(comments)
     namespace = ACTION["main"].__globals__
     monkeypatch.setitem(namespace, "GitHub", lambda repo, token: api)
 
@@ -234,7 +255,22 @@ def test_action_main_trust_checks(tmp_path, monkeypatch, failure):
         return b"different" if failure == "modified-db" else db.read_bytes()
 
     monkeypatch.setattr(namespace["subprocess"], "check_output", git)
-    if failure:
+    if failure == "no-history-broken-chain":
+        with pytest.raises(SystemExit, match="verification failed"):
+            ACTION["main"]()
+        assert len(api.writes) == 1 and api.writes[0][2] == "POST"
+        assert "**FAIL**" in api.writes[0][1]["body"]
+    elif no_history:
+        ACTION["main"]()
+        assert "Missing history is not approval" in summary.read_text()
+        assert base in summary.read_text() and head in summary.read_text()
+        if comments:
+            assert len(api.writes) == 1 and api.writes[0][2] == "PATCH"
+            assert "Missing history is not approval" in api.writes[0][1]["body"]
+            assert "old revision context" not in api.writes[0][1]["body"]
+        else:
+            assert not api.writes
+    elif failure:
         with pytest.raises(ValueError):
             ACTION["main"]()
     else:

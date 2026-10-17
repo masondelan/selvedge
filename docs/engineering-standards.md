@@ -1,6 +1,7 @@
 # Engineering standards
 
-Reviewed October 15, 2026. These standards apply to design, code, documentation,
+Lightweight standard reviewed October 17, 2026; upstream support/security baseline
+last reviewed October 15, 2026. These standards apply to design, code, documentation,
 examples, the website, reviews, tests, dependencies and releases.
 
 ## Product values
@@ -23,6 +24,45 @@ Agent/model labels identify contributors; they do not select storage semantics
 or gate core features. Put client-specific behavior in optional adapters. Keep
 named examples and truthful compatibility guides; never equate setup presets
 with the full set of compatible clients.
+
+## Lightweight and powerful
+
+**Does this make Selvedge more useful without making everyone's experience heavier?**
+
+Ask this for every product and engineering decision. Borrow
+[DuckDB's emphasis on simple installation, embedded use, portability and optional
+extensions](https://duckdb.org/why_duckdb); this is a design reference, not a claim
+of certification, equal performance or identical dependencies.
+
+- Keep everyday storage and retrieval local, deterministic and usable without
+  an account, model call, network connection or running MCP server. The Python
+  library is a first-class path. Preserve explicit data ownership and exports.
+- Keep GitHub, editor and MCP integrations thin: reuse the same decisions and
+  retrieval behavior. Put their network, authentication and UI needs at the
+  integration boundary. Add abstractions only when an actual second use needs them.
+- Make added capabilities optional and bounded: limit background work, output,
+  notifications and new dependencies. Quiet no-match output must still preserve
+  diagnostics and distinguish unknown history from approval.
+- Evaluate the whole installation as well as runtime imports. The current
+  package requires MCP, Click and Rich even for library users; lazy imports do
+  not make those installation dependencies optional. A smaller install needs a
+  separate compatibility plan, not a silent change to existing installs.
+
+For a substantial change, explain the user task, expected or observed benefit,
+added default versus optional cost, and the smallest approach that serves it.
+Measure the costs the change affects: dependency/install size, startup time,
+memory, query time, stored bytes, context/output size, setup steps or notification
+volume. Record the command, environment, baseline and result; do not invent a
+universal performance target or call a single-machine sample a benchmark win.
+Existing tests and CI checks remain required. A typo or routine documentation
+correction does not need a new measurement exercise.
+
+The core isolation test runs a real save/reopen/retrieve flow without installed
+third-party packages and with Python socket activity blocked. Preserve that boundary as
+integrations grow. Interactive CLI update checks and opt-in telemetry are
+separate documented behavior; this rule does not claim all entry points are
+network-free. See the [current audit](design/lightweight-core-audit.md) and
+[implementation phases](architecture.md#phase-225--lightweight-shared-core).
 
 ## Implementation and validation
 

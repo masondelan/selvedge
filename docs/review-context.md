@@ -35,6 +35,13 @@ links and whole-store chain verification/coverage. It updates its existing bot
 comment on reruns. It uses deterministic templates and makes no model calls.
 Recorded reasons are an explicit project artifact, not private model thinking.
 
+When no recorded history matches and the chain check has no failure, the Action
+does not create a new PR comment. It still writes the full job summary; no match
+means unknown, not approval. If an earlier run already posted a comment, it
+updates that comment to the current no-match result so old context is not left
+looking current. Chain failures remain visible and fail the run, even with no
+matching history. Dry-run continues to write only the job summary.
+
 Example workflow (pin the Selvedge Action to a reviewed full commit SHA):
 
 ```yaml

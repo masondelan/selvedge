@@ -8,6 +8,23 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Keep healthy GitHub review runs with no matching history quiet: retain the
+  job summary and refresh any existing Selvedge comment, but do not create a
+  new comment. Broken-chain reports remain visible and fail the run. Missing
+  history is still unknown, not approval.
+- Make lightweight local use a standing engineering rule. Add a focused core
+  audit and phased plan for better GitHub change review, one editor integration
+  and a shared library/CLI/MCP core. Remote services and smaller installation
+  options remain conditional work; no installation behavior changes here.
+- Describe CLI and MCP as routes to the same local store in the canonical
+  prompt and regenerated skill.
+
+### Added
+- A regression check that saves and retrieves the identical record across
+  isolated Python processes without site packages or socket access, protecting
+  the library's independence from integration dependencies.
+
 ## [0.3.17] - 2026-10-15
 
 ### Added

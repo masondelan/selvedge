@@ -69,6 +69,7 @@ jobs:
           token: ${{ github.token }}
           db-path: .selvedge/selvedge.db
           limit: '100'
+          budget: '6000'
           dry-run: 'true' # inspect the job summary before enabling comments
 ```
 
@@ -90,10 +91,28 @@ Workflow serialization reduces duplicate creation, but GitHub offers no atomic
 comment upsert or compare-and-swap. Large PRs beyond GitHub's 3,000-file ceiling
 fail explicitly. This first Action supports GitHub.com only.
 
-The comment is bounded to 100 events by default and under GitHub's comment size
-limit. Counts describe the full matching population; omissions are disclosed.
-Text fields over 1,200 characters are labeled truncated. Use local `ledger --json`
-for selected full text and `--limit` up to 1,000 for larger reports.
+The comment is compact. Decision evidence comes first: rejected and reverted
+approaches, explicit revisions, superseded decisions and recorded constraints or
+revisit/expiry conditions. Each entry leads with the recorded reason, then those
+conditions and revision links, then one line of routine metadata (time, change
+type, actor, event ID). Other recorded changes follow. Expiry and revisit-after
+values are labeled as not evaluated. Each group keeps newest-first order.
+
+The whole comment stays within the `budget` input (6,000 characters by default,
+2,000–60,000). It links to the tracked store at the exact base commit and states
+how many matching events were omitted by the event limit (`limit`, 100 by
+default) and by the output budget, and how many of the events beyond `limit`
+are decision evidence. It points to the job summary of the latest Selvedge
+review run in fixed text, with no per-run link, so re-running on an unchanged
+report leaves the comment untouched. The job summary repeats the compact view
+followed by the longer per-event report with session, changeset, recorded commit
+and chain head. Events beyond `limit` are counted but appear in neither report.
+A source link too long for the budget (for example a very long `db-path`) is
+replaced by a fixed note. Counts describe the full
+matching population. Comment fields over 300 characters (1,200 in the long
+report) are labeled truncated. Use local `ledger --json` for selected full text
+and `--limit` up to 1,000 for larger reports. The layout has protocol tests only;
+it has not yet been validated in a native GitHub run.
 
 A passing chain check means the stored chain recomputes for this snapshot. It
 does not authenticate actors, prove capture completeness, attest correctness or

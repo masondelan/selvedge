@@ -1,5 +1,5 @@
 name: Selvedge review context
-description: Comment touched-entity decisions, rejected alternatives, attribution and integrity on a PR.
+description: Comment compact touched-entity decisions, rejected alternatives, attribution and integrity on a PR.
 inputs:
   token:
     description: GitHub token with pull-requests write and contents read.
@@ -10,6 +10,9 @@ inputs:
   limit:
     description: Maximum recent matching events (1-1000); omissions are reported.
     default: '100'
+  budget:
+    description: Maximum PR comment length in characters (2000-60000); omitted events are counted and linked.
+    default: '6000'
   dry-run:
     description: Write only the job summary; do not create or update the PR comment.
     default: 'false'
@@ -25,6 +28,7 @@ runs:
         SELVEDGE_REVIEW_TOKEN: ${{ inputs.token }}
         SELVEDGE_REVIEW_DB: ${{ inputs.db-path }}
         SELVEDGE_REVIEW_LIMIT: ${{ inputs.limit }}
+        SELVEDGE_REVIEW_BUDGET: ${{ inputs.budget }}
         SELVEDGE_REVIEW_DRY_RUN: ${{ inputs.dry-run }}
         SELVEDGE_ACTION_PATH: ${{ github.action_path }}
       run: python -I "$SELVEDGE_ACTION_PATH/../../scripts/review_context.py"

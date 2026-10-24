@@ -11,13 +11,14 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 # Load only this trusted Action revision, never code from the caller's checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from selvedge.ledger import read_ledger, render_ledger  # noqa: E402
+from selvedge.ledger import read_ledger, render_ledger, render_review_context  # noqa: E402
 
 MARKER = "<!-- selvedge-review-context:v1 -->"
 
@@ -63,15 +64,53 @@ def touched_paths(files: list[dict]) -> list[str]:
     return sorted({p for f in files for p in (f["filename"], f.get("previous_filename", "")) if p})
 
 
-def compose(report: dict, base: str, head: str) -> str:
-    """Bind the report to the exact PR revisions and disclose base-only scope."""
-    return (
-        MARKER
-        + "\n"
-        + f"Base `{base}` · PR head `{head}`\n\n"
-        + "History is from the trusted base commit. Decisions added only in this PR are not included. Matching uses exact file paths and dotted subentities; schema/logical entities need a separate local lookup.\n\n"
-        + render_ledger(report)
+def compose(
+    report: dict,
+    base: str,
+    head: str,
+    *,
+    repo: str = "",
+    db_path: str = "",
+    budget: int = 6000,
+) -> str:
+    """Bind the compact report to the exact PR revisions and disclose base-only scope.
+
+    Links are built only from validated values: the repository name, a
+    40-hex base SHA and a percent-encoded tracked DB path. No per-run value
+    (run ID or run URL) enters the body, so an unchanged report on a re-run
+    yields an identical body and ``upsert`` makes no write. The whole comment,
+    marker included, stays within ``budget`` characters.
+    """
+    if repo and not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        raise ValueError("Invalid repository")
+    source = ""
+    if repo and db_path:
+        quoted = urllib.parse.quote(db_path, safe="/")
+        source = (
+            f"[tracked store at the base commit](https://github.com/{repo}/blob/{base}/{quoted}),"
+            f" matched against {len(report['entities'])} touched path(s)"
+        )
+    # Stable pointer: the per-run link lives only in the job summary itself.
+    details = "the longer report in the job summary of the latest Selvedge review run"
+    preamble = (
+        f"{MARKER}\nBase `{base}` · PR head `{head}`\n\n"
+        "History is from the trusted base commit. Decisions added only in this PR are not included. "
+        "Matching uses exact file paths and dotted subentities; schema/logical entities need a separate local lookup.\n\n"
     )
+    return preamble + render_review_context(
+        report, budget=budget, source=source, details=details, prefix_chars=len(preamble)
+    )
+
+
+def bounded_int(name: str, default: str, low: int, high: int) -> int:
+    """Read one integer Action input, rejecting values outside ``low..high``."""
+    try:
+        value = int(os.environ.get(name, default))
+        if not low <= value <= high:
+            raise ValueError
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer between {low} and {high}") from exc
+    return value
 
 
 def upsert(api: GitHub, number: int, body: str, *, create: bool = True) -> str:
@@ -136,16 +175,22 @@ def main() -> None:
     paths = touched_paths(files)
     if not paths:
         raise ValueError("No touched paths; refusing an unfiltered ledger disclosure")
-    try:
-        limit = int(os.environ.get("SELVEDGE_REVIEW_LIMIT", "100"))
-        if not 1 <= limit <= 1000:
-            raise ValueError
-    except ValueError as exc:
-        raise ValueError("SELVEDGE_REVIEW_LIMIT must be an integer between 1 and 1000") from exc
+    limit = bounded_int("SELVEDGE_REVIEW_LIMIT", "100", 1, 1000)
+    # GitHub rejects comment bodies over 65536 characters.
+    budget = bounded_int("SELVEDGE_REVIEW_BUDGET", "6000", 2000, 60000)
     report = read_ledger(db, paths, limit)
-    body = compose(report, base, head)
+    body = compose(
+        report,
+        base,
+        head,
+        repo=os.environ["GITHUB_REPOSITORY"],
+        db_path=relative,
+        budget=budget,
+    )
     with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as stream:
-        stream.write(body)
+        # The summary keeps the compact view plus the longer per-event report
+        # that the comment's omission line points to.
+        stream.write(body + "\n---\n\n" + render_ledger(report))
     dry_run = os.environ.get("SELVEDGE_REVIEW_DRY_RUN", "false")
     if dry_run not in ("true", "false"):
         raise ValueError("dry-run must be true or false")

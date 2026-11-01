@@ -79,11 +79,11 @@ new comment; an existing comment is refreshed and broken chains remain visible.
 Missing history is unknown, not approval. The Action still uses only
 publication-approved base history and never executes PR-head code.
 
-This release candidate also protects the library's local save/reopen/retrieve
-path with an isolation check. No new runtime dependencies, migrations, MCP
+A regression check also protects the library's local save/reopen/retrieve
+path with site packages unavailable and socket access blocked. No new runtime dependencies, migrations, MCP
 tools or model calls. Python 3.10 compatibility is retained; use supported
 Python 3.11–3.14 for new installations. Native Action execution and review
-usefulness remain unverified. v0.3.18 has not been published yet.
+usefulness remain unverified.
 
 ---
 

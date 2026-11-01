@@ -1,9 +1,18 @@
 # Publishing a complete Selvedge release
 
-A release is complete when PyPI, the official MCP Registry, npm, and Smithery
-serve the intended version. A successful tag workflow only covers the first two.
-Keep a receipt for each registry; record an authentication or upload failure as
-pending and continue the remaining independent steps.
+A release is complete when its GitHub Release and tag are verified, and PyPI,
+the official MCP Registry and npm serve the intended version. These are three
+active registries plus GitHub Releases. The tag workflow covers GitHub Releases,
+PyPI and the MCP Registry; npm requires separate publication. Keep a receipt for
+each destination. Record authentication or upload failures as pending.
+
+Smithery [announced](https://www.smithery.ai/future) retirement of its former
+CLI/API/account publishing path effective October 31, 2026, without specifying
+a shutdown time zone. Its public directory remains. Legacy publishing docs and
+an operational status page do not establish supported post-sunset uploads; no
+replacement publishing path has been verified. Record the announced sunset and
+unverified publication/version status separately. Do not infer an observed
+outage or a new-version publication from the notice or a live directory listing.
 
 ## Prepare and verify
 
@@ -54,7 +63,7 @@ Confirm both the npm version and Python pin, plus the `latest` tag. Complete any
 interactive npm authentication in the browser; never put credentials in the repo.
 Existing installations pinned to an older version still need an explicit upgrade.
 
-## Publish Smithery
+## Retain the legacy bundle artifact
 
 Hand-zip the bundle; do not use `mcpb pack`, whose schema validation is incompatible
 with the per-tool `inputSchema` fields used by this listing. From the checkout:
@@ -80,18 +89,19 @@ with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as bundle:
         bundle.write(path, path.relative_to(root))
 print(output)
 PY
-smithery mcp publish ./dist/selvedge-VERSION.mcpb --name masondelan/selvedge
 ```
 
-Replace `VERSION` with the release version. The explicit file list excludes local
-databases, credentials, development environments, and private launch materials.
-Verify the upload succeeds and the listing's deployment/version reflects it at
-[Smithery](https://smithery.ai/servers/masondelan/selvedge). Its public description
-is managed separately from the bundle; inspect it when product positioning changes.
+Attach the `.mcpb` artifact to the GitHub Release and retain its SHA-256 with the
+release evidence. The explicit file list excludes local databases, credentials,
+development environments and private launch materials. Building this artifact
+does not verify replacement-service compatibility or publication to Smithery's
+remaining directory. Preserve the [legacy listing](https://smithery.ai/servers/masondelan/selvedge)
+as historical context and record its observed state separately.
 
 ## Close the release
 
-Record the commit, version, registry URLs, bundle checksum, public package version
-and pin, and installation/protocol smoke-test results. Treat website deployment
-as a separate receipt. Tell the release coordinator which channels are verified
-and which remain pending; do not infer completion from a manifest edit alone.
+Record the commit, tag, GitHub Release URL, three registry receipts, artifact
+checksums, npm version and Python pin, and installation/protocol smoke results.
+Include the Smithery sunset disclosure and any unresolved listing status.
+Website deployment remains a separate receipt. Do not infer publication from
+manifest edits or artifact creation.

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from selvedge import ledger
 from selvedge.cli import cli
 from selvedge.ledger import read_ledger, render_ledger
 from selvedge.models import ChangeEvent
@@ -176,6 +177,7 @@ def test_action_refuses_untrusted_event(monkeypatch):
         "wal",
         "shm",
         "bad-limit",
+        "bad-budget",
         "no-history",
         "no-history-existing-comment",
         "no-history-broken-chain",
@@ -238,6 +240,8 @@ def test_action_main_trust_checks(tmp_path, monkeypatch, failure):
         Path(str(db) + "-" + failure).write_text("sidecar")
     if failure == "bad-limit":
         monkeypatch.setenv("SELVEDGE_REVIEW_LIMIT", "bad")
+    if failure == "bad-budget":
+        monkeypatch.setenv("SELVEDGE_REVIEW_BUDGET", "70000")
     comments = []
     if failure == "no-history-existing-comment":
         comments.append({
@@ -277,3 +281,250 @@ def test_action_main_trust_checks(tmp_path, monkeypatch, failure):
         ACTION["main"]()
         assert "A recorded rejection" in summary.read_text()
         assert base in summary.read_text() and head in summary.read_text()
+
+
+# --- Phase 2.26 compact review context -------------------------------------
+
+BASE, HEAD = "a" * 40, "b" * 40
+
+
+def _compact(store, paths, **kwargs):
+    report = read_ledger(store.db_path, paths, kwargs.pop("limit", 100))
+    return report, ACTION["compose"](report, BASE, HEAD, **kwargs)
+
+
+def test_compact_context_puts_decision_evidence_before_metadata(tmp_path):
+    """Relevant + superseded: reasons, constraints and revisions lead."""
+    store = SelvedgeStorage(tmp_path / "store.db")
+    rejected = store.log_event(
+        ChangeEvent(
+            entity_path="src/a.py",
+            change_type="reject",
+            agent="maintainer",
+            reasoning="Rejected token cache.",
+            constraint="No plaintext credentials at rest.",
+            expires_when="date:2027-01-01",
+        )
+    )
+    store.log_supersede(
+        "src/a.py", supersedes=rejected.id, agent="reviewer", reasoning="Vault rollout finished."
+    )
+    store.log_event(
+        ChangeEvent(entity_path="src/a.py", change_type="modify", agent="maintainer", reasoning="Tidy")
+    )
+    store.log_event(
+        ChangeEvent(entity_path="src/unrelated.py", change_type="reject", reasoning="Irrelevant")
+    )
+    report, body = _compact(store, ["src/a.py"], repo="o/r", db_path="store.db")
+    assert body.startswith(ACTION["MARKER"] + "\n") and BASE in body and HEAD in body
+    assert "Irrelevant" not in body and report["total_matching"] == 3
+    evidence, routine = body.index("### Decision evidence"), body.index("### Other recorded changes")
+    assert evidence < body.index("Vault rollout finished") < body.index("Rejected token cache")
+    assert body.index("Rejected token cache") < routine < body.index("Tidy")
+    block = body[body.index("**Rejected approach**") : routine]
+    assert block.index("Rejected token cache") < block.index("Constraint: No plaintext")
+    assert block.index("Constraint:") < block.index("Status: superseded") < block.index("Recorded ")
+    assert "Expiry condition (not evaluated here)" in block
+    assert "Cross-agent revision: maintainer → reviewer." in body
+    assert "Not evaluated: correctness, semantic conflicts" in body
+    assert "omitted" not in body.split("Showing")[1]
+    assert body == _compact(store, ["src/a.py"], repo="o/r", db_path="store.db")[1]
+
+
+def test_compact_context_empty_history_is_explicitly_unknown(tmp_path):
+    store = SelvedgeStorage(tmp_path / "store.db")
+    store.log_event(ChangeEvent(entity_path="src/other.py", change_type="reject", reasoning="x"))
+    report, body = _compact(store, ["src/a.py"])
+    assert report["total_matching"] == 0
+    assert "No matching decisions recorded." in body and "Missing history is not approval" in body
+    assert "### " not in body.split("## Selvedge decision context")[1]
+    assert "Showing 0 of 0 matching events within a 6000-character budget." in body
+
+
+def test_compact_context_oversized_stays_within_budget(tmp_path):
+    store = SelvedgeStorage(tmp_path / "store.db")
+    store.log_event(
+        ChangeEvent(entity_path="src/a.py", change_type="revert", reasoning="Old rollback reason")
+    )
+    for i in range(150):
+        store.log_event(
+            ChangeEvent(entity_path="src/a.py", change_type="modify", reasoning=f"routine {i} " * 40)
+        )
+    report, body = _compact(store, ["src/a.py"], limit=150, budget=2000)
+    assert len(body) <= 2000 and report["omitted"] == 1
+    # The rollback is the oldest row, beyond the event limit: counted, not shown.
+    # Once the limit selects it, evidence is listed before newer routine rows.
+    assert "Old rollback reason" not in body
+    shown = body.count("\n- **")
+    assert f"Showing {shown} of 151 matching events within a 2000-character budget." in body
+    assert f"{151 - shown} more matching events omitted (1 by event limit, {150 - shown} by output budget); see the longer report in the job summary of the latest Selvedge review run." in body
+    assert "1 of the 1 events beyond the event limit are decision evidence" in body
+    assert "&#91;truncated&#93;" in body  # rendered as "[truncated]"
+    assert "appear in neither report; raise `limit`" in body
+    report = read_ledger(store.db_path, ["src/a.py"], 150)
+    for budget in (2000, 2001, 2345, 3333, 6000, 60000):
+        sized = ACTION["compose"](report, BASE, HEAD, repo="o/r", db_path="s.db", budget=budget)
+        assert len(sized) <= budget and f"within a {budget}-character budget" in sized
+    report, body = _compact(store, ["src/a.py"], limit=151, budget=2000)
+    assert "**Reverted approach**" in body and len(body) <= 2000
+    assert body.index("Old rollback reason") < body.index("Showing")
+    assert "routine 149" not in body or body.index("Old rollback reason") < body.index("routine 149")
+
+
+def test_compact_context_keeps_untrusted_text_literal(tmp_path):
+    store = SelvedgeStorage(tmp_path / "store.db")
+    store.log_event(
+        ChangeEvent(
+            entity_path="src/`x`.py",
+            change_type="reject",
+            agent="@everyone",
+            reasoning="</details><img src=x onerror=alert(1)> [click](javascript:alert(1)) `code`",
+            stale_when="<!-- selvedge-review-context:v1 -->",
+        )
+    )
+    _, body = _compact(store, ["src/`x`.py"], repo="o/r", db_path="db/a b(1).db")
+    after = body.split("## Selvedge decision context")[1]
+    for raw in ("<img", "</details>", "[click](", "@everyone", "`code`", "`x`", "<!--"):
+        assert raw not in after
+    assert "(https://github.com/o/r/blob/" + BASE + "/db/a%20b%281%29.db)" in body
+    with pytest.raises(ValueError, match="Invalid repository"):
+        ACTION["compose"]({}, BASE, HEAD, repo="o/r) [x](y")
+    with pytest.raises(ValueError, match="at least 1000"):
+        ledger.render_review_context(read_ledger(store.db_path, ["a"]), budget=999)
+
+
+def test_action_compact_comment_for_renamed_file(tmp_path, monkeypatch):
+    """A rename surfaces history recorded under the old name, within the budget."""
+    db = tmp_path / "store.db"
+    store = SelvedgeStorage(db)
+    store.log_event(
+        ChangeEvent(entity_path="src/old.py", change_type="reject", reasoning="Kept sync I/O here")
+    )
+    store.log_event(ChangeEvent(entity_path="src/elsewhere.py", change_type="reject", reasoning="nope"))
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"number": 7}))
+    summary = tmp_path / "summary.md"
+    for key, value in {
+        "GITHUB_EVENT_NAME": "pull_request_target",
+        "GITHUB_EVENT_PATH": str(event),
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_WORKSPACE": str(tmp_path),
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "GITHUB_RUN_ID": "1234",
+        "SELVEDGE_REVIEW_TOKEN": "test",
+        "SELVEDGE_REVIEW_DB": "store.db",
+        "SELVEDGE_REVIEW_BUDGET": "3000",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    class API(FakeAPI):
+        def request(self, path, data=None, method="GET"):
+            if data is not None:
+                self.writes.append((path, data, method))
+                return {}
+            return {"state": "open", "base": {"sha": BASE}, "head": {"sha": HEAD}, "changed_files": 1}
+
+        def pages(self, path, max_pages):
+            if path.endswith("/comments"):
+                return []
+            return [{"filename": "src/new.py", "previous_filename": "src/old.py"}]
+
+    api = API([])
+    namespace = ACTION["main"].__globals__
+    monkeypatch.setitem(namespace, "GitHub", lambda repo, token: api)
+
+    def git(args, **kwargs):
+        return BASE + "\n" if "rev-parse" in args else db.read_bytes()
+
+    monkeypatch.setattr(namespace["subprocess"], "check_output", git)
+    ACTION["main"]()
+    assert len(api.writes) == 1 and api.writes[0][2] == "POST"
+    body = api.writes[0][1]["body"]
+    assert len(body) <= 3000 and "Kept sync I&#47;O here" in body and "nope" not in body
+    assert "src&#47;old&#46;py" in body and "matched against 2 touched path(s)" in body
+    assert f"(https://github.com/owner/repo/blob/{BASE}/store.db)" in body
+    assert "within a 3000-character budget" in body
+    text = summary.read_text()
+    assert text.startswith(body) and "Event: " in text.split("\n---\n", 1)[1]
+
+
+# --- Phase 2.26 cross-model review remediation ------------------------------
+
+
+def test_upsert_is_noop_for_same_report_with_new_run_id(tmp_path, monkeypatch):
+    """Finding 1: a re-run with a different GITHUB_RUN_ID writes nothing."""
+    store = SelvedgeStorage(tmp_path / "store.db")
+    for i in range(30):
+        store.log_event(
+            ChangeEvent(entity_path="src/a.py", change_type="modify", reasoning=f"r{i} " * 60)
+        )
+    report = read_ledger(store.db_path, ["src/a.py"], 20)
+    assert report["omitted"] == 10  # omission line (formerly carrying the run link) is present
+    bodies = []
+    for run_id in ("1", "2"):
+        monkeypatch.setenv("GITHUB_RUN_ID", run_id)
+        bodies.append(ACTION["compose"](report, BASE, HEAD, repo="o/r", db_path="s.db", budget=2000))
+    assert bodies[0] == bodies[1] and "actions/runs" not in bodies[0]
+    assert "more matching events omitted" in bodies[0]
+    existing = {
+        "id": 5,
+        "body": bodies[0],
+        "user": {"login": "github-actions[bot]", "type": "Bot"},
+    }
+    api = FakeAPI([existing])
+    assert ACTION["upsert"](api, 7, bodies[1]) == "unchanged"
+    assert not api.writes
+
+
+def test_evidence_beyond_event_limit_is_counted(tmp_path):
+    """Finding 2: hidden rejects/reverts/conditions/superseded rows are counted."""
+    store = SelvedgeStorage(tmp_path / "store.db")
+    old = store.log_event(ChangeEvent(entity_path="src/a.py", change_type="add", reasoning="v1"))
+    store.log_event(ChangeEvent(entity_path="src/a.py", change_type="reject", reasoning="no"))
+    store.log_event(
+        ChangeEvent(entity_path="src/a.py", change_type="modify", revisit_after="2027-01-01")
+    )
+    store.log_event(ChangeEvent(entity_path="src/a.py", change_type="modify", reasoning="plain"))
+    store.log_supersede("src/a.py", supersedes=old.id, reasoning="moved")
+    for i in range(5):
+        store.log_event(ChangeEvent(entity_path="src/a.py", change_type="modify", reasoning=f"n{i}"))
+    report = read_ledger(store.db_path, ["src/a.py"], 5)
+    assert report["omitted"] == 5 and report["evidence_omitted"] == 4
+    body = ledger.render_review_context(report)
+    assert "4 of the 5 events beyond the event limit are decision evidence" in body
+    assert read_ledger(store.db_path, ["src/a.py"], 100)["evidence_omitted"] == 0
+
+
+def test_revisit_after_only_event_is_decision_evidence(tmp_path):
+    """Finding 3: a bare revisit_after groups under Decision evidence."""
+    store = SelvedgeStorage(tmp_path / "store.db")
+    store.log_event(
+        ChangeEvent(
+            entity_path="src/a.py",
+            change_type="modify",
+            reasoning="Pinned retry count",
+            revisit_after="2027-03-01",
+        )
+    )
+    store.log_event(ChangeEvent(entity_path="src/a.py", change_type="modify", reasoning="Tidy"))
+    _, body = _compact(store, ["src/a.py"])
+    evidence, routine = body.index("### Decision evidence"), body.index("### Other recorded changes")
+    assert evidence < body.index("Pinned retry count") < routine < body.index("Tidy")
+    assert "Revisit after (not evaluated here)" in body[evidence:routine]
+
+
+def test_field_cap_and_head_overflow_stay_within_budget(tmp_path):
+    """Finding 4: every field honors the 300 cap; a long db-path cannot overflow."""
+    store = SelvedgeStorage(tmp_path / "store.db")
+    store.log_event(
+        ChangeEvent(entity_path="src/a.py", change_type="reject", agent="x" * 800, reasoning="Why")
+    )
+    report = read_ledger(store.db_path, ["src/a.py"])
+    block = "\n".join(ledger._compact_block(report["events"][0], 300))
+    assert "x" * 301 not in block and "x" * 300 in block
+    long_path = "d/" * 2000 + "store.db"
+    body = ACTION["compose"](report, BASE, HEAD, repo="o/r", db_path=long_path, budget=2000)
+    assert len(body) <= 2000 and "link omitted (too long for the output budget)" in body
+    assert "d/d/d/d/" not in body and "**Rejected approach**" in body
+    with pytest.raises(ValueError, match="too small"):
+        ledger.render_review_context(report, budget=2000, prefix_chars=990, details="y" * 200)

@@ -1954,8 +1954,8 @@ Do not add a dependency or abstraction solely for a hypothetical future adapter.
 
 ### Phase 2.26 — GitHub change review first
 
-**Status: quieter no-match reporting implemented in this branch, unreleased;
-the broader workflow remains planned.** Improve the existing ledger and Action
+**Status: quieter no-match reporting and compact context implemented,
+unreleased; not yet validated on GitHub. The broader workflow remains planned.** Improve the existing ledger and Action
 before adding overlapping commands. The goal is to help a reviewer understand
 applicable recorded decisions with less reading and fewer interruptions.
 
@@ -1963,11 +1963,17 @@ applicable recorded decisions with less reading and fewer interruptions.
       not create a new PR comment. It still records a job summary and updates
       an existing comment so old context cannot appear current. Integrity
       failures remain visible; missing history never means approval.
-- [ ] **Compact, useful context.** Put the recorded reason, constraint,
+- [x] **Compact, useful context.** Put the recorded reason, constraint,
       rejected/reverted approach and explicit revision evidence ahead of routine
       metadata. Keep details available within a stated output budget and disclose
       omissions. Do not infer semantic conflict, correctness or capture
       completeness. An unevaluated expiry condition must remain labeled as such.
+      *Implemented, unreleased; protocol-tested only and not yet validated on
+      GitHub.* The comment lists decision evidence first within the `budget`
+      input, links the base-commit store, points to the job summary with stable
+      text (no per-run link, so unchanged re-runs make no write), and counts
+      omissions by event limit and by budget, including how many events beyond
+      the limit are decision evidence.
 - [ ] **Preserve source and trust boundaries.** Keep publication-approved base
       history, exact base/head revisions, literal untrusted text and explicit
       unknown states. Do not execute PR-head code or silently include decisions

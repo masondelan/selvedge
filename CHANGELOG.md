@@ -9,6 +9,20 @@ Selvedge uses [semantic versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- Make the GitHub review comment compact. Rejected and reverted approaches,
+  explicit revisions, superseded decisions and recorded constraints or
+  conditions come first, each led by its recorded reason, with one line of
+  routine metadata after it. Other recorded changes follow. The comment stays
+  within a new `budget` input (6,000 characters by default, 2,000–60,000),
+  links to the tracked store at the exact base commit, and counts events
+  omitted by the event limit and by the budget (and how many of those beyond
+  the limit are decision evidence), pointing to the job summary with stable
+  text so an unchanged report on a re-run leaves the comment untouched. The
+  summary keeps the longer per-event report. Base-only history,
+  exact base/head SHAs, literal escaping of stored text, unknown states and
+  "not evaluated" expiry labels are unchanged; no model calls or PR-head code
+  execution. Covered by protocol tests only; not yet validated in a native
+  GitHub run.
 - Keep healthy GitHub review runs with no matching history quiet: retain the
   job summary and refresh any existing Selvedge comment, but do not create a
   new comment. Broken-chain reports remain visible and fail the run. Missing

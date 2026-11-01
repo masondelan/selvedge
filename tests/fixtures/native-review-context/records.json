@@ -1,0 +1,30 @@
+[
+  {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "timestamp": "2026-01-01T00:00:01.000000Z",
+    "entity_path": "tests/fixtures/native-review-context/probe.py",
+    "entity_type": "file",
+    "change_type": "reject",
+    "reasoning": "SYNTHETIC VALIDATION ONLY: rejected unbounded retries in favor of a fixed retry budget.",
+    "constraint": "SYNTHETIC VALIDATION ONLY: no account, model call or remote service is needed.",
+    "agent": "synthetic-fixture"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000002",
+    "timestamp": "2026-01-01T00:00:02.000000Z",
+    "entity_path": "tests/fixtures/native-review-context/probe.py",
+    "entity_type": "file",
+    "change_type": "modify",
+    "reasoning": "SYNTHETIC VALIDATION ONLY: renamed a demonstration variable; no behavior changed.",
+    "agent": "synthetic-fixture"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000003",
+    "timestamp": "2026-01-01T00:00:03.000000Z",
+    "entity_path": "tests/fixtures/native-review-context/unrelated.py",
+    "entity_type": "file",
+    "change_type": "reject",
+    "reasoning": "SYNTHETIC VALIDATION ONLY: unrelated demonstration record; it must not appear for the probe file.",
+    "agent": "synthetic-fixture"
+  }
+]

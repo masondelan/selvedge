@@ -22,6 +22,40 @@ For everything else:
 
 ---
 
+## Commit identity
+
+Use the contributor's verified Git identity. Copy a GitHub-provided private
+email from that account's settings; never invent a `users.noreply.github.com`
+address from a role name. Such an address can belong to an unrelated account.
+Preserve legitimate contributors' authorship when importing their work.
+
+Before creating commits, check the effective author and committer:
+
+```sh
+git var GIT_AUTHOR_IDENT
+git var GIT_COMMITTER_IDENT
+```
+
+Before publishing a branch, inspect the raw identities of every new commit,
+including commits imported through bundles, patches or cherry-picks:
+
+```sh
+git log --no-use-mailmap --format='%h %an <%ae> | %cn <%ce>' origin/main..HEAD
+```
+
+Use the actual current target branch in place of `origin/main` when needed.
+Resolve an unexpected identity before publication. Local Git settings do not
+replace author metadata already stored in an imported commit. A `.mailmap`
+corrects display in supporting Git tools; it does not change commit objects
+or establish that GitHub has corrected its contributor listing. Do not rewrite
+published commits or move release tags as an identity-cleanup shortcut.
+
+References: [GitHub commit attribution](https://docs.github.com/en/pull-requests/how-tos/commit-changes/troubleshooting-commits),
+[commit email settings](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address),
+and [Git mailmap](https://git-scm.com/docs/gitmailmap).
+
+---
+
 ## Code conventions
 
 - **Useful without unnecessary weight.** Always ask: "Does this make Selvedge more useful without making everyone's experience heavier?" Keep the local core small, fast, deterministic and usable directly as a library. GitHub, editor and MCP integrations reuse it; optional integrations must not add required services or model calls to ordinary local use. For substantial changes, explain the user benefit and added default versus optional cost, with proportionate measurements. Follow the [lightweight standard](docs/engineering-standards.md#lightweight-and-powerful).

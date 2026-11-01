@@ -1,0 +1,3 @@
+# Correct an accidental alias in Git tools that support mailmap.
+# This does not change stored commits or guarantee GitHub contributor attribution.
+Mason Delan <57777824+masondelan@users.noreply.github.com> Selvedge-Maintainer <maintainer@users.noreply.github.com>

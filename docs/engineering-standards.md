@@ -90,10 +90,10 @@ compatibility. Use current security patches within the chosen supported line.
 
 The current package still permits Python 3.10 for compatibility. Upstream ended
 3.10 support on October 1, 2026; passing compatibility tests does not restore
-security support. Use Python 3.11–3.14 for new installations. The 0.3.17 patch
-release retains the 3.10 compatibility floor; its release notes document that
-decision. Revisit the floor before the next versioned release rather than
-silently changing it. Python 3.15 is released upstream but has not yet been
+security support. Use Python 3.11–3.14 for new installations. The 0.3.18 patch
+release deliberately retains the 3.10 compatibility floor; its release notes
+document that decision. Revisit the floor before a subsequent versioned release
+rather than silently changing it. Python 3.15 is released upstream but has not yet been
 added to Selvedge's tested runtime matrix.
 
 Review dependency updates and advisories regularly; core's weekly Dependabot

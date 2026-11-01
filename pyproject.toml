@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selvedge"
-version = "0.3.17"
+version = "0.3.18"
 description = "Persistent decision memory for AI agents: rationale, rejected approaches, and entity history."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -58,6 +58,8 @@ dev = [
     "ruff>=0.16.10",
     "mypy>=2.4.0",
     "hatchling",
+    # Required for the sdist-content gate; packaging failures must not skip it.
+    "build>=1.0.0",
     # Dev-only (NOT a runtime dependency): gives scripts/schema_tax.py the real
     # tokenizer so the CI MCP-footprint gate matches the published figure.
     "tiktoken>=0.14.0",

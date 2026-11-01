@@ -7,7 +7,7 @@
 
 ## Current release and next work
 
-**Updated October 17, 2026, against v0.3.17.** The
+**Updated November 1, 2026, for v0.3.18.** The
 [CHANGELOG](../CHANGELOG.md) records delivered behavior; the phase numbers below
 identify design work, not a release schedule. Earlier assignments of Phases
 2.18–2.24 to v0.3.12–v0.3.18 are retired. Unfinished phases have no assigned
@@ -23,6 +23,7 @@ hosted-platform assumptions; historical design notes remain for context.
 | v0.3.15 | Five additional native hook adapters, preserving setup merges and the published 48-trial synthetic pilot. |
 | v0.3.16 | Read-only agent/session ledger, optional trusted-base PR review Action, project hook diagnostics and the published 24-trial injection pilot. |
 | v0.3.17 | MCP save/restart/retrieve demo, Markdown digest drift checks, clearer rejection labels and literal CLI output; includes the published 18-attempt synthetic coding pilot. |
+| v0.3.18 | Compact decision-first GitHub review context, quiet healthy no-match runs and a core isolation regression check. |
 
 The current core uses SQLite and **eight MCP tools**. `summary` is a library
 helper, not a ninth tool. The ledger's actor labels are self-reported; chain
@@ -30,10 +31,10 @@ verification does not authenticate them. The review Action is opt-in and uses
 publication-approved base history. Neither an authenticated remote service nor
 cross-repo queries ship in v0.3.17. See [review context](review-context.md).
 
-**Current work, unreleased:** this branch adds the standing lightweight standard,
-core isolation checks and quieter GitHub reporting when there is no matching
-history. These changes are not part of v0.3.17. Compact review presentation,
-native GitHub validation and an editor integration remain future work.
+**v0.3.18 scope:** compact review presentation,
+quiet GitHub reporting when there is no matching history, the standing
+lightweight standard and core isolation checks. Native GitHub validation, human usefulness evidence and an editor
+integration remain future work.
 
 **Next work:** keep a small local core shared by the Python library, CLI, MCP
 and optional integrations (Phase 2.25); improve proposed-change review on GitHub

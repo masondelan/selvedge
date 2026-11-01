@@ -8,6 +8,8 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.18] - Unreleased
+
 ### Changed
 - Make the GitHub review comment compact. Rejected and reverted approaches,
   explicit revisions, superseded decisions and recorded constraints or
@@ -38,6 +40,20 @@ Selvedge uses [semantic versioning](https://semver.org/).
 - A regression check that saves and retrieves the identical record across
   isolated Python processes without site packages or socket access, protecting
   the library's independence from integration dependencies.
+
+### Fixed
+- Make the sdist-content gate fail on build errors instead of skipping them.
+  Include the build frontend in development dependencies and use the installed
+  build backend so the content check does not require network access.
+
+### Distribution
+- Prepare Python, plugin, npm and MCP Registry metadata for 0.3.18. This is an
+  unpublished release candidate; registry publication remains pending.
+- Retain Python 3.10 compatibility for this patch without changing the declared
+  floor. Python 3.10 is upstream end of life; use supported Python 3.11–3.14 for
+  new installations. Python 3.15 is not in the tested runtime matrix.
+- Update the CI setup-python dependency from 7.0.0 to 7.1.0. No new runtime
+  dependencies, migrations, MCP tools or default telemetry.
 
 ## [0.3.17] - 2026-10-15
 

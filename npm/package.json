@@ -1,7 +1,7 @@
 {
   "name": "selvedge-mcp",
-  "version": "0.3.17",
-  "pypiVersion": "0.3.17",
+  "version": "0.3.18",
+  "pypiVersion": "0.3.18",
   "description": "Persistent decision memory for AI agents: rationale, rejected approaches, and entity history.",
   "bin": {
     "selvedge-mcp": "bin/selvedge-mcp.js"

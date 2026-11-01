@@ -76,11 +76,11 @@ def test_sdist_ships_exactly_the_enumerated_set():
     repo_root = Path(__file__).resolve().parent.parent
     with tempfile.TemporaryDirectory() as out:
         proc = subprocess.run(
-            [sys.executable, "-m", "build", "--sdist", "--outdir", out, str(repo_root)],
+            [sys.executable, "-m", "build", "--sdist", "--no-isolation", "--outdir", out,
+             str(repo_root)],
             capture_output=True, text=True, timeout=600,
         )
-        if proc.returncode != 0:
-            pytest.skip(f"sdist build unavailable: {proc.stderr[-200:]}")
+        assert proc.returncode == 0, f"sdist build failed:\n{proc.stdout}\n{proc.stderr}"
         tarball = next(Path(out).glob("*.tar.gz"))
         names = [n.split("/", 1)[1] for n in tarfile.open(tarball).getnames() if "/" in n]
 

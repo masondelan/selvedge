@@ -7,7 +7,7 @@
 
 ## Current release and next work
 
-**Updated October 17, 2026, against v0.3.17.** The
+**Updated November 1, 2026, for the unpublished v0.3.18 candidate; latest release v0.3.17.** The
 [CHANGELOG](../CHANGELOG.md) records delivered behavior; the phase numbers below
 identify design work, not a release schedule. Earlier assignments of Phases
 2.18–2.24 to v0.3.12–v0.3.18 are retired. Unfinished phases have no assigned
@@ -30,10 +30,11 @@ verification does not authenticate them. The review Action is opt-in and uses
 publication-approved base history. Neither an authenticated remote service nor
 cross-repo queries ship in v0.3.17. See [review context](review-context.md).
 
-**Current work, unreleased:** this branch adds the standing lightweight standard,
-core isolation checks and quieter GitHub reporting when there is no matching
-history. These changes are not part of v0.3.17. Compact review presentation,
-native GitHub validation and an editor integration remain future work.
+**Current candidate, unpublished:** v0.3.18 combines compact review presentation,
+quiet GitHub reporting when there is no matching history, the standing
+lightweight standard and core isolation checks. These changes are not part of
+v0.3.17. Native GitHub validation, human usefulness evidence and an editor
+integration remain future work.
 
 **Next work:** keep a small local core shared by the Python library, CLI, MCP
 and optional integrations (Phase 2.25); improve proposed-change review on GitHub

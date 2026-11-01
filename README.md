@@ -66,6 +66,27 @@ sessions](https://selvedge.sh/guides/verify-first-decision/) to test your setup.
 
 ---
 
+## What's new in v0.3.18
+
+**Read the recorded reasons before routine review metadata.** The optional
+[GitHub review Action](docs/review-context.md) puts rejected and reverted
+approaches, revisions and constraints first. Its comment defaults to a
+6,000-character budget, counts omitted events and links to the trusted base
+store and longer job summary. Unchanged reruns leave the comment untouched.
+
+Healthy runs with no matching history keep the job summary without creating a
+new comment; an existing comment is refreshed and broken chains remain visible.
+Missing history is unknown, not approval. The Action still uses only
+publication-approved base history and never executes PR-head code.
+
+This release candidate also protects the library's local save/reopen/retrieve
+path with an isolation check. No new runtime dependencies, migrations, MCP
+tools or model calls. Python 3.10 compatibility is retained; use supported
+Python 3.11–3.14 for new installations. Native Action execution and review
+usefulness remain unverified. v0.3.18 has not been published yet.
+
+---
+
 ## What's new in v0.3.17
 
 **Check recorded decisions before a review.** Generate a Markdown digest, then
@@ -87,26 +108,6 @@ migrations or MCP tools.
 
 ---
 
-## What's new in v0.3.16
-
-**Bring recorded decisions into code review.** `selvedge ledger` shows who
-recorded each decision and which later record explicitly revised it. The optional
-[PR review Action](docs/review-context.md) adds reasons and rejected alternatives
-for touched files from publication-approved base history. Attribution is
-self-reported; the Action is opt-in and never executes PR-head code.
-
-`selvedge doctor --agent CLIENT` checks project hook configuration for all six
-setup targets, with concrete next steps. Configuration checks do not prove that
-a client has activated its hooks.
-
-The [matched injection pilot](bench/decision_memory/results/2026-10-01/) completed
-24 synthetic trials: still-valid rejected choices recurred in 4/6 eligible runs
-without memory and 0/6 with injected records. Both conditions passed the stale
-and unrelated controls. Two synthetic tasks do not establish general coding
-performance or superiority over maintained files; the earlier four-arm tie is
-still disclosed. No new runtime dependencies, migrations or MCP tools.
-
----
 
 ## Where Selvedge fits
 
@@ -735,7 +736,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.17   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.18   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only

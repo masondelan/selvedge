@@ -111,8 +111,30 @@ A source link too long for the budget (for example a very long `db-path`) is
 replaced by a fixed note. Counts describe the full
 matching population. Comment fields over 300 characters (1,200 in the long
 report) are labeled truncated. Use local `ledger --json` for selected full text
-and `--limit` up to 1,000 for larger reports. The layout has protocol tests only;
-it has not yet been validated in a native GitHub run.
+and `--limit` up to 1,000 for larger reports. Protocol tests and the limited
+synthetic native runs below cover the reported behavior.
+
+### Native validation
+
+On November 1, 2026 UTC, two temporary same-repository PRs exercised a frozen
+three-record synthetic store at base
+`2aae718a902cc42a6b8927602cca48832e69e231`, with `limit: 10` and `budget: 2000`.
+[PR82's initial run and rerun](https://github.com/masondelan/selvedge/actions/runs/41263574121)
+created one 1,556-character comment, prioritized the rejection and disclosed
+the omitted routine match. The second invocation and a full unchanged rerun
+left the comment untouched. After replacing the matching path,
+[the refresh run](https://github.com/masondelan/selvedge/actions/runs/41263735508)
+updated that same comment to a 961-character no-history report, then made no
+further change. [Fresh no-history PR83](https://github.com/masondelan/selvedge/actions/runs/41263617441)
+returned `no-matching-history` twice and created no Selvedge comment.
+
+Every run used the exact trusted base and explicit invented fixture; a read-only
+dry-run preceded the comment job. Both probe PRs were closed without merging.
+The temporary workflow, fixture and dedicated tests were removed before release;
+the Action's pinned Python-setup dependency remains. These receipts establish
+only this synthetic lifecycle. Superseded and renamed paths, invalid-chain
+handling and other layouts retain local test coverage; broader native cases,
+human usefulness and native agent-hook activation are not established here.
 
 A passing chain check means the stored chain recomputes for this snapshot. It
 does not authenticate actors, prove capture completeness, attest correctness or

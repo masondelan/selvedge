@@ -1955,8 +1955,9 @@ Do not add a dependency or abstraction solely for a hypothetical future adapter.
 
 ### Phase 2.26 — GitHub change review first
 
-**Status: quieter no-match reporting and compact context implemented,
-unreleased; not yet validated on GitHub. The broader workflow remains planned.** Improve the existing ledger and Action
+**Status: quieter no-match reporting and compact context implemented for
+v0.3.18, with a limited synthetic GitHub lifecycle validated. The broader
+workflow remains planned.** Improve the existing ledger and Action
 before adding overlapping commands. The goal is to help a reviewer understand
 applicable recorded decisions with less reading and fewer interruptions.
 
@@ -1969,8 +1970,9 @@ applicable recorded decisions with less reading and fewer interruptions.
       metadata. Keep details available within a stated output budget and disclose
       omissions. Do not infer semantic conflict, correctness or capture
       completeness. An unevaluated expiry condition must remain labeled as such.
-      *Implemented, unreleased; protocol-tested only and not yet validated on
-      GitHub.* The comment lists decision evidence first within the `budget`
+      *Implemented for v0.3.18; protocol tests and limited
+      [synthetic GitHub receipts](review-context.md#native-validation) are recorded.*
+      The comment lists decision evidence first within the `budget`
       input, links the base-commit store, points to the job summary with stable
       text (no per-run link, so unchanged re-runs make no write), and counts
       omissions by event limit and by budget, including how many events beyond
@@ -1984,6 +1986,9 @@ applicable recorded decisions with less reading and fewer interruptions.
       empty and oversized cases, then retain native GitHub run evidence for the
       supported workflow. Protocol tests or a generated workflow are not proof
       that GitHub executed it. This is separate from native agent-hook activation.
+      Initial creation, unchanged reruns, refresh to no history and fresh
+      no-history suppression passed with a synthetic fixture and a 2,000-character
+      budget. The broader native case matrix remains open.
 - [ ] **Observe actual review use.** Compare with normal review and maintained
       decision files. Record relevant and distracting context, decisions affected,
       reading effort and notification volume, including negative feedback.

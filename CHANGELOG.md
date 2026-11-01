@@ -23,8 +23,10 @@ Selvedge uses [semantic versioning](https://semver.org/).
   summary keeps the longer per-event report. Base-only history,
   exact base/head SHAs, literal escaping of stored text, unknown states and
   "not evaluated" expiry labels are unchanged; no model calls or PR-head code
-  execution. Covered by protocol tests only; not yet validated in a native
-  GitHub run.
+  execution. Synthetic native GitHub runs verified comment creation,
+  unchanged reruns, refresh to no matching history and suppression on a fresh
+  no-history PR. See [validation receipts](docs/review-context.md#native-validation);
+  these runs do not establish human usefulness or native agent-hook activation.
 - Keep healthy GitHub review runs with no matching history quiet: retain the
   job summary and refresh any existing Selvedge comment, but do not create a
   new comment. Broken-chain reports remain visible and fail the run. Missing

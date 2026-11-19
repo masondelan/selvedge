@@ -8,6 +8,18 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.19]
+
+### Added
+- Opt-in `SelvedgeStorage(path, read_only=True)` for existing compatible stores.
+  Construction checks the current migration ledger and required column shapes
+  without initialization or migration. Public mutation methods reject writes;
+  default writable construction is unchanged. Committed WAL remains visible,
+  with a separate transactional snapshot per storage session. SQLite can still
+  create or update sidecars: this is SQL read-only access, not filesystem
+  confinement or an authorization boundary. See the [library compatibility
+  contract](docs/library-read-only.md). No new dependency or MCP surface.
+
 ## [0.3.18] - 2026-11-01
 
 ### Changed

@@ -66,6 +66,18 @@ sessions](https://selvedge.sh/guides/verify-first-decision/) to test your setup.
 
 ---
 
+## What's new in v0.3.19
+
+**Read an existing decision store without enabling SQL writes.**
+Use `SelvedgeStorage(path, read_only=True)` from Python. It checks the
+store's current schema without initializing or migrating it, and reads
+committed WAL data. Default writable access is unchanged. Each call has
+its own snapshot; SQLite may still create or update WAL/SHM sidecars.
+This is not filesystem write confinement or an authorization boundary.
+See the [read-only library contract](docs/library-read-only.md).
+
+---
+
 ## What's new in v0.3.18
 
 **Read the recorded reasons before routine review metadata.** The optional
@@ -82,32 +94,12 @@ publication-approved base history and never executes PR-head code.
 A regression check also protects the library's local save/reopen/retrieve
 path with site packages unavailable and socket access blocked. No new runtime dependencies, migrations, MCP
 tools or model calls. Python 3.10 compatibility is retained; use supported
-Python 3.11–3.14 for new installations. Native Action execution and review
-usefulness remain unverified.
+Python 3.11–3.14 for new installations. Limited synthetic native Action runs
+verified comment creation, unchanged reruns, refresh to no matching history,
+and no comment for a fresh no-history PR. See the [validation receipts](docs/review-context.md#native-validation).
+Broader native cases and human review usefulness remain unverified.
 
 ---
-
-## What's new in v0.3.17
-
-**Check recorded decisions before a review.** Generate a Markdown digest, then
-run `selvedge export --format markdown -o DECISIONS.md --check` to catch drift.
-An identical digest exits 0 silently; a stale or missing digest exits 1 with a
-unified diff and regeneration guidance. Check mode preserves the digest and
-stored records. Review exported reasoning before publishing it.
-
-`selvedge demo --mcp` saves a synthetic rejection through a real local MCP
-server, restarts it and retrieves the same record. It uses disposable state;
-it does not verify your agent's configuration or hook activation.
-
-CLI output now preserves literal brackets in user data, and `blame` and Markdown
-exports distinguish rejected approaches from changes that were tried and reverted.
-Python 3.10 compatibility remains for this patch, but that runtime is now
-[upstream end of life](https://devguide.python.org/versions/); use tested,
-supported Python 3.11–3.14 for new installations. No new runtime dependencies,
-migrations or MCP tools.
-
----
-
 
 ## Where Selvedge fits
 
@@ -736,7 +728,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.18   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.19   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only

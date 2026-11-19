@@ -564,10 +564,54 @@ def _open_connection(db_path: Path) -> sqlite3.Connection:
 class SelvedgeStorage:
     """Thread-safe SQLite-backed event store."""
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, *, read_only: bool = False):
+        """Open storage. Candidate read_only mode never initializes or migrates.
+
+        Reads include committed WAL data; each session owns one transaction.
+        SQLite may create/update WAL/SHM sidecars: this is not filesystem
+        write confinement. Separate query calls are separate snapshots.
+        """
+        if type(read_only) is not bool:
+            raise TypeError("read_only must be a bool")
+        self._read_only = read_only
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        if read_only:
+            self.db_path = self.db_path.resolve(strict=True)
+            if not self.db_path.is_file():
+                raise ValueError("Read-only database must be an existing file")
+            self._validate_read_only_schema()
+        else:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_db()
+
+    def _require_writable(self) -> None:
+        if self._read_only:
+            raise PermissionError("Storage was opened read_only")
+
+    def _validate_read_only_schema(self) -> None:
+        from ._readonly_schema import REQUIRED_COLUMNS
+        from .migrations import MIGRATIONS
+
+        with self._session() as conn:
+            try:
+                ledger = [(row["version"], row["name"]) for row in
+                          conn.execute("SELECT version, name FROM schema_migrations")]
+                actual = set(ledger)
+                expected = {(migration.version, migration.name) for migration in MIGRATIONS}
+                if actual != expected or len(ledger) != len(expected):
+                    raise ValueError("Unsupported read-only schema migration ledger")
+                for table, columns in REQUIRED_COLUMNS.items():
+                    kind = conn.execute("SELECT type, sql FROM sqlite_master WHERE name=?", (table,)).fetchone()
+                    if kind is None or kind[0] != "table" or "VIRTUAL TABLE" in (kind[1] or "").upper():
+                        raise ValueError("Unsupported read-only schema table")
+                    # Historical ALTER TABLE migrations may append columns that
+                    # the fresh initializer places earlier. Reads address columns
+                    # by name (including SELECT * rows converted to mappings).
+                    present = {tuple(row)[1:] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+                    if {column[1:] for column in columns} != present:
+                        raise ValueError("Unsupported read-only schema columns")
+            except sqlite3.DatabaseError as exc:
+                raise ValueError("Unsupported or invalid read-only database schema") from exc
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -581,7 +625,18 @@ class SelvedgeStorage:
         Retained for backward compatibility — direct use leaks connections
         unless the caller explicitly closes them.
         """
-        return _open_connection(self.db_path)
+        if not self._read_only:
+            return _open_connection(self.db_path)
+        conn = sqlite3.connect(self.db_path.as_uri() + "?mode=ro", uri=True,
+                               timeout=_BUSY_TIMEOUT_MS / 1000)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
+            return conn
+        except BaseException:
+            conn.close()
+            raise
 
     @contextmanager
     def _session(self, immediate: bool = False) -> Iterator[sqlite3.Connection]:
@@ -604,12 +659,17 @@ class SelvedgeStorage:
         usual locked/busy error, which :func:`_retry_on_locked` and the
         ``busy_timeout`` PRAGMA already handle.
         """
-        conn = _open_connection(self.db_path)
+        if immediate:
+            self._require_writable()
+        conn = self._connect()
         try:
+            if self._read_only:
+                conn.execute("BEGIN")
             if immediate:
                 conn.execute("BEGIN IMMEDIATE")
             yield conn
-            conn.commit()
+            if not self._read_only:
+                conn.commit()
         except BaseException:
             conn.rollback()
             raise
@@ -624,6 +684,7 @@ class SelvedgeStorage:
         migration runner uses a separate ``schema_migrations`` ledger so
         every additive change after v0.1.0 runs exactly once per DB.
         """
+        self._require_writable()
         with self._session() as conn:
             conn.execute(CREATE_TABLE_SQL)
             conn.execute(CREATE_TOOL_CALLS_SQL)
@@ -675,6 +736,7 @@ class SelvedgeStorage:
         ``BEGIN IMMEDIATE`` and re-checks emptiness under the lock so N
         processes opening a fresh DB append exactly one genesis record.
         """
+        self._require_writable()
         from . import __version__
 
         with self._session(immediate=True) as conn:
@@ -744,6 +806,7 @@ class SelvedgeStorage:
         chain head is read so two writers cannot fork the chain (§7.1 of the
         tamper-evidence proposal).
         """
+        self._require_writable()
         self._normalize_for_storage(event)
         with self._session(immediate=True) as conn:
             conn.execute(self._INSERT_SQL, self._event_row(event))
@@ -762,6 +825,7 @@ class SelvedgeStorage:
         transaction with ONE head read for the whole batch, so importers
         are cheaper than a per-event design.
         """
+        self._require_writable()
         events = list(events)
         if not events:
             return events
@@ -820,6 +884,7 @@ class SelvedgeStorage:
         the date to check it again both belong on the event. They were
         previously accepted by ``log_change``, validated, and then dropped.
         """
+        self._require_writable()
         canonical = canonicalize_entity_path(entity_path)
         prefix = f"{_escape_like(canonical)}.%"
         with self._session() as conn:
@@ -908,6 +973,7 @@ class SelvedgeStorage:
 
         Returns the two stored events ``[rename, create]``, oldest first.
         """
+        self._require_writable()
         canonical_old = canonicalize_entity_path(old_path)
         rename_event = ChangeEvent(
             entity_path=old_path,
@@ -961,6 +1027,7 @@ class SelvedgeStorage:
         Returns:
             Number of events updated.
         """
+        self._require_writable()
         cutoff = normalize_timestamp(
             (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
         )
@@ -1009,6 +1076,7 @@ class SelvedgeStorage:
         Older callers passing only the original five positional args
         keep working: ``agent`` defaults to ''.
         """
+        self._require_writable()
         try:
             with self._session() as conn:
                 conn.execute(
@@ -1134,6 +1202,7 @@ class SelvedgeStorage:
         gates first; :func:`selvedge.prune.run_events_prune` is the supported
         entry point and re-checks the environment itself.
         """
+        self._require_writable()
         with self._session(immediate=True) as conn:
             # Count the chained casualties BEFORE the DELETE, in the same
             # immediate transaction, so the tombstone matches exactly what
@@ -1164,6 +1233,7 @@ class SelvedgeStorage:
         lands in v0.3.10 alongside ``.selvedge/config.toml`` and an
         explicit ``SELVEDGE_DESTRUCTIVE=1`` gate.
         """
+        self._require_writable()
         with self._session() as conn:
             cursor = conn.execute(
                 "DELETE FROM tool_calls WHERE timestamp < ?",
@@ -1205,6 +1275,8 @@ class SelvedgeStorage:
         ``rewrites`` list (``{id, from, to}``), and the ``collisions`` list
         (``{canonical, paths}``).
         """
+        if apply:
+            self._require_writable()
         with self._session(immediate=apply) as conn:
             rows = conn.execute("SELECT id, entity_path FROM events").fetchall()
             rows_scanned = len(rows)

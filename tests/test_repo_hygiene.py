@@ -96,6 +96,7 @@ def test_sdist_ships_exactly_the_enumerated_set():
         "docs/agent-hooks.md",
         "docs/coding-agents.md",
         "docs/getting-started.md",
+        "docs/recall-output.md",
         "docs/telemetry.md",
         "pyproject.toml",
     ], f"sdist contents drifted: {non_package}"

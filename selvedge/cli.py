@@ -48,7 +48,12 @@ from .config import get_db_path, init_project, resolve_setting
 from .expires_when import validate_expires_when
 from .logging_config import configure_logging
 from .models import ChangeEvent, ChangeType
-from .presenters import blame_payload, changeset_payload, prior_attempts_payload
+from .presenters import (
+    blame_payload,
+    changeset_payload,
+    prior_attempts_payload,
+    prior_attempts_report,
+)
 from .storage import SelvedgeStorage
 from .timeutil import normalize_revisit_after, parse_time_string, parse_window_minutes
 from .validation import (
@@ -1142,20 +1147,22 @@ def ledger_cmd(entity: tuple[str, ...], limit: int, as_json: bool) -> None:
 )
 @click.option("--limit", "-n", default=20, show_default=True, help="Number of results")
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_json):
+@click.option("--json-report", is_flag=True, help="Versioned JSON report with query integrity and warnings, including no-match queries.")
+def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_json, json_report):
     """Show prior change attempts on an entity, each with an inferred outcome.
 
     \b
     A thin presenter over the same store the `prior_attempts` MCP tool reads,
-    so the two surfaces can't diverge — `--json` emits the identical list the
-    tool returns. Pass an ENTITY (exact, with `.`-prefix matching) OR
+    with shared recall semantics. --json preserves the legacy row keys and
+    empty list; integrity warnings go to stderr. --json-report opts into a
+    versioned envelope with query metadata. Pass an ENTITY (exact, with `.`-prefix matching) OR
     --description for free-text mode; ENTITY wins if both are given.
     --fuzzy adds semantically similar records on top of either, clearly
     labeled (match_type="fuzzy" with a similarity score).
 
     \b
     Conservative by default: only the high-signal rows show — attempts closed
-    by an explicit revert/reject and standalone rejections (confidence
+    by an explicit revert/reject and standalone verdicts (confidence
     "exact"), plus "tried, then reverted within the window" (proximity_high).
     An empty result is the normal, good answer (exit 0) — pass --all to widen
     recall.
@@ -1167,6 +1174,8 @@ def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_j
       selvedge prior-attempts users.card_token --fuzzy "tokenized payment credentials"
       selvedge prior-attempts src/auth.py::login --window 30d --json
     """
+    if as_json and json_report:
+        raise click.UsageError("--json and --json-report are mutually exclusive")
     if not entity and not description and not fuzzy:
         err_console.print(
             "[red]error:[/red] provide an ENTITY, --description, or --fuzzy"
@@ -1186,27 +1195,31 @@ def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_j
     # reflects both surfaces. A prior_attempts lookup also counts as active-use
     # of the entity for the stale-decisions weighting.
     storage.record_tool_call("prior_attempts", entity_path=entity, agent="cli")
-    # Shared with the MCP tool so `--json` really does emit "the identical
-    # list the tool returns", as this command's help has always claimed.
-    rows, notices = prior_attempts_payload(
-        storage,
-        entity_path=entity,
-        description=description,
-        fuzzy=fuzzy,
-        min_confidence=min_confidence,
-        window_minutes=window_minutes,
-        limit=limit,
-    )
+    if json_report:
+        report = prior_attempts_report(
+            storage, entity_path=entity, description=description, fuzzy=fuzzy,
+            min_confidence=min_confidence, window_minutes=window_minutes, limit=limit,
+        )
+        rows, notices = report["attempts"], report["warnings"]
+    else:
+        rows, notices = prior_attempts_payload(
+            storage, entity_path=entity, description=description, fuzzy=fuzzy,
+            min_confidence=min_confidence, window_minutes=window_minutes, limit=limit,
+            include_empty_notice=False,
+        )
     for notice in notices:
         from rich.markup import escape
 
         # escape(): the hint contains "[semantic]", which Rich would
         # otherwise swallow as a markup tag.
-        err_console.print(f"[yellow]fuzzy unavailable:[/yellow] {escape(notice)}")
-        err_console.print("[dim]falling back to substring matching[/dim]")
+        if notice.startswith("fuzzy matching unavailable"):
+            err_console.print(f"[yellow]fuzzy unavailable:[/yellow] {escape(notice)}")
+            err_console.print("[dim]falling back to substring matching[/dim]")
+        else:
+            err_console.print(escape(notice), style="yellow")
 
-    if as_json:
-        click.echo(json.dumps(rows, indent=2))
+    if as_json or json_report:
+        click.echo(json.dumps(report if json_report else rows, indent=2))
         return
 
     # The note row carries no attempt of its own — it's already on stderr.
@@ -1247,20 +1260,22 @@ def prior_attempts_cmd(entity, description, fuzzy, show_all, window, limit, as_j
             f"[dim]({confidence})[/dim]{fuzzy_tag}"
         )
         # The trail, one line per step: tried → reverted → re-opened. A
-        # standalone rejection was never tried — its whole point is "decided
-        # against WITHOUT writing the change" — so its reasoning gets the
-        # "rejected:" label, not "tried:". Empty recorded reasoning is valid;
+        # standalone verdict carries its own rationale: label it rejected
+        # or reverted without inventing an earlier locally recorded attempt.
+        # Empty recorded reasoning is valid;
         # show the stand-in rather than omitting the step.
-        is_rejection = r.get("change_type") == "reject"
+        standalone_verdict = r.get("change_type") in ("reject", "revert")
         reason, recorded = _reason_display(r.get("reasoning"))
-        verb = "rejected" if is_rejection else "tried"
+        verb = {"reject": "rejected", "revert": "reverted"}.get(
+            r.get("change_type", ""), "tried"
+        )
         _print_explanation(
             reason, left=4, prefix=_TRAIL_PREFIXES[verb], dim=not recorded
         )
         if outcome in ("reverted", "reopened") and not (
-            # A standalone rejection's outcome_reasoning IS its own
+            # A standalone verdict's outcome_reasoning IS its own
             # reasoning — already printed above, don't repeat it.
-            is_rejection and r.get("outcome_reasoning") == r.get("reasoning")
+            standalone_verdict and r.get("outcome_reasoning") == r.get("reasoning")
         ):
             reverted_text, reverted_recorded = _reason_display(
                 r.get("outcome_reasoning")

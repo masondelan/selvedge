@@ -1,6 +1,6 @@
 {
   "name": "selvedge",
-  "version": "0.3.19",
+  "version": "0.3.20",
   "description": "Persistent decision memory for AI agents: rationale, rejected approaches, and entity history.",
   "author": {
     "name": "Mason Delan",

@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "selvedge",
   "display_name": "Selvedge",
-  "version": "0.3.19",
+  "version": "0.3.20",
   "description": "Persistent decision memory for AI agents: rationale, rejected approaches, and entity history. A local MCP server: agents call `prior_attempts` before editing an entity — \"was this tried here before, and how did it turn out?\" — and the trail reads tried → reverted → re-opened, because a reverted decision is not a permanent ban. Entity-level rather than line-level: DB columns, functions, env vars, dependencies, API routes. An append-only, queryable audit trail — a git blame for decisions. Local SQLite, and no LLM anywhere in the storage or retrieval path, with retrieval based on stored records rather than generated explanations.",
   "long_description": "Selvedge is a local MCP server and CLI that any compatible AI agent can use to record decisions and structured change events. It captures the entity (DB column, table, function, endpoint, dependency, env var), the diff, and the reasoning — the intent that would otherwise evaporate when the agent session ends.\n\nWith human-written code, intent leaked into commit messages and PR descriptions. With AI-written code, intent lives in a prompt that disappears. Selvedge writes it down before it's gone, so weeks later you can ask 'when was users.stripe_customer_id added and why?' and get a real answer.\n\nThe SQLite DB lives locally in `.selvedge/` next to your code — your data stays yours.",
   "author": {
@@ -556,7 +556,7 @@
     {
       "name": "prior_attempts",
       "title": "Prior attempts on an entity",
-      "description": "Prior change attempts on an entity, each with an inferred outcome.\n\nCall this BEFORE editing an entity. If the same change was tried before\nand reverted, you get the prior `reasoning` and `change_type` plus an\ninferred `outcome` — so you can change your plan instead of repeating a\nrejected approach.\n\nEach result is a change event plus the trail fields: `outcome`\n(\"reverted\" — a later removal on the path; \"reopened\" — closed but a\nlater supersede re-opened it; \"rejected\" — a standalone `reject` event\nthat closed no earlier attempt, surfaced as its own row whose reasoning\nIS the record; \"active\"), `confidence` (\"exact\" — the attempt was closed\nby an explicit revert/reject, or the row is a standalone rejection;\n\"proximity_high\" / \"proximity_low\" — the add->remove window heuristic\nfor implicit removals), `outcome_reasoning` (WHY it was rejected),\n`superseded_by` + `supersede_reasoning` (the re-open, when present), and\n`current_status` — the entity's standing now. Treat \"reverted\" and\n\"rejected\" as \"don't repeat this without a supersede\"; \"reopened\" means\nthe old verdict no longer stands. Together they read: tried → reverted →\nre-opened. Templated and deterministic — no LLM call; pull-only.\n\nConservative by design — `min_confidence` defaults to \"proximity_high\",\nso an empty list (nothing clearly tried-and-rejected) is the normal,\npreferred answer over a speculative false positive; \"exact\" rows always\nclear that default floor. Pass `min_confidence=\"proximity_low\"` to widen\nrecall. Rows carry `match_type` (\"exact\" / \"substring\" / \"fuzzy\") and\n`similarity`.",
+      "description": "Recall prior attempts BEFORE editing an entity.\n\nReturns event rows with source IDs/reasoning and an outcome trail:\nreverted, rejected (standalone reject), reopened (linked supersede), or\nactive. A standalone revert retains its own record. Explicit verdicts\nhave exact confidence; implicit removals use the proximity window.\nExact describes recorded provenance, not correctness. outcome_reasoning\nexplains the verdict; superseded_by and supersede_reasoning link its\nrevision; current_status describes the entity. match_type is exact,\nsubstring or fuzzy, with similarity for fuzzy matches.\n\nDefault rows preserve legacy keys. Failed/unknown integrity adds a note;\na no-match carries a shaped note because MCP has no query stderr. Clean\nno-match is []. Fuzzy fallback also has a note row.\n\noutput_format=\"report-v1\" returns format=\"selvedge.prior-attempts/1\",\nevent-only attempts, query_status (matched/no_match), warnings and\nintegrity (intact/failed/unknown, scope=local_chain_snapshot, reason).\nThe bounded check uses the recall snapshot; it does not prove advice,\nidentity, authenticity or completeness. No-match is not approval. CLI\n--json-report returns the same report. Local, deterministic, no LLM call.",
       "inputSchema": {
         "properties": {
           "entity_path": {
@@ -579,7 +579,7 @@
           },
           "min_confidence": {
             "default": "proximity_high",
-            "description": "Confidence floor. 'proximity_high' (default) returns the high-signal rows: attempts closed by an explicit revert/reject (confidence 'exact' — always clears this floor, including standalone rejections) plus attempts reverted within the window. Pass 'proximity_low' to also see the noisy tail (still-active changes and far-apart reverts).",
+            "description": "Confidence floor. 'proximity_high' (default) returns the high-signal rows: attempts closed by an explicit revert/reject (confidence 'exact' — always clears this floor, including standalone verdicts) plus attempts reverted within the window. Pass 'proximity_low' to also see the noisy tail (still-active changes and far-apart reverts).",
             "title": "Min Confidence",
             "type": "string"
           },
@@ -598,6 +598,12 @@
             "minimum": 1,
             "title": "Limit",
             "type": "integer"
+          },
+          "output_format": {
+            "default": "rows",
+            "description": "rows (default) or report-v1 for versioned query integrity, warnings and event-only attempts.",
+            "title": "Output Format",
+            "type": "string"
           }
         },
         "title": "prior_attemptsArguments",
@@ -606,12 +612,20 @@
       "outputSchema": {
         "properties": {
           "result": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Result",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
+            "title": "Result"
           }
         },
         "required": [

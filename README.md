@@ -66,6 +66,26 @@ sessions](https://selvedge.sh/guides/verify-first-decision/) to test your setup.
 
 ---
 
+## What's new in v0.3.20
+
+**Recall recorded rollbacks even when their original attempt predates the store.**
+Standalone reverts, including Git imports, retain their original rationale and
+record ID. Paired reverts stay deduplicated; a targeted supersede reopens only
+its linked verdict.
+
+Ordinary CLI `prior-attempts --json` keeps its existing row fields and empty
+list. Opt into `--json-report` or MCP `output_format="report-v1"` for explicit
+query status, warnings and a bounded integrity check of the same read snapshot.
+An intact local chain does not prove correctness or complete history. Unknown
+checks preserve recalled evidence. See the [output contract](docs/recall-output.md)
+for MCP's uncertain-empty note, field definitions and work limits.
+
+No new runtime dependencies, migrations, tools or external services. Python 3.10
+compatibility remains in this patch; use supported Python 3.11–3.14 for new
+installations. Python 3.15 is not yet in Selvedge's tested matrix.
+
+---
+
 ## What's new in v0.3.19
 
 **Read an existing decision store without enabling SQL writes.**
@@ -75,29 +95,6 @@ committed WAL data. Default writable access is unchanged. Each call has
 its own snapshot; SQLite may still create or update WAL/SHM sidecars.
 This is not filesystem write confinement or an authorization boundary.
 See the [read-only library contract](docs/library-read-only.md).
-
----
-
-## What's new in v0.3.18
-
-**Read the recorded reasons before routine review metadata.** The optional
-[GitHub review Action](docs/review-context.md) puts rejected and reverted
-approaches, revisions and constraints first. Its comment defaults to a
-6,000-character budget, counts omitted events and links to the trusted base
-store and longer job summary. Unchanged reruns leave the comment untouched.
-
-Healthy runs with no matching history keep the job summary without creating a
-new comment; an existing comment is refreshed and broken chains remain visible.
-Missing history is unknown, not approval. The Action still uses only
-publication-approved base history and never executes PR-head code.
-
-A regression check also protects the library's local save/reopen/retrieve
-path with site packages unavailable and socket access blocked. No new runtime dependencies, migrations, MCP
-tools or model calls. Python 3.10 compatibility is retained; use supported
-Python 3.11–3.14 for new installations. Limited synthetic native Action runs
-verified comment creation, unchanged reruns, refresh to no matching history,
-and no comment for a fresh no-history PR. See the [validation receipts](docs/review-context.md#native-validation).
-Broader native cases and human review usefulness remain unverified.
 
 ---
 
@@ -517,6 +514,35 @@ When connected as an MCP server, Selvedge exposes:
 | `prior_attempts` | Prior change attempts on an entity + inferred outcome (tried → reverted → re-opened) — call it before editing. Optional `fuzzy` query adds semantically similar records (needs the `semantic` extra; falls back to substring) |
 | `stale_decisions` | Decisions due for a revisit: past their `revisit_after` and still in active use (`flag="revisit_due"`), or whose `stale_when` condition matched a later change (`flag="review_suggested"`) |
 
+
+`prior_attempts` also returns a standalone recorded `revert` when its original
+attempt predates the store, including Git-imported reverts. Its ID and original
+rationale remain available for a targeted `supersede`.
+
+For strict existing CLI clients, `prior-attempts --json` retains the v0.3.19
+list and row keys, including `[]` when no attempt matches. It does not insert
+query metadata into the event's stored `metadata`. Integrity warnings go to
+stderr and the existing row `note` field when an attempt is returned.
+
+Use `prior-attempts --json-report` or MCP `prior_attempts(output_format="report-v1")`
+for an explicit, versioned report with `attempts`, `query_status`, `integrity`,
+and `warnings`, even on an empty query. These two report forms are identical;
+`attempts` contains actual events only. Default MCP rows retain the same keys,
+but failed/unknown no-match queries include a shaped note because MCP has no
+query stderr. The existing optional fuzzy fallback note stays on both row
+surfaces. CLI `--json` and `--json-report` are mutually exclusive.
+
+The bounded integrity check uses the same SQLite snapshot as recall and reports
+`intact`, `failed`, or `unknown`, scoped to `local_chain_snapshot`. It examines
+at most 1,000 events and 1,000 chain records (including boundaries), with an
+8 MiB content cap, a SQL work cap, and a best-effort 100 ms time budget.
+Unavailable/partial chains, larger stores and check errors remain unknown.
+An intact chain does not prove correctness, identity, authenticity or complete
+history. `confidence: "exact"` describes recorded provenance; no-match is not
+approval. Run `selvedge verify` for the full local audit. No new dependency or
+external service is used. See [the output contract](docs/recall-output.md) for
+exact fields, compatibility behavior and limits.
+
 ---
 
 ## CLI reference
@@ -541,6 +567,7 @@ selvedge prior-attempts ENTITY            Prior attempts + inferred outcome,
                        [--description T]   with the tried → reverted →
                        [--all]             re-opened trail + status line
                        [--window 7d]       (--all widens recall)
+                       [--json-report]     versioned query metadata + attempts
                        [--fuzzy TEXT]      add semantic matches (needs the
                                            semantic extra; substring fallback)
 selvedge supersede ENTITY                 Re-open a reverted decision —
@@ -728,7 +755,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history so commits can be matched
-      - uses: masondelan/selvedge@v0.3.19   # pin to a release tag (or @main for latest)
+      - uses: masondelan/selvedge@v0.3.20   # pin to a release tag (or @main for latest)
         with:
           since: 30d
           fail-under: "0.5"         # optional: fail below 50% coverage; omit to report only

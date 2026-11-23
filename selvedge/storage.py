@@ -1,5 +1,6 @@
 """SQLite storage layer for Selvedge."""
 
+import copy
 import functools
 import json
 import logging
@@ -242,9 +243,9 @@ def _parse_iso(ts: str) -> datetime:
 # for the git-history importer) is a removal by definition. ``reject``
 # (v0.3.11) counts too: the standing verdict on a rejected path is negative,
 # a later supersede can re-open it, and the digest names it as a dead path —
-# but in ``get_prior_attempts`` a reject that closes no earlier attempt
-# surfaces as its OWN row (the rejection IS the record), unlike the other
-# removal types, which only ever fold into the attempt they close.
+# but in ``get_prior_attempts`` an explicit reject/revert that closes no
+# earlier attempt surfaces as its OWN row (the verdict IS the record).
+# Implicit removal types only fold into the attempt they close.
 _REMOVAL_CHANGE_TYPES: frozenset[str] = frozenset(
     {"remove", "delete", "index_remove", "revert", "reject"}
 )
@@ -574,6 +575,7 @@ class SelvedgeStorage:
         if type(read_only) is not bool:
             raise TypeError("read_only must be a bool")
         self._read_only = read_only
+        self._snapshot_connection: sqlite3.Connection | None = None
         self.db_path = Path(db_path)
         if read_only:
             self.db_path = self.db_path.resolve(strict=True)
@@ -661,6 +663,9 @@ class SelvedgeStorage:
         """
         if immediate:
             self._require_writable()
+        if self._snapshot_connection is not None:
+            yield self._snapshot_connection
+            return
         conn = self._connect()
         try:
             if self._read_only:
@@ -675,6 +680,23 @@ class SelvedgeStorage:
             raise
         finally:
             conn.close()
+
+    @contextmanager
+    def _read_snapshot(self) -> Iterator["SelvedgeStorage"]:
+        """Pin related reads to one query-only transaction on a temporary view.
+
+        The original store remains thread-safe and holds no shared connection.
+        The view is scoped to this context and the calling thread. It does not
+        initialize, migrate or validate a legacy store as a new open would.
+        """
+        with self._session() as conn:
+            conn.execute("PRAGMA query_only=ON")
+            if not conn.in_transaction:
+                conn.execute("BEGIN")
+            snapshot = copy.copy(self)
+            snapshot._read_only = True
+            snapshot._snapshot_connection = conn
+            yield snapshot
 
     def _init_db(self) -> None:
         """
@@ -1697,8 +1719,8 @@ class SelvedgeStorage:
     ) -> dict:
         """Build one ``get_prior_attempts`` result row from an event dict.
 
-        Shared by the attempt rows and the standalone-reject rows (v0.3.11)
-        so the two can't drift on the eight always-present trail keys.
+        Shared by attempt rows and standalone explicit-verdict rows so they
+        can't drift on the eight always-present trail keys.
         ``match_type`` records how the row was found (v0.3.9.1): "exact" for
         entity-path lookups, "substring" for description mode; the optional
         semantic layer contributes "fuzzy" rows with a real ``similarity`` —
@@ -1754,13 +1776,13 @@ class SelvedgeStorage:
         within ``window_minutes``, else ``proximity_low`` (active attempts
         are always ``proximity_low``).
 
-        **Standalone rejections (v0.3.11).** A ``reject`` event that closes
-        no earlier attempt — "we considered this and decided against it"
-        with nothing ever written — surfaces as its OWN row with
-        ``outcome="rejected"`` and ``confidence="exact"``; its
-        ``outcome_reasoning`` is its own reasoning (the rejection IS the
-        record). A later supersede re-opens it to ``outcome="reopened"``
-        like any other closed verdict.
+        **Standalone explicit verdicts.** A ``reject`` or ``revert`` event
+        that closes no earlier recorded attempt surfaces as its OWN row
+        with ``outcome="rejected"`` or ``"reverted"`` and
+        ``confidence="exact"``. This includes imported reverts whose
+        original attempt predates the local store. ``outcome_reasoning``
+        is the verdict's own reasoning. A later supersede re-opens only
+        its linked verdict to ``outcome="reopened"``, like a paired verdict.
 
         Conservative-recall posture: ``min_confidence="proximity_high"`` (the
         default) returns only the high-confidence "tried then rejected"
@@ -1779,10 +1801,9 @@ class SelvedgeStorage:
         semantic layer contributes ``fuzzy`` rows), and ``similarity``
         (``0.0`` unless the row came from a fuzzy match). Together they read
         as the full trail: tried → reverted → re-opened. Removal events are
-        folded into the attempt they close and never appear on their own —
-        with the one v0.3.11 exception above: a ``reject`` closing nothing
-        appears as its own ``outcome="rejected"`` row. Newest first, capped
-        at ``limit``.
+        folded into the attempt they close; an explicit ``reject`` or
+        ``revert`` closing nothing appears as its own verdict row instead.
+        Newest first, capped at ``limit``.
         """
         with self._session() as conn:
             if entity_path:
@@ -1921,18 +1942,23 @@ class SelvedgeStorage:
                     )
                 )
 
-            # Standalone rejections: a reject that closed no earlier attempt
-            # is itself the record — surface it as its own exact-tier row.
-            for rj in removals:
-                if rj["change_type"] != "reject" or rj["id"] in closing_ids:
+            # An explicit verdict is evidence even when the original attempt
+            # was never recorded (for example a pre-Selvedge Git revert).
+            # Paired verdicts stay folded into their attempt: no duplicate row.
+            for verdict in removals:
+                if (
+                    verdict["change_type"] not in _EXPLICIT_VERDICT_CHANGE_TYPES
+                    or verdict["id"] in closing_ids
+                ):
                     continue
-                superseding = _superseding_of(rj)
+                superseding = _superseding_of(verdict)
+                outcome = "rejected" if verdict["change_type"] == "reject" else "reverted"
                 results.append(
                     self._annotate_attempt(
-                        rj,
-                        outcome="reopened" if superseding is not None else "rejected",
+                        verdict,
+                        outcome="reopened" if superseding is not None else outcome,
                         confidence="exact",
-                        outcome_reasoning=rj["reasoning"],
+                        outcome_reasoning=verdict["reasoning"],
                         superseding=superseding,
                         path_status=path_status,
                         match_type="exact" if entity_path else "substring",

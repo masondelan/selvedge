@@ -8,6 +8,25 @@ Selvedge uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.20]
+
+### Fixed
+- Recall standalone explicit reverts, including Git imports whose original
+  attempt was never recorded locally. Preserve the source ID and rationale,
+  exact confidence, pairing without duplicate closing rows, and targeted
+  supersession without reopening sibling verdicts.
+- Keep fuzzy lookup reads on the recall snapshot and avoid creating an
+  embeddings table when an index is missing, including read-only stores.
+
+### Added
+- Bounded prior-attempts integrity checks shared by CLI and MCP. The opt-in
+  CLI `--json-report` and MCP `output_format="report-v1"` expose a versioned
+  report with query status, event-only attempts, integrity and warnings.
+  Ordinary CLI `--json` preserves legacy row keys and no-match `[]`; warnings
+  use stderr and existing row notes. MCP's ordinary uncertain no-match keeps
+  a shaped note so the diagnostic remains visible. Source event `metadata`
+  is unchanged. See `docs/recall-output.md` for the explicit contract.
+
 ## [0.3.19]
 
 ### Added

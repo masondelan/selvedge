@@ -245,8 +245,11 @@ def fuzzy_events(
     ``threshold``, capped at ``limit``. Raises :class:`IndexMissing` when no
     embeddings exist for the model.
     """
-    conn = _connect(storage.db_path)
-    try:
+    with storage._session() as conn:
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='embeddings'"
+        ).fetchone() is None:
+            raise IndexMissing("no embeddings index yet — run `selvedge index` first")
         rows = conn.execute(
             "SELECT event_id, dim, vector FROM embeddings WHERE model = ?",
             (model_name,),
@@ -283,8 +286,6 @@ def fuzzy_events(
                 [event_id for _, event_id in scored],
             ).fetchall()
         }
-    finally:
-        conn.close()
 
     from .storage import _coalesce_event_nullables
 

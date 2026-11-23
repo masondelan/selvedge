@@ -140,6 +140,49 @@ def changeset_payload(storage: SelvedgeStorage, changeset_id: str) -> list[dict]
     return events
 
 
+def prior_attempts_report(
+    storage: SelvedgeStorage,
+    *,
+    entity_path: str = "",
+    description: str = "",
+    fuzzy: str = "",
+    min_confidence: str = "proximity_high",
+    window_minutes: int = 10080,
+    limit: int = 20,
+) -> dict:
+    """Return the versioned recall report, including metadata on empty queries.
+
+    Query metadata never changes stored event ``metadata``. ``attempts`` holds
+    actual events only, with the legacy row keys; warnings belong to the query.
+    An intact chain is not a completeness or correctness claim.
+    """
+    from .recall_integrity import check_recall_integrity, integrity_notice
+
+    with storage._read_snapshot() as snapshot:
+        rows, notices = _prior_attempts_rows(
+            snapshot, entity_path=entity_path, description=description,
+            fuzzy=fuzzy, min_confidence=min_confidence,
+            window_minutes=window_minutes, limit=limit,
+        )
+        with snapshot._session() as conn:
+            integrity = check_recall_integrity(conn)
+
+    notice = integrity_notice(integrity)
+    if notice:
+        notices.append(notice)
+    attempts = [row for row in rows if row.get("match_type") != "note"]
+    for row in attempts:
+        if notice:
+            row["note"] = "; ".join(filter(None, (row.get("note", ""), notice)))
+    return {
+        "format": "selvedge.prior-attempts/1",
+        "attempts": attempts,
+        "integrity": integrity,
+        "query_status": "matched" if attempts else "no_match",
+        "warnings": notices,
+    }
+
+
 def prior_attempts_payload(
     storage: SelvedgeStorage,
     *,
@@ -149,21 +192,38 @@ def prior_attempts_payload(
     min_confidence: str = "proximity_high",
     window_minutes: int = 10080,
     limit: int = 20,
+    include_empty_notice: bool = True,
 ) -> tuple[list[dict], list[str]]:
-    """Prior attempts for an entity or description, optionally fuzzy-expanded.
+    """Return legacy-shaped rows and notices from one bounded recall report.
 
-    Returns ``(rows, notices)``. ``rows`` is the list BOTH surfaces emit
-    verbatim; ``notices`` are human-facing lines the CLI prints to stderr and
-    the MCP tool ignores (the rows already carry the same information in their
-    ``note`` field).
-
-    Every row carries a ``note`` key, empty on a normal row. The fallback used
-    to be a bare ``{"note": ...}`` element with no other keys, so the obvious
-    loop — ``for r in results: r["entity_path"]`` — raised ``KeyError`` on the
-    first element whenever the optional ``[semantic]`` extra was absent, which
-    is every default install. A row that doesn't match the shape of its
-    siblings is worse than no row.
+    Default CLI JSON keeps no-match as [] and sends notices to stderr. MCP
+    has no query stderr: its failed/unknown no-match carries a shaped note.
+    The existing opt-in fuzzy fallback note remains on both row surfaces.
+    Use report-v1 for explicit query metadata and actual-event-only arrays.
     """
+    report = prior_attempts_report(
+        storage, entity_path=entity_path, description=description, fuzzy=fuzzy,
+        min_confidence=min_confidence, window_minutes=window_minutes, limit=limit,
+    )
+    rows = report["attempts"]
+    notices = report["warnings"]
+    fuzzy_notice = any(n.startswith("fuzzy matching unavailable") for n in notices)
+    if fuzzy_notice or (include_empty_notice and not rows and notices):
+        rows = [_fallback_note_row("; ".join(notices)), *rows]
+    return rows, notices
+
+
+def _prior_attempts_rows(
+    storage: SelvedgeStorage,
+    *,
+    entity_path: str,
+    description: str,
+    fuzzy: str,
+    min_confidence: str,
+    window_minutes: int,
+    limit: int,
+) -> tuple[list[dict], list[str]]:
+    """Collect attempts and fuzzy notices through the caller's pinned view."""
     rows: list[dict] = []
     notices: list[str] = []
 

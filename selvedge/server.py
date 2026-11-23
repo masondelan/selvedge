@@ -48,6 +48,7 @@ from .presenters import (
     blame_payload,
     changeset_payload,
     prior_attempts_payload,
+    prior_attempts_report,
 )
 from .storage import SelvedgeStorage
 from .timeutil import normalize_revisit_after, parse_time_string
@@ -815,7 +816,7 @@ def prior_attempts(
                 "Confidence floor. 'proximity_high' (default) returns the "
                 "high-signal rows: attempts closed by an explicit revert/"
                 "reject (confidence 'exact' — always clears this floor, "
-                "including standalone rejections) plus attempts reverted "
+                "including standalone verdicts) plus attempts reverted "
                 "within the window. Pass 'proximity_low' to also see the "
                 "noisy tail (still-active changes and far-apart reverts)."
             ),
@@ -841,34 +842,31 @@ def prior_attempts(
         int,
         Field(default=20, ge=1, le=_MAX_LIMIT, description="Maximum number of results."),
     ] = 20,
-) -> list[dict]:
-    """Prior change attempts on an entity, each with an inferred outcome.
+    output_format: Annotated[
+        str, Field(default="rows", description="rows (default) or report-v1 for versioned query integrity, warnings and event-only attempts.")
+    ] = "rows",
+) -> list[dict] | dict:
+    """Recall prior attempts BEFORE editing an entity.
 
-    Call this BEFORE editing an entity. If the same change was tried before
-    and reverted, you get the prior `reasoning` and `change_type` plus an
-    inferred `outcome` — so you can change your plan instead of repeating a
-    rejected approach.
+    Returns event rows with source IDs/reasoning and an outcome trail:
+    reverted, rejected (standalone reject), reopened (linked supersede), or
+    active. A standalone revert retains its own record. Explicit verdicts
+    have exact confidence; implicit removals use the proximity window.
+    Exact describes recorded provenance, not correctness. outcome_reasoning
+    explains the verdict; superseded_by and supersede_reasoning link its
+    revision; current_status describes the entity. match_type is exact,
+    substring or fuzzy, with similarity for fuzzy matches.
 
-    Each result is a change event plus the trail fields: `outcome`
-    ("reverted" — a later removal on the path; "reopened" — closed but a
-    later supersede re-opened it; "rejected" — a standalone `reject` event
-    that closed no earlier attempt, surfaced as its own row whose reasoning
-    IS the record; "active"), `confidence` ("exact" — the attempt was closed
-    by an explicit revert/reject, or the row is a standalone rejection;
-    "proximity_high" / "proximity_low" — the add->remove window heuristic
-    for implicit removals), `outcome_reasoning` (WHY it was rejected),
-    `superseded_by` + `supersede_reasoning` (the re-open, when present), and
-    `current_status` — the entity's standing now. Treat "reverted" and
-    "rejected" as "don't repeat this without a supersede"; "reopened" means
-    the old verdict no longer stands. Together they read: tried → reverted →
-    re-opened. Templated and deterministic — no LLM call; pull-only.
+    Default rows preserve legacy keys. Failed/unknown integrity adds a note;
+    a no-match carries a shaped note because MCP has no query stderr. Clean
+    no-match is []. Fuzzy fallback also has a note row.
 
-    Conservative by design — `min_confidence` defaults to "proximity_high",
-    so an empty list (nothing clearly tried-and-rejected) is the normal,
-    preferred answer over a speculative false positive; "exact" rows always
-    clear that default floor. Pass `min_confidence="proximity_low"` to widen
-    recall. Rows carry `match_type` ("exact" / "substring" / "fuzzy") and
-    `similarity`.
+    output_format="report-v1" returns format="selvedge.prior-attempts/1",
+    event-only attempts, query_status (matched/no_match), warnings and
+    integrity (intact/failed/unknown, scope=local_chain_snapshot, reason).
+    The bounded check uses the recall snapshot; it does not prove advice,
+    identity, authenticity or completeness. No-match is not approval. CLI
+    --json-report returns the same report. Local, deterministic, no LLM call.
     """
     storage = get_storage()
     storage.record_tool_call("prior_attempts", entity_path=entity_path)
@@ -880,6 +878,13 @@ def prior_attempts(
         return [
             {"error": "min_confidence must be 'proximity_high' or 'proximity_low'"}
         ]
+    if output_format not in ("rows", "report-v1"):
+        return [{"error": "output_format must be 'rows' or 'report-v1'"}]
+    if output_format == "report-v1":
+        return prior_attempts_report(
+            storage, entity_path=entity_path, description=description, fuzzy=fuzzy,
+            min_confidence=min_confidence, window_minutes=window_minutes, limit=limit,
+        )
     results: list[dict] = []
     results, _notices = prior_attempts_payload(
         storage,
